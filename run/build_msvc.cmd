@@ -55,14 +55,21 @@ if not exist "%OUT%" mkdir "%OUT%"
 rem --- Source lists ----------------------------------------------------------
 rem Console: every .c under src (core, js, format, engine, console).
 rem Library: the same, minus the two entry points, plus lib\die.c.
+rem src\gui is the Windows GUI front end (its own WinMain / entry point and
+rem _fltused/mem* copies): it must NOT go into cdie.exe or the libraries, so it
+rem is skipped by path here and built separately by run\build_msvc_gui.cmd.
 set "EXE_SOURCES="
 set "LIB_SOURCES="
 for /r "%SRC%" %%f in (*.c) do (
-    set "EXE_SOURCES=!EXE_SOURCES! "%%f""
-    set "keep=1"
-    if /i "%%~nxf"=="utils_entry.c" set "keep="
-    if /i "%%~nxf"=="main_console.c" set "keep="
-    if defined keep set "LIB_SOURCES=!LIB_SOURCES! "%%f""
+    set "skip="
+    echo %%~dpf| findstr /i "\\gui\\" >nul && set "skip=1"
+    if not defined skip (
+        set "EXE_SOURCES=!EXE_SOURCES! "%%f""
+        set "keep=1"
+        if /i "%%~nxf"=="utils_entry.c" set "keep="
+        if /i "%%~nxf"=="main_console.c" set "keep="
+        if defined keep set "LIB_SOURCES=!LIB_SOURCES! "%%f""
+    )
 )
 set "LIB_SOURCES=!LIB_SOURCES! "%ROOT%\lib\die.c""
 
@@ -83,14 +90,19 @@ if errorlevel 1 ( echo BUILD FAILED ^(die_static compile^) & exit /b 1 )
 lib /nologo /OUT:"%OUT%\die_static.lib" "%OUT%\obj_static\*.obj"
 if errorlevel 1 ( echo BUILD FAILED ^(die_static.lib^) & exit /b 1 )
 
-rem --- 3. die.dll + die.lib (shared, CRT-free, DIE_BUILD_SHARED) -------------
-echo [3/3] die.dll + die.lib (shared library, CRT-free)...
+rem --- 3. die.dll + die.lib (shared, default CRT, DIE_BUILD_SHARED) ----------
+rem The shared library links the default CRT (matching lib/CMakeLists.txt: the
+rem CRT-free flags there are static-only). A CRT-free DLL would need its own
+rem DllMain / _fltused / mem* - which live in the entry files the libraries
+rem deliberately exclude - so the DLL keeps the CRT and the loader-provided
+rem _DllMainCRTStartup.
+echo [3/3] die.dll + die.lib (shared library, default CRT)...
 if not exist "%OUT%\obj_shared" mkdir "%OUT%\obj_shared"
-cl /nologo /O2 /W3 /Zl /GS- /kernel /GR- /EHsc- /DNDEBUG -DDIE_BUILD_SHARED -I"%SRC%" -I"%ROOT%\lib" ^
+cl /nologo /O2 /W3 /MD /GS- /DNDEBUG -DDIE_BUILD_SHARED -I"%SRC%" -I"%ROOT%\lib" ^
    /c !LIB_SOURCES! /Fo"%OUT%\obj_shared\\"
 if errorlevel 1 ( echo BUILD FAILED ^(die_shared compile^) & exit /b 1 )
-link /nologo /DLL /NODEFAULTLIB /ENTRY:DllMain /OUT:"%OUT%\die.dll" /IMPLIB:"%OUT%\die.lib" ^
-   "%OUT%\obj_shared\*.obj" kernel32.lib
+link /nologo /DLL /OUT:"%OUT%\die.dll" /IMPLIB:"%OUT%\die.lib" ^
+   "%OUT%\obj_shared\*.obj"
 if errorlevel 1 ( echo BUILD FAILED ^(die.dll^) & exit /b 1 )
 
 echo.

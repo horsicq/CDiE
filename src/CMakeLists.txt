@@ -95,3 +95,9 @@ set(CDIE_SOURCES "${CDIE_SOURCES}" PARENT_SCOPE)
 set(CDIE_LIB_SOURCES "${CDIE_LIB_SOURCES}" PARENT_SCOPE)
 
 add_subdirectory(console)
+
+# Windows-only native GUI front end (pure WinAPI). Reuses CDIE_LIB_SOURCES,
+# which is in scope here (defined above), so no PARENT_SCOPE plumbing is needed.
+if(WIN32)
+    add_subdirectory(gui)
+endif()

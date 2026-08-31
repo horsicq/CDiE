@@ -30,14 +30,20 @@ if not exist "%TCC%" (
 if not exist "%OUT%" mkdir "%OUT%"
 
 rem --- Source lists ----------------------------------------------------------
+rem src\gui is the Windows GUI front end (its own entry point): it must not be
+rem pulled into cdie.exe or the libraries, so it is skipped by path here.
 set "EXE_SOURCES="
 set "LIB_SOURCES="
 for /r "%SRC%" %%f in (*.c) do (
-    set "EXE_SOURCES=!EXE_SOURCES! "%%f""
-    set "keep=1"
-    if /i "%%~nxf"=="utils_entry.c" set "keep="
-    if /i "%%~nxf"=="main_console.c" set "keep="
-    if defined keep set "LIB_SOURCES=!LIB_SOURCES! "%%f""
+    set "skip="
+    echo %%~dpf| findstr /i "\\gui\\" >nul && set "skip=1"
+    if not defined skip (
+        set "EXE_SOURCES=!EXE_SOURCES! "%%f""
+        set "keep=1"
+        if /i "%%~nxf"=="utils_entry.c" set "keep="
+        if /i "%%~nxf"=="main_console.c" set "keep="
+        if defined keep set "LIB_SOURCES=!LIB_SOURCES! "%%f""
+    )
 )
 set "LIB_SOURCES=!LIB_SOURCES! "%ROOT%\lib\die.c""
 
