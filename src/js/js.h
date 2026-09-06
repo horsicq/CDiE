@@ -132,7 +132,7 @@ void js_def_fn(JSCtx *pCtx, const char *pName, JSNativeFn fn, int nArgc, void *p
 void js_def_method(JSCtx *pCtx, JSVal object, const char *pName, JSNativeFn fn, int nArgc, void *pUser);
 
 /* Raises a JavaScript exception; always returns undefined. */
-JSVal js_throw(JSCtx *pCtx, const char *pFormat, ...);
+X_PRINTF_LIKE(2, 3) JSVal js_throw(JSCtx *pCtx, const char *pFormat, ...);
 int js_has_exception(JSCtx *pCtx);
 
 #endif /* JS_H */

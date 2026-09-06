@@ -28,10 +28,15 @@
 
 /* --------------------------------------------------------------- strings  */
 
+/* Every string, object and scope is linked into an engine-wide list so that
+ * js_free can reclaim whatever reference counting could not (see the note
+ * above jsobj_unref). The lists are doubly linked so that an allocation
+ * whose count drops to zero can unlink itself in constant time.           */
 struct JSStr {
     cd_i32 nRef;
     size_t nSize;
-    JSStr *pNextAll; /* engine-wide list, used for the final sweep */
+    JSStr *pNextAll;
+    JSStr *pPrevAll;
     char *pData;
 };
 
@@ -43,6 +48,7 @@ void jsstr_unref(JSCtx *pCtx, JSStr *pStr);
 
 typedef struct {
     char *pKey;
+    size_t nKeySize; /* x_strlen(pKey), cached: the probe loop is very hot */
     cd_u32 nHash;
     JSVal value;
     cd_u8 bDeleted;
@@ -61,7 +67,11 @@ typedef struct {
 void jsprops_init(JSPropMap *pMap);
 void jsprops_free(JSCtx *pCtx, JSPropMap *pMap);
 JSProp *jsprops_find(JSPropMap *pMap, const char *pKey, size_t nKeySize);
+/* Same lookup with a hash the caller already computed (prototype walks). */
+JSProp *jsprops_find_hashed(JSPropMap *pMap, const char *pKey, size_t nKeySize, cd_u32 nHash);
 JSProp *jsprops_put(JSCtx *pCtx, JSPropMap *pMap, const char *pKey, size_t nKeySize);
+/* Stores value in an entry, taking its reference and releasing the old one. */
+void jsprop_store(JSCtx *pCtx, JSProp *pProp, JSVal value);
 int jsprops_del(JSCtx *pCtx, JSPropMap *pMap, const char *pKey);
 
 /* --------------------------------------------------------------- objects  */
@@ -85,9 +95,11 @@ typedef struct JSRegExp JSRegExp;
 
 struct JSObj {
     cd_i32 nRef;
+    cd_i32 nMapRefs; /* how many property maps hold this object; see jsprop_store */
     JSClass cls;
     JSObj *pProto;
     JSObj *pNextAll;
+    JSObj *pPrevAll;
     JSPropMap props;
     cd_u8 bExtensible;
     cd_u8 bSweeping;
@@ -108,6 +120,8 @@ struct JSObj {
     /* bound function */
     JSObj *pBoundTarget;
     JSVal boundThis;
+    JSVal *pBoundArgs;
+    int nBoundArgs;
 
     /* primitive wrapper */
     JSVal primitive;
@@ -121,6 +135,7 @@ struct JSScope {
     JSObj *pVars;
     JSScope *pParent;
     JSScope *pNextAll;
+    JSScope *pPrevAll;
 };
 
 /* ------------------------------------------------------------- context  */
@@ -157,6 +172,13 @@ struct JSCtx {
     int nCallDepth;
     int nMaxCallDepth;
 
+    /* AST recursion depth of the evaluator, guarded like the call depth. */
+    int nEvalDepth;
+    int nMaxEvalDepth;
+
+    /* Nesting of the eager free path; see jsobj_unref. */
+    int nFreeDepth;
+
     void *pUser;
 
     /* Cached empty string. */
@@ -186,6 +208,8 @@ int jsobj_has(JSCtx *pCtx, JSObj *pObj, const char *pKey, size_t nKeySize);
 
 /* Number/string helpers shared by the builtins. */
 JSVal js_number_to_string(JSCtx *pCtx, double nValue, int nRadix);
+/* Number::toString fast path for exact 32-bit integers; 0 = not applicable. */
+int js_int_to_buf(char *pBuf, double nValue);
 double js_string_to_number(const char *pData, size_t nSize);
 int js_is_array_index(const char *pKey, size_t nKeySize, cd_i64 *pnIndex);
 JSVal js_concat_str(JSCtx *pCtx, JSVal left, JSVal right);

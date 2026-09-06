@@ -56,6 +56,39 @@ typedef uint64_t cd_u64;
 
 /* ---------------------------------------------------------------- memory  */
 
+/* Out-of-memory policy.
+ *
+ * cd_malloc and friends never hand back NULL: some two hundred call sites in
+ * the engine use the result without a check, and a CRT-free build has no
+ * longjmp to unwind an allocation failure with. The default is therefore to
+ * end the process, which is the right answer for a console tool and the
+ * wrong one for libdie.so, which lives inside somebody else's process.
+ *
+ * cd_alloc_begin_soft_oom() takes an emergency reserve and switches the
+ * allocator over for the duration of one scan. The first failure hands the
+ * reserve back to the allocator, raises a sticky flag and retries, so the
+ * caller still receives the memory it asked for and no pointer in the engine
+ * becomes NULL. The scan then winds down at once - scan.c tests
+ * cd_alloc_oom() beside its cancellation flag - and the entry point turns
+ * the flag into a failed scan. A request larger than the reserve still ends
+ * the process, so this narrows the window rather than closing it.
+ *
+ * The state is process-wide, like the rest of the library's, so one scan at
+ * a time per process. A single request larger than the reserve still ends
+ * the process: closing that too means giving every call site a NULL check,
+ * for which cd_try_malloc below is the primitive.                           */
+int cd_alloc_begin_soft_oom(void);
+void cd_alloc_end_soft_oom(void);
+/* Sticky within one begin/end pair: an allocation has failed. */
+int cd_alloc_oom(void);
+
+/* Return NULL on failure and raise cd_alloc_oom() instead of ending the
+ * process. For the sites whose size comes from the file being scanned, where
+ * the caller has somewhere to report the failure to. */
+void *cd_try_malloc(size_t nSize);
+void *cd_try_calloc(size_t nCount, size_t nSize);
+void *cd_try_realloc(void *pPtr, size_t nSize);
+
 void *cd_malloc(size_t nSize);
 void *cd_calloc(size_t nCount, size_t nSize);
 void *cd_realloc(void *pPtr, size_t nSize);
@@ -79,7 +112,7 @@ void cdbuf_clear(CDBuf *pBuf);
 void cdbuf_append(CDBuf *pBuf, const void *pData, size_t nSize);
 void cdbuf_append_str(CDBuf *pBuf, const char *pString);
 void cdbuf_append_ch(CDBuf *pBuf, char nChar);
-void cdbuf_appendf(CDBuf *pBuf, const char *pFormat, ...);
+X_PRINTF_LIKE(2, 3) void cdbuf_appendf(CDBuf *pBuf, const char *pFormat, ...);
 /* Detaches the buffer contents; the caller owns the returned pointer. */
 char *cdbuf_detach(CDBuf *pBuf, size_t *pnSize);
 

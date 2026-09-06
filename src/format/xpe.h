@@ -39,6 +39,10 @@
 #define XPE_DIR_DELAYIMPORT 13
 #define XPE_DIR_COMHEADER 14
 
+/* Import-walk budgets, mirroring XPE::getImports. */
+#define XPE_MAX_POSITIONS_PER_LIBRARY 16384
+#define XPE_MAX_IMPORT_POSITIONS 65536
+
 typedef struct {
     char sName[16];
     cd_u32 nVirtualSize;

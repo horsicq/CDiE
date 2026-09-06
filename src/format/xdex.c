@@ -29,11 +29,6 @@
 #include "xdex.h"
 #include "../core/utils.h"
 
-/* DEX map item type codes (subset). */
-#define DEX_TYPE_STRING_ID_ITEM 0x0001
-#define DEX_TYPE_TYPE_ID_ITEM 0x0002
-#define DEX_TYPE_MAP_LIST 0x1000
-
 typedef struct {
     cd_u16 nType;
     cd_u32 nCount;
@@ -75,16 +70,33 @@ static char *dex_read_string_data(XBFile *pFile, cd_i64 nDataOffset)
     cd_i64 nOffset = nDataOffset;
     cd_i64 nStart = 0;
     cd_i64 nEnd = 0;
+    cd_i64 nAvail = 0;
+    cd_i64 nMax = 0;
+    cd_u32 nUnits = 0;
 
     if ((nDataOffset <= 0) || (nDataOffset >= pFile->nSize)) {
         return cd_strdup("");
     }
 
-    (void)dex_uleb128(pFile, &nOffset); /* character count, unused */
+    nUnits = dex_uleb128(pFile, &nOffset); /* character count, UTF-16 units */
     nStart = nOffset;
+    nAvail = pFile->nSize - nStart;
+
+    if (nAvail <= 0) {
+        return cd_strdup("");
+    }
+
+    /* Each UTF-16 unit is at most 3 MUTF-8 bytes; +1 for the terminator. The
+     * bound keeps a crafted string_id from copying the rest of the file. */
+    nMax = (cd_i64)nUnits * 3 + 1;
+
+    if (nMax > nAvail) {
+        nMax = nAvail;
+    }
+
     nEnd = nStart;
 
-    while ((nEnd < pFile->nSize) && (pFile->pData[nEnd] != 0)) {
+    while (((nEnd - nStart) < nMax) && (pFile->pData[nEnd] != 0)) {
         nEnd++;
     }
 
@@ -236,7 +248,7 @@ int xdex_parse(XBFile *pFile, XDEX *pDex)
 
         nStringIndex = dex_u32(pFile, nIdOffset, bBE);
 
-        if ((nStringIndex > 0) && (nStringIndex < pDex->vecStrings.nSize)) {
+        if (((cd_i32)nStringIndex >= 0) && (nStringIndex < pDex->vecStrings.nSize)) {
             cdvec_push(&pDex->vecItemStrings, cd_strdup((const char *)pDex->vecStrings.ppData[nStringIndex]));
         }
     }

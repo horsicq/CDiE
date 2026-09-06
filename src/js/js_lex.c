@@ -88,10 +88,26 @@ static void append_code_point(CDBuf *pBuf, unsigned int nCode)
     } else if (nCode < 0x800) {
         cdbuf_append_ch(pBuf, (char)(0xC0 | (nCode >> 6)));
         cdbuf_append_ch(pBuf, (char)(0x80 | (nCode & 0x3F)));
-    } else {
+    } else if (nCode < 0x10000) {
         cdbuf_append_ch(pBuf, (char)(0xE0 | (nCode >> 12)));
         cdbuf_append_ch(pBuf, (char)(0x80 | ((nCode >> 6) & 0x3F)));
         cdbuf_append_ch(pBuf, (char)(0x80 | (nCode & 0x3F)));
+    } else {
+        cdbuf_append_ch(pBuf, (char)(0xF0 | (nCode >> 18)));
+        cdbuf_append_ch(pBuf, (char)(0x80 | ((nCode >> 12) & 0x3F)));
+        cdbuf_append_ch(pBuf, (char)(0x80 | ((nCode >> 6) & 0x3F)));
+        cdbuf_append_ch(pBuf, (char)(0x80 | (nCode & 0x3F)));
+    }
+}
+
+/* Reports a lexical error in the same shape the parser uses. */
+static void lex_error(char **ppError, const char *pMessage, int nLine)
+{
+    if (ppError) {
+        char sBuf[128];
+
+        x_snprintf(sBuf, sizeof(sBuf), "SyntaxError: %s at line %d", pMessage, nLine);
+        *ppError = cd_strdup(sBuf);
     }
 }
 
@@ -132,6 +148,12 @@ int js_lex_run(JSLexer *pLexer, const char *pSource, char **ppError)
     x_memset(pLexer, 0, sizeof(*pLexer));
     pLexer->pSource = pSource;
 
+    /* ECMAScript treats U+FEFF as whitespace; skipping it here keeps the
+     * first identifier of a BOM-prefixed script from absorbing it.      */
+    if (((unsigned char)p[0] == 0xEF) && ((unsigned char)p[1] == 0xBB) && ((unsigned char)p[2] == 0xBF)) {
+        p += 3;
+    }
+
     for (;;) {
         JSToken token;
 
@@ -165,6 +187,10 @@ int js_lex_run(JSLexer *pLexer, const char *pSource, char **ppError)
 
                 if (*p) {
                     p += 2;
+                } else {
+                    lex_error(ppError, "unterminated comment", nLine);
+
+                    return 0;
                 }
             } else {
                 break;
@@ -213,12 +239,20 @@ int js_lex_run(JSLexer *pLexer, const char *pSource, char **ppError)
 
             if ((p[0] == '0') && ((p[1] == 'x') || (p[1] == 'X'))) {
                 double nValue = 0;
+                int nDigits = 0;
 
                 p += 2;
 
                 while (is_hex((unsigned char)*p)) {
                     nValue = nValue * 16 + hex_value((unsigned char)*p);
+                    nDigits++;
                     p++;
+                }
+
+                if (nDigits == 0) {
+                    lex_error(ppError, "invalid numeric literal", nLine);
+
+                    return 0;
                 }
 
                 token.type = T_NUMBER;
@@ -229,12 +263,20 @@ int js_lex_run(JSLexer *pLexer, const char *pSource, char **ppError)
 
             if ((p[0] == '0') && ((p[1] == 'b') || (p[1] == 'B'))) {
                 double nValue = 0;
+                int nDigits = 0;
 
                 p += 2;
 
                 while ((*p == '0') || (*p == '1')) {
                     nValue = nValue * 2 + (*p - '0');
+                    nDigits++;
                     p++;
+                }
+
+                if (nDigits == 0) {
+                    lex_error(ppError, "invalid numeric literal", nLine);
+
+                    return 0;
                 }
 
                 token.type = T_NUMBER;
@@ -245,12 +287,20 @@ int js_lex_run(JSLexer *pLexer, const char *pSource, char **ppError)
 
             if ((p[0] == '0') && ((p[1] == 'o') || (p[1] == 'O'))) {
                 double nValue = 0;
+                int nDigits = 0;
 
                 p += 2;
 
                 while ((*p >= '0') && (*p <= '7')) {
                     nValue = nValue * 8 + (*p - '0');
+                    nDigits++;
                     p++;
+                }
+
+                if (nDigits == 0) {
+                    lex_error(ppError, "invalid numeric literal", nLine);
+
+                    return 0;
                 }
 
                 token.type = T_NUMBER;
@@ -304,6 +354,7 @@ int js_lex_run(JSLexer *pLexer, const char *pSource, char **ppError)
         /* String literal. */
         if ((*p == '"') || (*p == '\'')) {
             char nQuote = *p;
+            int nStartLine = nLine;
             CDBuf buf;
 
             cdbuf_init(&buf);
@@ -343,6 +394,19 @@ int js_lex_run(JSLexer *pLexer, const char *pSource, char **ppError)
                                 unsigned int nCode = (unsigned int)((hex_value((unsigned char)p[1]) << 12) | (hex_value((unsigned char)p[2]) << 8) |
                                                                     (hex_value((unsigned char)p[3]) << 4) | hex_value((unsigned char)p[4]));
 
+                                /* A high surrogate followed by \uDC00-\uDFFF is one code
+                                 * point; encoding the halves apart would give CESU-8.   */
+                                if ((nCode >= 0xD800) && (nCode <= 0xDBFF) && (p[5] == '\\') && (p[6] == 'u') && is_hex((unsigned char)p[7]) &&
+                                    is_hex((unsigned char)p[8]) && is_hex((unsigned char)p[9]) && is_hex((unsigned char)p[10])) {
+                                    unsigned int nLow = (unsigned int)((hex_value((unsigned char)p[7]) << 12) | (hex_value((unsigned char)p[8]) << 8) |
+                                                                       (hex_value((unsigned char)p[9]) << 4) | hex_value((unsigned char)p[10]));
+
+                                    if ((nLow >= 0xDC00) && (nLow <= 0xDFFF)) {
+                                        nCode = 0x10000 + ((nCode - 0xD800) << 10) + (nLow - 0xDC00);
+                                        p += 6;
+                                    }
+                                }
+
                                 append_code_point(&buf, nCode);
                                 p += 5;
                             } else {
@@ -353,6 +417,17 @@ int js_lex_run(JSLexer *pLexer, const char *pSource, char **ppError)
                         case '\n':
                             nLine++;
                             p++;
+                            break;
+                        case '\r':
+                            /* CRLF is a single line terminator, so the continuation
+                             * swallows both bytes.                                 */
+                            p++;
+
+                            if (*p == '\n') {
+                                p++;
+                            }
+
+                            nLine++;
                             break;
                         case 0: break;
                         default:
@@ -372,6 +447,11 @@ int js_lex_run(JSLexer *pLexer, const char *pSource, char **ppError)
 
             if (*p == nQuote) {
                 p++;
+            } else {
+                cdbuf_free(&buf);
+                lex_error(ppError, "unterminated string literal", nStartLine);
+
+                return 0;
             }
 
             token.type = T_STRING;
@@ -427,23 +507,25 @@ int js_lex_run(JSLexer *pLexer, const char *pSource, char **ppError)
             }
         }
 
-        /* Punctuators, longest match first. */
+        /* Punctuators, longest match first. There is deliberately no '**' or
+         * '**=': QJSEngine rejects exponentiation, so lexing them as two
+         * tokens keeps the SyntaxError the reference reports.               */
         {
             struct {
                 const char *pText;
                 JSTokType type;
             } punctuators[] = {
                 {">>>=", T_USHR_ASSIGN}, {"===", T_SEQ},        {"!==", T_SNE},        {"<<=", T_SHL_ASSIGN}, {">>=", T_SHR_ASSIGN},
-                {">>>", T_USHR},         {"**=", T_MUL_ASSIGN}, {"...", T_ELLIPSIS},   {"==", T_EQ},          {"!=", T_NE},
-                {"<=", T_LE},            {">=", T_GE},          {"&&", T_LAND},        {"||", T_LOR},         {"++", T_INC},
-                {"--", T_DEC},           {"<<", T_SHL},         {">>", T_SHR},         {"+=", T_ADD_ASSIGN},  {"-=", T_SUB_ASSIGN},
-                {"*=", T_MUL_ASSIGN},    {"/=", T_DIV_ASSIGN},  {"%=", T_MOD_ASSIGN},  {"&=", T_AND_ASSIGN},  {"|=", T_OR_ASSIGN},
-                {"^=", T_XOR_ASSIGN},    {"=>", T_ARROW},       {"**", T_MUL},         {"{", T_LBRACE},       {"}", T_RBRACE},
-                {"(", T_LPAREN},         {")", T_RPAREN},       {"[", T_LBRACKET},     {"]", T_RBRACKET},     {";", T_SEMI},
-                {",", T_COMMA},          {"<", T_LT},           {">", T_GT},           {"+", T_ADD},          {"-", T_SUB},
-                {"*", T_MUL},            {"/", T_DIV},          {"%", T_MOD},          {"&", T_AND},          {"|", T_OR},
-                {"^", T_XOR},            {"!", T_NOT},          {"~", T_BNOT},         {"?", T_QUESTION},     {":", T_COLON},
-                {"=", T_ASSIGN},         {".", T_DOT},          {NULL, T_EOF}};
+                {">>>", T_USHR},         {"...", T_ELLIPSIS},   {"==", T_EQ},          {"!=", T_NE},          {"<=", T_LE},
+                {">=", T_GE},            {"&&", T_LAND},        {"||", T_LOR},         {"++", T_INC},         {"--", T_DEC},
+                {"<<", T_SHL},           {">>", T_SHR},         {"+=", T_ADD_ASSIGN},  {"-=", T_SUB_ASSIGN},  {"*=", T_MUL_ASSIGN},
+                {"/=", T_DIV_ASSIGN},    {"%=", T_MOD_ASSIGN},  {"&=", T_AND_ASSIGN},  {"|=", T_OR_ASSIGN},   {"^=", T_XOR_ASSIGN},
+                {"=>", T_ARROW},         {"{", T_LBRACE},       {"}", T_RBRACE},       {"(", T_LPAREN},       {")", T_RPAREN},
+                {"[", T_LBRACKET},       {"]", T_RBRACKET},     {";", T_SEMI},         {",", T_COMMA},        {"<", T_LT},
+                {">", T_GT},             {"+", T_ADD},          {"-", T_SUB},          {"*", T_MUL},          {"/", T_DIV},
+                {"%", T_MOD},            {"&", T_AND},          {"|", T_OR},           {"^", T_XOR},          {"!", T_NOT},
+                {"~", T_BNOT},           {"?", T_QUESTION},     {":", T_COLON},        {"=", T_ASSIGN},       {".", T_DOT},
+                {NULL, T_EOF}};
             int i = 0;
             int bFound = 0;
 

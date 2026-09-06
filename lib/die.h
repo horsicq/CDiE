@@ -25,6 +25,12 @@
  * function names and signatures, so a program written against die_library
  * (its samples included) compiles and links against this library unchanged.
  * The implementation is the pure-C cdie engine rather than the Qt one.
+ *
+ * Threading: the library is single-threaded, exactly as die_library is. The
+ * database that DIE_LoadDatabase installs for the *Ex scans is one process
+ * global, so a DIE_LoadDatabase* running concurrently with a DIE_Scan*Ex
+ * frees the signature array the scan is walking. Serialise the calls, or give
+ * each thread its own database by using the non-Ex entry points.
  */
 
 #ifndef DIE_H
@@ -70,6 +76,10 @@ extern "C" {
 /* --- Scan flags --------------------------------------------------------- */
 #define DIE_DEEPSCAN 0x00000001
 #define DIE_HEURISTICSCAN 0x00000002
+/* Accepted for source compatibility with die_library but inert: honouring it
+ * would add a second result group and change the output shape, which would
+ * break the byte-for-byte parity with diec this port is built around. See
+ * docs/LIMITATIONS.md. */
 #define DIE_ALLTYPESSCAN 0x00000004
 #define DIE_RECURSIVESCAN 0x00000008
 #define DIE_VERBOSE 0x00000010

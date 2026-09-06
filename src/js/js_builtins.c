@@ -27,6 +27,14 @@
 
 #define ARG(i) (((i) < nArgc) ? pArgv[i] : js_undefined())
 
+/* Upper bounds on the two places where a nominal array length is turned
+ * into a single flat allocation.  Both are defensive: an array that really
+ * holds this many elements has already cost far more memory in the property
+ * map, so no realistic script is refused, while the multiplication by
+ * sizeof(JSVal) can no longer wrap size_t and the count still fits an int. */
+#define JS_MAX_SPREAD_ARGS 16777216
+#define JS_MAX_SORT_ITEMS  16777216
+
 /* ------------------------------------------------------------- utilities  */
 
 static JSVal this_string(JSCtx *pCtx, JSVal thisVal)
@@ -63,13 +71,28 @@ static cd_i64 clamp_index(double nValue, cd_i64 nLength)
         return 0;
     }
 
+    /* ToInteger truncates towards zero FIRST; only then is the sign tested.
+     * Without this, -0.5 truncates to -0 but still takes the negative
+     * branch and yields nLength instead of 0.                             */
+    nValue = (nValue < 0) ? (-x_floor(-nValue)) : x_floor(nValue);
+
+    /* The double has to be brought into range before the cast: converting a
+     * value that does not fit into cd_i64 is undefined behaviour.          */
     if (nValue < 0) {
+        if (nValue < (-(double)nLength)) {
+            return 0;
+        }
+
         nResult = nLength + (cd_i64)nValue;
 
         if (nResult < 0) {
             nResult = 0;
         }
     } else {
+        if (nValue > (double)nLength) {
+            return nLength;
+        }
+
         nResult = (cd_i64)nValue;
 
         if (nResult > nLength) {
@@ -244,6 +267,15 @@ static JSVal fn_function_apply(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *pAr
             nCount = 0;
         }
 
+        /* Keeps the allocation below from wrapping size_t and the argument
+         * count from being truncated by the (int) cast further down.  The
+         * bound is far above any real argument list - the reference engine
+         * still spreads half a million elements - but low enough that the
+         * multiplication cannot wrap and the block stays bounded.          */
+        if (nCount > JS_MAX_SPREAD_ARGS) {
+            return js_throw(pCtx, "RangeError: too many arguments");
+        }
+
         if (nCount > 0) {
             pCallArgs = (JSVal *)cd_malloc((size_t)nCount * sizeof(JSVal));
 
@@ -278,6 +310,19 @@ static JSVal fn_function_bind(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *pArg
     result.u.o->pBoundTarget = jsobj_ref(thisVal.u.o);
     result.u.o->boundThis = js_dup(ARG(0));
 
+    /* Everything after thisArg is partially applied and goes in front of the
+     * arguments of the eventual call.                                      */
+    if (nArgc > 1) {
+        int i = 0;
+
+        result.u.o->pBoundArgs = (JSVal *)cd_malloc((size_t)(nArgc - 1) * sizeof(JSVal));
+        result.u.o->nBoundArgs = nArgc - 1;
+
+        for (i = 1; i < nArgc; i++) {
+            result.u.o->pBoundArgs[i - 1] = js_dup(pArgv[i]);
+        }
+    }
+
     return result;
 }
 
@@ -305,7 +350,18 @@ static JSVal fn_array_ctor(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *pArgv, 
     (void)pUser;
 
     if ((nArgc == 1) && (pArgv[0].tag == JT_NUM)) {
-        result.u.o->nArrayLen = (cd_i64)pArgv[0].u.n;
+        double nValue = pArgv[0].u.n;
+
+        /* Only a uint32 is a valid array length; anything else is a
+         * RangeError and must never reach the (cd_i64) conversion.        */
+        if ((nValue != nValue) || (nValue < 0) || (nValue > 4294967295.0) || (nValue != x_floor(nValue))) {
+            js_release(pCtx, result);
+
+            /* Word for word what the reference engine reports. */
+            return js_throw(pCtx, "RangeError: Array size is not a small enough positive integer.");
+        }
+
+        result.u.o->nArrayLen = (cd_i64)nValue;
 
         return result;
     }
@@ -480,7 +536,9 @@ static JSVal fn_array_splice(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *pArgv
 {
     cd_i64 nLength = js_array_length(pCtx, thisVal);
     cd_i64 nStart = (nArgc > 0) ? clamp_index(js_to_number(pCtx, pArgv[0]), nLength) : 0;
-    cd_i64 nDelete = (nArgc > 1) ? js_to_int64(pCtx, pArgv[1]) : (nLength - nStart);
+    /* The reference engine narrows the delete count to an int32 before it
+     * clamps, so 2^32 + 1 deletes one element and 1e300 deletes none.     */
+    cd_i64 nDelete = (nArgc > 1) ? (cd_i64)js_to_int32(pCtx, pArgv[1]) : (nLength - nStart);
     JSVal removed = js_new_array(pCtx);
     JSVal tail = js_new_array(pCtx);
     cd_i64 i = 0;
@@ -495,7 +553,9 @@ static JSVal fn_array_splice(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *pArgv
         nDelete = 0;
     }
 
-    if (nStart + nDelete > nLength) {
+    /* nStart is in [0, nLength], so the subtraction cannot overflow while
+     * the addition would for a delete count near INT64_MAX.               */
+    if (nDelete > (nLength - nStart)) {
         nDelete = nLength - nStart;
     }
 
@@ -602,11 +662,27 @@ static JSVal fn_array_lastindexof(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *
 {
     cd_i64 nLength = js_array_length(pCtx, thisVal);
     JSVal search = ARG(0);
-    cd_i64 i = 0;
+    cd_i64 i = nLength - 1;
 
     (void)pUser;
 
-    for (i = nLength - 1; i >= 0; i--) {
+    if ((nArgc > 1) && (nLength > 0)) {
+        cd_i64 nFrom = js_to_int64(pCtx, pArgv[1]);
+
+        if (nFrom < 0) {
+            if (nFrom < (-nLength)) {
+                return js_num(-1);
+            }
+
+            nFrom += nLength;
+        } else if (nFrom > (nLength - 1)) {
+            nFrom = nLength - 1;
+        }
+
+        i = nFrom;
+    }
+
+    for (; i >= 0; i--) {
         JSVal item = js_get_index(pCtx, thisVal, i);
         int bMatch = js_strict_equals(pCtx, item, search);
 
@@ -695,6 +771,12 @@ static JSVal fn_array_sort(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *pArgv, 
 
     if (nLength <= 1) {
         return js_dup(thisVal);
+    }
+
+    /* A nominal length far beyond the number of stored elements would wrap
+     * the multiplication below; refuse it instead of allocating.          */
+    if (nLength > JS_MAX_SORT_ITEMS) {
+        return js_throw(pCtx, "RangeError: array is too large to sort");
     }
 
     pItems = (JSVal *)cd_malloc((size_t)nLength * sizeof(JSVal));
@@ -1015,9 +1097,27 @@ static JSVal fn_string_lastindexof(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal 
     (void)pUser;
 
     if (nNeedleSize <= nTextSize) {
+        size_t nStart = nTextSize - nNeedleSize;
         size_t i = 0;
 
-        for (i = nTextSize - nNeedleSize + 1; i > 0; i--) {
+        /* An absent or NaN position means +Infinity, i.e. no upper bound. */
+        if (nArgc > 1) {
+            double nValue = js_to_number(pCtx, pArgv[1]);
+
+            if (nValue == nValue) {
+                size_t nFrom = 0;
+
+                if (nValue > 0) {
+                    nFrom = (nValue > (double)nTextSize) ? nTextSize : (size_t)nValue;
+                }
+
+                if (nFrom < nStart) {
+                    nStart = nFrom;
+                }
+            }
+        }
+
+        for (i = nStart + 1; i > 0; i--) {
             if (x_memcmp(js_str_data(text) + i - 1, js_str_data(needle), nNeedleSize) == 0) {
                 nResult = (cd_i64)(i - 1);
                 break;
@@ -1128,7 +1228,9 @@ static JSVal fn_string_substr(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *pArg
         nCount = 0;
     }
 
-    if (nStart + nCount > nLength) {
+    /* nStart is in [0, nLength] here, so clamping by subtraction avoids the
+     * overflow that a count near INT64_MAX would cause in the addition.   */
+    if (nCount > (nLength - nStart)) {
         nCount = nLength - nStart;
     }
 
@@ -1720,6 +1822,319 @@ static JSVal fn_boolean_tostring(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *p
     return js_str(pCtx, js_to_bool(pCtx, thisVal) ? "true" : "false");
 }
 
+/* ------------------------------------------------------------------ Date  */
+
+/* Pure integer civil-calendar arithmetic: the CRT-free build has no clock
+ * and no timezone database, so local time is UTC and a Date built without
+ * arguments (and Date.now) reports the epoch. Everything that the signature
+ * database actually evaluates - a time value, a broken-down UTC field or an
+ * ISO string - is exact.                                                   */
+
+#define DATE_MS_PER_DAY 86400000.0
+
+typedef enum {
+    DATE_TIME, DATE_YEAR, DATE_MONTH, DATE_DATE, DATE_DAY, DATE_HOURS,
+    DATE_MINUTES, DATE_SECONDS, DATE_MS, DATE_TZOFFSET
+} DateField;
+
+static int date_is_finite(double nValue)
+{
+    return ((nValue == nValue) && (nValue != x_inf()) && (nValue != (-x_inf()))) ? 1 : 0;
+}
+
+static double date_trunc(double nValue)
+{
+    return (nValue < 0) ? (-x_floor(-nValue)) : x_floor(nValue);
+}
+
+/* Days since 1970-01-01 for a proleptic Gregorian date, nMonth in [1, 12]. */
+static double date_days_from_civil(cd_i64 nYear, cd_i64 nMonth, cd_i64 nDay)
+{
+    cd_i64 y = nYear - ((nMonth <= 2) ? 1 : 0);
+    cd_i64 nEra = ((y >= 0) ? y : (y - 399)) / 400;
+    cd_i64 nYoe = y - nEra * 400;
+    cd_i64 nDoy = (153 * (nMonth + ((nMonth > 2) ? (-3) : 9)) + 2) / 5 + nDay - 1;
+    cd_i64 nDoe = nYoe * 365 + nYoe / 4 - nYoe / 100 + nDoy;
+
+    return (double)(nEra * 146097 + nDoe - 719468);
+}
+
+static void date_civil_from_days(cd_i64 nDays, cd_i64 *pnYear, cd_i64 *pnMonth, cd_i64 *pnDay)
+{
+    cd_i64 z = nDays + 719468;
+    cd_i64 nEra = ((z >= 0) ? z : (z - 146096)) / 146097;
+    cd_i64 nDoe = z - nEra * 146097;
+    cd_i64 nYoe = (nDoe - nDoe / 1460 + nDoe / 36524 - nDoe / 146096) / 365;
+    cd_i64 nDoy = nDoe - (365 * nYoe + nYoe / 4 - nYoe / 100);
+    cd_i64 nMp = (5 * nDoy + 2) / 153;
+    cd_i64 nDay = nDoy - (153 * nMp + 2) / 5 + 1;
+    cd_i64 nMonth = nMp + ((nMp < 10) ? 3 : (-9));
+    cd_i64 nYear = nYoe + nEra * 400 + ((nMonth <= 2) ? 1 : 0);
+
+    *pnYear = nYear;
+    *pnMonth = nMonth;
+    *pnDay = nDay;
+}
+
+static double date_make_day(double nYear, double nMonth, double nDate)
+{
+    double nYm = 0;
+    double nMn = 0;
+
+    if ((!date_is_finite(nYear)) || (!date_is_finite(nMonth)) || (!date_is_finite(nDate))) {
+        return x_nan();
+    }
+
+    nYear = date_trunc(nYear);
+    nMonth = date_trunc(nMonth);
+    nDate = date_trunc(nDate);
+
+    nYm = nYear + x_floor(nMonth / 12.0);
+    nMn = nMonth - x_floor(nMonth / 12.0) * 12.0;
+
+    /* A time value is capped at +-8.64e15 ms, i.e. roughly +-274000 years;
+     * anything outside that cannot survive the clip and would overflow the
+     * integer arithmetic below.                                           */
+    if ((nYm < (-400000.0)) || (nYm > 400000.0) || (nDate < (-1.0e9)) || (nDate > 1.0e9)) {
+        return x_nan();
+    }
+
+    return date_days_from_civil((cd_i64)nYm, (cd_i64)nMn + 1, 1) + (nDate - 1.0);
+}
+
+static double date_make_time(double nHours, double nMinutes, double nSeconds, double nMs)
+{
+    if ((!date_is_finite(nHours)) || (!date_is_finite(nMinutes)) || (!date_is_finite(nSeconds)) || (!date_is_finite(nMs))) {
+        return x_nan();
+    }
+
+    /* Hours, minutes and seconds arrive already narrowed to an int32; the
+     * millisecond field is the one component the reference engine keeps as
+     * a full double, and it floors it rather than truncating towards zero
+     * (a ms of -1.9 moves the time value back by 2, not by 1).            */
+    return date_trunc(nHours) * 3600000.0 + date_trunc(nMinutes) * 60000.0 + date_trunc(nSeconds) * 1000.0 + x_floor(nMs);
+}
+
+static double date_time_clip(double nTime)
+{
+    if ((!date_is_finite(nTime)) || (x_fabs(nTime) > 8.64e15)) {
+        return x_nan();
+    }
+
+    return date_trunc(nTime);
+}
+
+/* The reference engine rejects a NaN component but narrows every other one
+ * to an int32, so Infinity and 1e300 both behave as zero.                  */
+static double date_component(JSCtx *pCtx, JSVal value, int *pbNaN)
+{
+    double nValue = js_to_number(pCtx, value);
+
+    if (nValue != nValue) {
+        *pbNaN = 1;
+
+        return 0;
+    }
+
+    return (double)js_to_int32(pCtx, js_num(nValue));
+}
+
+static double date_from_parts(JSCtx *pCtx, int nArgc, JSVal *pArgv)
+{
+    int bNaN = 0;
+    double nYear = date_component(pCtx, pArgv[0], &bNaN);
+    double nMonth = (nArgc > 1) ? date_component(pCtx, pArgv[1], &bNaN) : 0;
+    double nDate = (nArgc > 2) ? date_component(pCtx, pArgv[2], &bNaN) : 1;
+    double nHours = (nArgc > 3) ? date_component(pCtx, pArgv[3], &bNaN) : 0;
+    double nMinutes = (nArgc > 4) ? date_component(pCtx, pArgv[4], &bNaN) : 0;
+    double nSeconds = (nArgc > 5) ? date_component(pCtx, pArgv[5], &bNaN) : 0;
+    /* Deliberately NOT narrowed: a millisecond count of 1e16 has to push the
+     * time value out of the clip range and give NaN, which an int32 wrap
+     * would hide.                                                         */
+    double nMs = (nArgc > 6) ? js_to_number(pCtx, pArgv[6]) : 0;
+
+    if (bNaN) {
+        return x_nan();
+    }
+
+    if ((nYear >= 0) && (nYear <= 99)) {
+        nYear = 1900 + nYear;
+    }
+
+    return date_time_clip(date_make_day(nYear, nMonth, nDate) * DATE_MS_PER_DAY + date_make_time(nHours, nMinutes, nSeconds, nMs));
+}
+
+/* The time value lives in the object's primitive slot; a value that is not a
+ * number means the receiver is not a Date.                                 */
+static double date_this_time(JSVal thisVal)
+{
+    if ((thisVal.tag == JT_OBJ) && (thisVal.u.o->primitive.tag == JT_NUM)) {
+        return thisVal.u.o->primitive.u.n;
+    }
+
+    return x_nan();
+}
+
+static JSVal fn_date_ctor(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *pArgv, void *pUser)
+{
+    JSObj *pProto = (JSObj *)pUser;
+    double nTime = 0;
+
+    if (nArgc == 1) {
+        nTime = date_time_clip(js_to_number(pCtx, pArgv[0]));
+    } else if (nArgc > 1) {
+        nTime = date_from_parts(pCtx, nArgc, pArgv);
+    }
+
+    if ((thisVal.tag == JT_OBJ) && (thisVal.u.o->pProto == pProto)) {
+        thisVal.u.o->primitive = js_num(nTime);
+
+        return js_undefined();
+    }
+
+    {
+        JSObj *pObj = jsobj_new(pCtx, JCLASS_OBJECT, pProto);
+
+        pObj->primitive = js_num(nTime);
+
+        return jsval_obj(pObj);
+    }
+}
+
+static JSVal fn_date_utc(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *pArgv, void *pUser)
+{
+    (void)thisVal;
+    (void)pUser;
+
+    /* The reference engine needs at least the year and the month. */
+    if (nArgc < 2) {
+        return js_num(x_nan());
+    }
+
+    return js_num(date_from_parts(pCtx, nArgc, pArgv));
+}
+
+static JSVal fn_date_now(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *pArgv, void *pUser)
+{
+    (void)pCtx;
+    (void)thisVal;
+    (void)nArgc;
+    (void)pArgv;
+    (void)pUser;
+
+    return js_num(0);
+}
+
+static JSVal fn_date_get(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *pArgv, void *pUser)
+{
+    double nTime = date_this_time(thisVal);
+    DateField field = (DateField)(size_t)pUser;
+    cd_i64 nDays = 0;
+    cd_i64 nInDay = 0;
+    cd_i64 nYear = 0;
+    cd_i64 nMonth = 0;
+    cd_i64 nDate = 0;
+
+    (void)pCtx;
+    (void)nArgc;
+    (void)pArgv;
+
+    if (nTime != nTime) {
+        return js_num(x_nan());
+    }
+
+    if (field == DATE_TIME) {
+        return js_num(nTime);
+    }
+
+    if (field == DATE_TZOFFSET) {
+        return js_num(0);
+    }
+
+    nDays = (cd_i64)x_floor(nTime / DATE_MS_PER_DAY);
+    nInDay = (cd_i64)(nTime - (double)nDays * DATE_MS_PER_DAY);
+    date_civil_from_days(nDays, &nYear, &nMonth, &nDate);
+
+    switch (field) {
+        case DATE_TIME: return js_num(nTime);
+        case DATE_TZOFFSET: return js_num(0);
+        case DATE_YEAR: return js_num((double)nYear);
+        case DATE_MONTH: return js_num((double)(nMonth - 1));
+        case DATE_DATE: return js_num((double)nDate);
+        case DATE_DAY: return js_num((double)(((nDays % 7) + 11) % 7));
+        case DATE_HOURS: return js_num((double)(nInDay / 3600000));
+        case DATE_MINUTES: return js_num((double)((nInDay / 60000) % 60));
+        case DATE_SECONDS: return js_num((double)((nInDay / 1000) % 60));
+        case DATE_MS: return js_num((double)(nInDay % 1000));
+        default: break;
+    }
+
+    return js_num(x_nan());
+}
+
+static JSVal fn_date_toisostring(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *pArgv, void *pUser)
+{
+    double nTime = date_this_time(thisVal);
+    cd_i64 nDays = 0;
+    cd_i64 nInDay = 0;
+    cd_i64 nYear = 0;
+    cd_i64 nMonth = 0;
+    cd_i64 nDate = 0;
+    /* Exactly the width the reference engine uses: a year that does not fit
+     * four digits pushes the trailing 'Z' out of the buffer.              */
+    char sBuf[27];
+
+    (void)nArgc;
+    (void)pArgv;
+    (void)pUser;
+
+    if (nTime != nTime) {
+        return js_str(pCtx, "Invalid Date");
+    }
+
+    nDays = (cd_i64)x_floor(nTime / DATE_MS_PER_DAY);
+    nInDay = (cd_i64)(nTime - (double)nDays * DATE_MS_PER_DAY);
+    date_civil_from_days(nDays, &nYear, &nMonth, &nDate);
+
+    /* The millisecond field is truncated towards zero rather than floored,
+     * so a negative time prints ".-01"; the reference does the same.      */
+    x_snprintf(sBuf, sizeof(sBuf), "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ", (int)nYear, (int)nMonth, (int)nDate,
+               (int)(nInDay / 3600000), (int)((nInDay / 60000) % 60), (int)((nInDay / 1000) % 60), (int)x_fmod(nTime, 1000.0));
+
+    return js_str(pCtx, sBuf);
+}
+
+static JSVal fn_date_tostring(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *pArgv, void *pUser)
+{
+    static const char *pWeekDays = "SunMonTueWedThuFriSat";
+    static const char *pMonths = "JanFebMarAprMayJunJulAugSepOctNovDec";
+    double nTime = date_this_time(thisVal);
+    cd_i64 nDays = 0;
+    cd_i64 nInDay = 0;
+    cd_i64 nYear = 0;
+    cd_i64 nMonth = 0;
+    cd_i64 nDate = 0;
+    char sBuf[64];
+
+    (void)nArgc;
+    (void)pArgv;
+    (void)pUser;
+
+    if (nTime != nTime) {
+        return js_str(pCtx, "Invalid Date");
+    }
+
+    nDays = (cd_i64)x_floor(nTime / DATE_MS_PER_DAY);
+    nInDay = (cd_i64)(nTime - (double)nDays * DATE_MS_PER_DAY);
+    date_civil_from_days(nDays, &nYear, &nMonth, &nDate);
+
+    x_snprintf(sBuf, sizeof(sBuf), "%.3s %.3s %02d %04d %02d:%02d:%02d GMT+0000 (UTC)", pWeekDays + ((((nDays % 7) + 11) % 7) * 3),
+               pMonths + (nMonth - 1) * 3, (int)nDate, (int)nYear, (int)(nInDay / 3600000), (int)((nInDay / 60000) % 60),
+               (int)((nInDay / 1000) % 60));
+
+    return js_str(pCtx, sBuf);
+}
+
 /* ------------------------------------------------------------------ Math  */
 
 typedef enum {
@@ -1749,6 +2164,7 @@ static JSVal fn_math_unary(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *pArgv, 
         case MATH_SIGN: return js_num((nValue > 0) ? 1 : ((nValue < 0) ? -1 : nValue));
         case MATH_LOG2: return js_num(x_log(nValue) / x_log(2.0));
         case MATH_LOG10: return js_num(x_log10(nValue));
+        default: break;
     }
 
     return js_num(x_nan());
@@ -1892,7 +2308,7 @@ static JSVal fn_parsefloat(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *pArgv, 
 {
     JSVal text = js_to_string(pCtx, ARG(0));
     const char *pData = js_str_data(text);
-    char *pEnd = NULL;
+    const char *pEnd = NULL;
     double nResult = x_strtod(pData, &pEnd);
 
     (void)thisVal;
@@ -1929,12 +2345,13 @@ static JSVal fn_isfinite(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *pArgv, vo
 
 static JSVal fn_error_ctor(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *pArgv, void *pUser)
 {
-    JSVal object = js_new_object(pCtx);
+    /* Error.prototype has to be the prototype, otherwise the instance never
+     * finds its own toString and stringifies as "[object Object]".        */
+    JSVal object = jsval_obj(jsobj_new(pCtx, JCLASS_ERROR, pCtx->pErrorProto));
 
     (void)thisVal;
     (void)pUser;
 
-    object.u.o->cls = JCLASS_ERROR;
     js_set(pCtx, object, "message", (nArgc > 0) ? js_to_string(pCtx, pArgv[0]) : js_str(pCtx, ""));
     js_set(pCtx, object, "name", js_str(pCtx, "Error"));
 
@@ -2000,7 +2417,13 @@ static void json_quote(CDBuf *pBuf, const char *pData, size_t nSize)
     cdbuf_append_ch(pBuf, '"');
 }
 
-static void json_stringify_value(JSCtx *pCtx, CDBuf *pBuf, JSVal value, int nDepth)
+static void json_stringify_value(JSCtx *pCtx, CDBuf *pBuf, JSVal value, int nDepth);
+
+/* Serialises a value that has already had toJSON applied to it (or that never
+ * had one).  Keeping this separate is what stops an object returned BY toJSON
+ * from having its own toJSON invoked again, which is both what the spec says
+ * and what the reference engine does.                                       */
+static void json_stringify_raw(JSCtx *pCtx, CDBuf *pBuf, JSVal value, int nDepth)
 {
     if (nDepth > 64) {
         cdbuf_append_str(pBuf, "null");
@@ -2019,7 +2442,7 @@ static void json_stringify_value(JSCtx *pCtx, CDBuf *pBuf, JSVal value, int nDep
             break;
         }
         case JT_STR: json_quote(pBuf, js_str_data(value), js_str_len(value)); break;
-        case JT_OBJ:
+        case JT_OBJ: {
             if (js_is_callable(value)) {
                 cdbuf_append_str(pBuf, "null");
             } else if (value.u.o->cls == JCLASS_ARRAY) {
@@ -2064,8 +2487,37 @@ static void json_stringify_value(JSCtx *pCtx, CDBuf *pBuf, JSVal value, int nDep
 
                 cdbuf_append_ch(pBuf, '}');
             }
+
             break;
+        }
+
+        default: break;
     }
+}
+
+static void json_stringify_value(JSCtx *pCtx, CDBuf *pBuf, JSVal value, int nDepth)
+{
+    /* An object that supplies toJSON is serialised through it - the only
+     * reason Date.prototype.toJSON exists at all.  The replacement value is
+     * then serialised raw, so a toJSON that returns the receiver terminates
+     * instead of recursing.                                               */
+    if ((value.tag == JT_OBJ) && (!js_is_callable(value))) {
+        JSVal toJson = js_get(pCtx, value, "toJSON");
+
+        if (js_is_callable(toJson)) {
+            JSVal replaced = js_call(pCtx, toJson, value, 0, NULL);
+
+            js_release(pCtx, toJson);
+            json_stringify_raw(pCtx, pBuf, replaced, nDepth);
+            js_release(pCtx, replaced);
+
+            return;
+        }
+
+        js_release(pCtx, toJson);
+    }
+
+    json_stringify_raw(pCtx, pBuf, value, nDepth);
 }
 
 static JSVal fn_json_stringify(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *pArgv, void *pUser)
@@ -2088,7 +2540,15 @@ typedef struct {
     const char *p;
     JSCtx *pCtx;
     int bError;
+    int nDepth;
 } JsonParser;
+
+/* json_parse_value recurses once per nesting level and its frame is about
+ * 200 bytes, so this bound costs well under half a megabyte of stack while
+ * being orders of magnitude deeper than any real document.  A limit of any
+ * size necessarily diverges from the reference engine, which keeps going
+ * until its own stack runs out.                                           */
+#define JSON_MAX_DEPTH 2048
 
 static JSVal json_parse_value(JsonParser *pParser);
 
@@ -2105,14 +2565,24 @@ static JSVal json_parse_value(JsonParser *pParser)
 
     json_skip_ws(pParser);
 
+    if ((*pParser->p == '{') || (*pParser->p == '[')) {
+        if (pParser->nDepth >= JSON_MAX_DEPTH) {
+            pParser->bError = 1;
+
+            return js_null();
+        }
+    }
+
     if (*pParser->p == '{') {
         JSVal object = js_new_object(pCtx);
 
+        pParser->nDepth++;
         pParser->p++;
         json_skip_ws(pParser);
 
         if (*pParser->p == '}') {
             pParser->p++;
+            pParser->nDepth--;
 
             return object;
         }
@@ -2128,6 +2598,7 @@ static JSVal json_parse_value(JsonParser *pParser)
             if (*pParser->p != ':') {
                 pParser->bError = 1;
                 js_release(pCtx, key);
+                pParser->nDepth--;
 
                 return object;
             }
@@ -2152,6 +2623,8 @@ static JSVal json_parse_value(JsonParser *pParser)
             break;
         }
 
+        pParser->nDepth--;
+
         return object;
     }
 
@@ -2159,11 +2632,13 @@ static JSVal json_parse_value(JsonParser *pParser)
         JSVal array = js_new_array(pCtx);
         cd_i64 nCount = 0;
 
+        pParser->nDepth++;
         pParser->p++;
         json_skip_ws(pParser);
 
         if (*pParser->p == ']') {
             pParser->p++;
+            pParser->nDepth--;
 
             return array;
         }
@@ -2186,6 +2661,8 @@ static JSVal json_parse_value(JsonParser *pParser)
             break;
         }
 
+        pParser->nDepth--;
+
         return array;
     }
 
@@ -2198,7 +2675,16 @@ static JSVal json_parse_value(JsonParser *pParser)
 
         while (*pParser->p && (*pParser->p != '"')) {
             if (*pParser->p == '\\') {
+                int bBadEscape = 0;
+
                 pParser->p++;
+
+                /* A backslash immediately before the terminator must not
+                 * push the cursor past the end of the string.            */
+                if (*pParser->p == 0) {
+                    pParser->bError = 1;
+                    break;
+                }
 
                 switch (*pParser->p) {
                     case 'n': cdbuf_append_ch(&buf, '\n'); break;
@@ -2210,9 +2696,11 @@ static JSVal json_parse_value(JsonParser *pParser)
                         unsigned int nCode = 0;
                         int i = 0;
 
+                        /* Stops at the first byte that is not a hex digit,
+                         * so a truncated escape cannot read past the end. */
                         for (i = 1; i <= 4; i++) {
                             char nChar = pParser->p[i];
-                            int nDigit = 0;
+                            int nDigit = -1;
 
                             if ((nChar >= '0') && (nChar <= '9')) {
                                 nDigit = nChar - '0';
@@ -2222,7 +2710,16 @@ static JSVal json_parse_value(JsonParser *pParser)
                                 nDigit = nChar - 'A' + 10;
                             }
 
+                            if (nDigit < 0) {
+                                break;
+                            }
+
                             nCode = nCode * 16 + (unsigned int)nDigit;
+                        }
+
+                        if (i <= 4) {
+                            bBadEscape = 1;
+                            break;
                         }
 
                         if (nCode < 0x80) {
@@ -2240,6 +2737,11 @@ static JSVal json_parse_value(JsonParser *pParser)
                         break;
                     }
                     default: cdbuf_append_ch(&buf, *pParser->p); break;
+                }
+
+                if (bBadEscape) {
+                    pParser->bError = 1;
+                    break;
                 }
 
                 pParser->p++;
@@ -2278,7 +2780,7 @@ static JSVal json_parse_value(JsonParser *pParser)
     }
 
     {
-        char *pEnd = NULL;
+        const char *pEnd = NULL;
         double nValue = x_strtod(pParser->p, &pEnd);
 
         if (pEnd == pParser->p) {
@@ -2305,6 +2807,7 @@ static JSVal fn_json_parse(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *pArgv, 
     parser.p = js_str_data(text);
     parser.pCtx = pCtx;
     parser.bError = 0;
+    parser.nDepth = 0;
 
     result = json_parse_value(&parser);
     js_release(pCtx, text);
@@ -2436,6 +2939,45 @@ void js_install_builtins(JSCtx *pCtx)
         js_release(pCtx, booleanCtor);
         js_release(pCtx, errorCtor);
         js_release(pCtx, functionCtor);
+    }
+
+    /* Date - the prototype is not shared, so the constructor carries it as
+     * its user pointer instead of living on the context.                  */
+    {
+        JSObj *pDateProto = jsobj_new(pCtx, JCLASS_OBJECT, pCtx->pObjectProto);
+        JSVal dateCtor = js_new_native(pCtx, "Date", fn_date_ctor, 7, pDateProto);
+
+        def_proto_method(pCtx, pDateProto, "getTime", fn_date_get, 0, (void *)(size_t)DATE_TIME);
+        def_proto_method(pCtx, pDateProto, "valueOf", fn_date_get, 0, (void *)(size_t)DATE_TIME);
+        def_proto_method(pCtx, pDateProto, "getFullYear", fn_date_get, 0, (void *)(size_t)DATE_YEAR);
+        def_proto_method(pCtx, pDateProto, "getUTCFullYear", fn_date_get, 0, (void *)(size_t)DATE_YEAR);
+        def_proto_method(pCtx, pDateProto, "getMonth", fn_date_get, 0, (void *)(size_t)DATE_MONTH);
+        def_proto_method(pCtx, pDateProto, "getUTCMonth", fn_date_get, 0, (void *)(size_t)DATE_MONTH);
+        def_proto_method(pCtx, pDateProto, "getDate", fn_date_get, 0, (void *)(size_t)DATE_DATE);
+        def_proto_method(pCtx, pDateProto, "getUTCDate", fn_date_get, 0, (void *)(size_t)DATE_DATE);
+        def_proto_method(pCtx, pDateProto, "getDay", fn_date_get, 0, (void *)(size_t)DATE_DAY);
+        def_proto_method(pCtx, pDateProto, "getUTCDay", fn_date_get, 0, (void *)(size_t)DATE_DAY);
+        def_proto_method(pCtx, pDateProto, "getHours", fn_date_get, 0, (void *)(size_t)DATE_HOURS);
+        def_proto_method(pCtx, pDateProto, "getUTCHours", fn_date_get, 0, (void *)(size_t)DATE_HOURS);
+        def_proto_method(pCtx, pDateProto, "getMinutes", fn_date_get, 0, (void *)(size_t)DATE_MINUTES);
+        def_proto_method(pCtx, pDateProto, "getUTCMinutes", fn_date_get, 0, (void *)(size_t)DATE_MINUTES);
+        def_proto_method(pCtx, pDateProto, "getSeconds", fn_date_get, 0, (void *)(size_t)DATE_SECONDS);
+        def_proto_method(pCtx, pDateProto, "getUTCSeconds", fn_date_get, 0, (void *)(size_t)DATE_SECONDS);
+        def_proto_method(pCtx, pDateProto, "getMilliseconds", fn_date_get, 0, (void *)(size_t)DATE_MS);
+        def_proto_method(pCtx, pDateProto, "getUTCMilliseconds", fn_date_get, 0, (void *)(size_t)DATE_MS);
+        def_proto_method(pCtx, pDateProto, "getTimezoneOffset", fn_date_get, 0, (void *)(size_t)DATE_TZOFFSET);
+        def_proto_method(pCtx, pDateProto, "toISOString", fn_date_toisostring, 0, NULL);
+        def_proto_method(pCtx, pDateProto, "toJSON", fn_date_toisostring, 1, NULL);
+        def_proto_method(pCtx, pDateProto, "toString", fn_date_tostring, 0, NULL);
+
+        jsobj_put_hidden(pCtx, dateCtor.u.o, "prototype", jsval_obj(jsobj_ref(pDateProto)));
+        jsobj_put_hidden(pCtx, pDateProto, "constructor", js_dup(dateCtor));
+        jsobj_put_hidden(pCtx, pCtx->pGlobal, "Date", js_dup(dateCtor));
+
+        js_def_method(pCtx, dateCtor, "UTC", fn_date_utc, 7, NULL);
+        js_def_method(pCtx, dateCtor, "now", fn_date_now, 0, NULL);
+
+        js_release(pCtx, dateCtor);
     }
 
     /* Math */

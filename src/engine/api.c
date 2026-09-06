@@ -138,6 +138,9 @@ typedef enum {
     A_divu64,
     A_shlu64,
     A_shru64,
+    A_shl64,
+    A_shr64,
+    A_secondsToTimeStr,
     A_bytesCountToString,
     A_find_ansiString,
     A_find_unicodeString,
@@ -286,6 +289,7 @@ typedef enum {
     A_getStringValuesByKey,
     A_getValuesByKey,
     A_isValuesHexByKey,
+    A_isEncrypted,
 
     /* ---- DEX ---- */
     A_isDexStringPresent,
@@ -317,6 +321,78 @@ typedef struct {
     ApiId id;
     int nArgc;
 } ApiEntry;
+
+/* ------------------------------------------------------------ profiling  */
+
+/* -l/--profiling. DiE_Script brackets every detection script and
+ * Binary_Script every search primitive with a QElapsedTimer, and both report
+ * through warningMessage, which the reference console prints to stdout as
+ * "[WARNING] <text>"; a measured step appends " [<n> ms]".
+ *
+ * Two deliberate differences from the reference. The trace follows -l on its
+ * own, where diec also wants -M, because a flag documented as showing
+ * profiling information that shows none is the defect this closes; and
+ * endTiming() does not report an unknown handle, because nothing in the
+ * database calls it and the error would be a new line in -M output.        */
+
+cd_i64 cdie_profile_start(DieEngine *pEngine)
+{
+    if (!pEngine->pOptions->bProfiling) {
+        return -1;
+    }
+
+    return (cd_i64)x_clock_ms();
+}
+
+void cdie_profile_text(DieEngine *pEngine, const char *pText)
+{
+    if (!pEngine->pOptions->bProfiling) {
+        return;
+    }
+
+    x_printf("[WARNING] %s\n", pText);
+}
+
+X_PRINTF_LIKE(3, 4) void cdie_profile_end(DieEngine *pEngine, cd_i64 nStart, const char *pFormat, ...)
+{
+    char sInfo[1024];
+    X_VA_LIST args;
+
+    if ((!pEngine->pOptions->bProfiling) || (nStart < 0)) {
+        return;
+    }
+
+    X_VA_START(args, pFormat);
+    x_vsnprintf(sInfo, sizeof(sInfo), pFormat, args);
+    X_VA_END(args);
+
+    x_printf("[WARNING] %s [%lld ms]\n", sInfo, (long long)((cd_i64)x_clock_ms() - nStart));
+}
+
+void cdie_profile_free(DieEngine *pEngine)
+{
+    cd_free(pEngine->pTimings);
+    pEngine->pTimings = NULL;
+    pEngine->nTimingCount = 0;
+    pEngine->nTimingCapacity = 0;
+}
+
+/* XBinary::valueToHexEx: the field is only as wide as the value needs, in
+ * lowercase - two hex digits below 0xFF, then four, eight and sixteen.     */
+static void value_to_hex_ex(cd_u64 nValue, char *pBuffer, size_t nBufferSize)
+{
+    int nWidth = 2;
+
+    if (nValue >= 0xFFFFFFFFull) {
+        nWidth = 16;
+    } else if (nValue >= 0xFFFFull) {
+        nWidth = 8;
+    } else if (nValue >= 0xFFull) {
+        nWidth = 4;
+    }
+
+    x_snprintf(pBuffer, nBufferSize, "%0*llx", nWidth, (unsigned long long)nValue);
+}
 
 /* -------------------------------------------------------------- helpers  */
 
@@ -419,6 +495,32 @@ static const char *ne_arch_name(cd_u8 nOS)
     return ((nOS == 4) || (nOS == 5)) ? "386" : "286";
 }
 
+/* Work budget for one isArchiveRecordPresentExp call.
+ *
+ * jsregexp_exec caps the backtracking of a single match, but the cap is per
+ * subject: an archive with many long entry names multiplies it, and the
+ * total grows with the entry count without limit. Measured against the
+ * Obfuscapk pattern over 64 KB names: 8.6 s for 40 entries, 32 s for 200,
+ * and on from there in proportion to the entry count.
+ *
+ * The regular expression engine reports no step count, so a budget over the
+ * expensive names can only be wall clock, and a wall-clock budget must never
+ * be what decides whether a name matches: the same file would answer
+ * differently on a different machine, or on the same machine twice. A plain
+ * deadline over the whole walk does exactly that - with 6 crafted names in
+ * front of a matching one, cdie answered "detected" on some runs and "not
+ * detected" on others, where the reference always answers "detected".
+ *
+ * So the walk goes over the short names first, with no budget at all. Every
+ * name a real archive holds is short - a ZIP entry name is a path, and paths
+ * stop at PATH_MAX - so for real input the second pass has nothing to do and
+ * the answer is exactly the reference's, whatever the machine. Only names
+ * longer than any path, which is to say only names that were built to be
+ * slow, are left to the deadline, and only when the short names produced no
+ * match.                                                                    */
+#define ARCHIVE_EXP_SHORT_NAME 4096
+#define ARCHIVE_EXP_BUDGET_MS 1500
+
 /* isArchiveRecordPresentExp: true if any archive record name matches the
  * regular expression pPattern with a non-empty captured(0). Mirrors
  * XArchive::isArchiveRecordPresentExp over XBinary::isRegExpPresent (the same
@@ -429,7 +531,9 @@ static int archive_record_present_exp(DieEngine *pEngine, const char *pPattern)
     char *pError = NULL;
     cd_i32 *pnCaps = NULL;
     int bFound = 0;
+    int nPass = 0;
     size_t i = 0;
+    cd_i64 nDeadline = 0;
 
     if ((!pEngine->bHasZip) || (pPattern == NULL)) {
         return 0;
@@ -447,18 +551,42 @@ static int archive_record_present_exp(DieEngine *pEngine, const char *pPattern)
 
     pnCaps = (cd_i32 *)cd_malloc((size_t)(jsregexp_ngroups(pRegExp) + 1) * 2 * sizeof(cd_i32));
 
-    for (i = 0; i < pEngine->zip.vecNames.nSize; i++) {
-        const char *pName = (const char *)pEngine->zip.vecNames.ppData[i];
-
-        if (pName == NULL) {
-            continue;
+    /* Pass 0 takes the names no longer than a path, pass 1 the rest. The
+     * reference walks the record list under isPdStructNotCanceled, so a
+     * cancelled scan drops out of the loop instead of running the expression
+     * over every remaining name.                                           */
+    for (nPass = 0; (nPass < 2) && (!bFound); nPass++) {
+        if (nPass == 1) {
+            nDeadline = (cd_i64)x_clock_ms() + ARCHIVE_EXP_BUDGET_MS;
         }
 
-        if (jsregexp_exec(pRegExp, pName, x_strlen(pName), 0, pnCaps)) {
-            if (pnCaps[1] > pnCaps[0]) { /* captured(0) non-empty */
-                bFound = 1;
+        for (i = 0; (i < pEngine->zip.vecNames.nSize) && (!pEngine->bStop); i++) {
+            const char *pName = (const char *)pEngine->zip.vecNames.ppData[i];
+            size_t nLength = 0;
 
+            if (pName == NULL) {
+                continue;
+            }
+
+            nLength = x_strlen(pName);
+
+            if ((nLength > ARCHIVE_EXP_SHORT_NAME) != (nPass == 1)) {
+                continue;
+            }
+
+            /* Checked once per name rather than in batches: one name can be
+             * the whole budget on its own, and a clock reading costs nothing
+             * next to a match attempt on a name this long. */
+            if ((nPass == 1) && ((cd_i64)x_clock_ms() > nDeadline)) {
                 break;
+            }
+
+            if (jsregexp_exec(pRegExp, pName, nLength, 0, pnCaps)) {
+                if (pnCaps[1] > pnCaps[0]) { /* captured(0) non-empty */
+                    bFound = 1;
+
+                    break;
+                }
             }
         }
     }
@@ -608,6 +736,7 @@ static const char *pe_type_name(PEType type)
         case PETYPE_NATIVE: return "Native";
         case PETYPE_EFI_RUNTIMEDRIVER: return "EFI Runtime driver";
         case PETYPE_EFI_BOOTSERVICEDRIVER: return "EFI Boot service driver";
+        default: break;
     }
 
     return "Unknown";
@@ -751,6 +880,205 @@ static int is_plain_text(XBFile *pFile)
     }
 }
 
+/* XBinary::isUTF8TextType over the first 0x2000 bytes: the whole sample has to
+ * decode as UTF-8, and without a byte order mark it also needs a few
+ * multi-byte sequences and a mostly printable body.                        */
+static int is_utf8_text(XBFile *pFile)
+{
+    cd_i64 nSize = 0;
+    cd_i64 i = 0;
+    cd_i64 nStart = 0;
+    cd_i64 nValid = 0;
+    cd_i64 nMultiByte = 0;
+    cd_i64 nPrintable = 0;
+    int bHasBOM = 0;
+    const unsigned char *pData = NULL;
+
+    if (pFile == NULL) {
+        return 0;
+    }
+
+    nSize = pFile->nSize;
+
+    if (nSize > 0x2000) {
+        nSize = 0x2000;
+    }
+
+    if (nSize <= 0) {
+        return 0;
+    }
+
+    pData = (const unsigned char *)pFile->pData;
+
+    if ((nSize >= 3) && (pData[0] == 0xEF) && (pData[1] == 0xBB) && (pData[2] == 0xBF)) {
+        bHasBOM = 1;
+        nStart = 3;
+    }
+
+    for (i = nStart; i < nSize;) {
+        unsigned char nByte = pData[i];
+
+        if (nByte == 0) {
+            return 0;
+        } else if (nByte < 0x80) {
+            if ((nByte >= 0x20) || (nByte == 0x09) || (nByte == 0x0A) || (nByte == 0x0D)) {
+                nPrintable++;
+            }
+
+            nValid++;
+            i++;
+        } else if ((nByte & 0xE0) == 0xC0) {
+            if (((i + 1) >= nSize) || ((pData[i + 1] & 0xC0) != 0x80) || (nByte < 0xC2)) {
+                return 0;
+            }
+
+            nMultiByte++;
+            nValid++;
+            i += 2;
+        } else if ((nByte & 0xF0) == 0xE0) {
+            if (((i + 2) >= nSize) || ((pData[i + 1] & 0xC0) != 0x80) || ((pData[i + 2] & 0xC0) != 0x80)) {
+                return 0;
+            }
+
+            if ((nByte == 0xE0) && (pData[i + 1] < 0xA0)) {
+                return 0;
+            }
+
+            nMultiByte++;
+            nValid++;
+            i += 3;
+        } else if ((nByte & 0xF8) == 0xF0) {
+            if (((i + 3) >= nSize) || ((pData[i + 1] & 0xC0) != 0x80) || ((pData[i + 2] & 0xC0) != 0x80) || ((pData[i + 3] & 0xC0) != 0x80)) {
+                return 0;
+            }
+
+            if ((nByte == 0xF0) && (pData[i + 1] < 0x90)) {
+                return 0;
+            }
+
+            if ((nByte > 0xF4) || ((nByte == 0xF4) && (pData[i + 1] > 0x8F))) {
+                return 0;
+            }
+
+            nMultiByte++;
+            nValid++;
+            i += 4;
+        } else {
+            return 0;
+        }
+    }
+
+    if (bHasBOM) {
+        return (nValid > 0) ? 1 : 0;
+    }
+
+    if (nValid > 0) {
+        double nPrintableRatio = (double)nPrintable / (double)nValid;
+        double nMultiByteRatio = (double)nMultiByte / (double)nValid;
+
+        return ((nMultiByteRatio > 0.05) && (nPrintableRatio >= 0.70)) ? 1 : 0;
+    }
+
+    return 0;
+}
+
+/* XBinary::getUnicodeType over the first 0x1000 bytes: the byte order mark
+ * first, then the alternating-NUL heuristic over a 512 byte sample.
+ * 0 is UNICODE_TYPE_NONE, 1 is _LE and 2 is _BE.                           */
+static int unicode_type(XBFile *pFile)
+{
+    cd_i64 nSize = 0;
+    cd_i64 nSample = 0;
+    cd_i64 i = 0;
+    cd_i64 nNull = 0;
+    cd_i64 nEvenNulls = 0;
+    cd_i64 nOddNulls = 0;
+    cd_i64 nPrintable = 0;
+    const unsigned char *pData = NULL;
+
+    if (pFile == NULL) {
+        return 0;
+    }
+
+    nSize = pFile->nSize;
+
+    if (nSize > 0x1000) {
+        nSize = 0x1000;
+    }
+
+    if (nSize <= 0) {
+        return 0;
+    }
+
+    pData = (const unsigned char *)pFile->pData;
+
+    if (nSize >= 2) {
+        cd_u16 nSymbol = (cd_u16)(pData[0] | ((cd_u16)pData[1] << 8));
+
+        if (nSymbol == 0xFFFE) {
+            return 2;
+        } else if (nSymbol == 0xFEFF) {
+            return 1;
+        }
+    }
+
+    if (nSize < 4) {
+        return 0;
+    }
+
+    nSample = (nSize < 512) ? nSize : 512;
+
+    for (i = 0; i < nSample; i++) {
+        unsigned char nByte = pData[i];
+
+        if (nByte == 0) {
+            nNull++;
+
+            if ((i % 2) == 0) {
+                nEvenNulls++;
+            } else {
+                nOddNulls++;
+            }
+        } else if ((nByte >= 0x20) && (nByte <= 0x7E)) {
+            nPrintable++;
+        }
+    }
+
+    if ((nNull > 0) && (nSample > 4)) {
+        double nNullRatio = (double)nNull / (double)nSample;
+        double nPrintableRatio = (double)nPrintable / (double)nSample;
+
+        if ((nNullRatio >= 0.30) && (nPrintableRatio >= 0.30)) {
+            cd_i64 nLEPairs = 0;
+            cd_i64 nBEPairs = 0;
+
+            if (nEvenNulls > (nOddNulls * 2)) {
+                return 1;
+            } else if (nOddNulls > (nEvenNulls * 2)) {
+                return 2;
+            }
+
+            for (i = 0; i < (nSample - 1); i += 2) {
+                if ((pData[i + 1] == 0) && (pData[i] >= 0x20) && (pData[i] <= 0x7E)) {
+                    nLEPairs++;
+                }
+
+                if ((pData[i] == 0) && (pData[i + 1] >= 0x20) && (pData[i + 1] <= 0x7E)) {
+                    nBEPairs++;
+                }
+            }
+
+            if (nLEPairs > nBEPairs) {
+                return 1;
+            } else if (nBEPairs > nLEPairs) {
+                return 2;
+            }
+        }
+    }
+
+    return 0;
+}
+
 /* --------------------------------------------------- operation system  ---
  *
  * Reproduces XPE::getOperatingSystemVersionsS and the IMAGE_FILE_HEADER
@@ -818,6 +1146,43 @@ static const char *pe_machine_name(unsigned int nMachine)
     }
 
     return "Unknown";
+}
+
+/* --------------------------------------------------------- PDF encryption -
+ *
+ * XPDF::isEncrypted is "getEncryption() is not empty", and getEncryption
+ * produces a descriptor exactly when XPDF::findEncryptObjectIndex finds an
+ * object whose first "/Filter" part is followed by "/Standard". The trailer
+ * /Encrypt reference the reference then prefers only picks between such
+ * objects - it never decides whether one exists - so the boolean the script
+ * asks for needs nothing beyond the token lists. getEncryption reads the
+ * objects with getParts(256).
+ */
+static int pdf_is_encrypted(XPDF *pPdf)
+{
+    size_t i = 0;
+
+    for (i = 0; i < pPdf->vecObjects.nSize; i++) {
+        CDVec *pParts = (CDVec *)pPdf->vecObjects.ppData[i];
+        size_t nLimit = pParts->nSize;
+        size_t j = 0;
+
+        if (nLimit > 256) {
+            nLimit = 256;
+        }
+
+        for (j = 0; j < nLimit; j++) {
+            if (x_strcmp((const char *)pParts->ppData[j], "/Filter") == 0) {
+                if (((j + 1) < nLimit) && (x_strcmp((const char *)pParts->ppData[j + 1], "/Standard") == 0)) {
+                    return 1;
+                }
+
+                break;
+            }
+        }
+    }
+
+    return 0;
 }
 
 /* ------------------------------------------------------------ dispatcher */
@@ -1001,6 +1366,45 @@ static JSVal api_dispatch(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *pArgv, v
 
             return js_num((double)(nValue >> (nShift & 63)));
         }
+        case A_shl64: {
+            cd_i64 nValue = arg_i64(pCtx, nArgc, pArgv, 0, 0);
+            cd_i64 nShift = arg_i64(pCtx, nArgc, pArgv, 1, 0);
+
+            /* Shifting into the sign bit is undefined for a signed left
+             * operand; the unsigned shift has the two's-complement result
+             * the reference gets out of qint64 << qint64.                 */
+            return js_num((double)(cd_i64)((cd_u64)nValue << (nShift & 63)));
+        }
+        case A_shr64: {
+            cd_i64 nValue = arg_i64(pCtx, nArgc, pArgv, 0, 0);
+            cd_i64 nShift = arg_i64(pCtx, nArgc, pArgv, 1, 0);
+            int nCount = (int)(nShift & 63);
+
+            /* qint64 >> n is an arithmetic shift; spelled out through the
+             * complement so it does not rest on implementation-defined
+             * behaviour for a negative left operand.                      */
+            if (nValue < 0) {
+                return js_num((double)(cd_i64)~((cd_u64)(~nValue) >> nCount));
+            }
+
+            return js_num((double)(nValue >> nCount));
+        }
+        case A_secondsToTimeStr: {
+            /* QTime(0, 0).addSecs(n).toString(): addSecs reduces the count
+             * modulo a day, addMSecs folds a negative result back into the
+             * day, and the default format is HH:mm:ss.                    */
+            cd_i32 nValue = (cd_i32)((nArgc > 0) ? js_to_int32(pCtx, pArgv[0]) : 0);
+            cd_i32 nSeconds = nValue % 86400;
+            char sBuf[32];
+
+            if (nSeconds < 0) {
+                nSeconds += 86400;
+            }
+
+            x_snprintf(sBuf, sizeof(sBuf), "%02d:%02d:%02d", (int)(nSeconds / 3600), (int)((nSeconds / 60) % 60), (int)(nSeconds % 60));
+
+            return js_str(pCtx, sBuf);
+        }
 
         case A_getString:
         case A_read_ansiString: return str_take(pCtx, xb_ansi_string(pFile, arg_i64(pCtx, nArgc, pArgv, 0, 0), arg_i64(pCtx, nArgc, pArgv, 1, 50)));
@@ -1016,9 +1420,21 @@ static JSVal api_dispatch(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *pArgv, v
             cd_i64 nSize = arg_i64(pCtx, nArgc, pArgv, 1, 0);
             char *pSignature = arg_string(pCtx, nArgc, pArgv, 2);
             cd_i64 nResult = 0;
+            cd_i64 nStart = cdie_profile_start(pEngine);
 
             fix_offset_size(pEngine, &nOffset, &nSize);
             nResult = xb_find_signature(pFile, pMap, nOffset, nSize, pSignature);
+
+            if (nStart >= 0) {
+                char sOffset[24];
+                char sSize[24];
+
+                value_to_hex_ex((cd_u64)nOffset, sOffset, sizeof(sOffset));
+                value_to_hex_ex((cd_u64)nSize, sSize, sizeof(sSize));
+                /* The reference spells this one with an underscore. */
+                cdie_profile_end(pEngine, nStart, "find_signature[%s]: %s %s", pSignature, sOffset, sSize);
+            }
+
             cd_free(pSignature);
 
             return js_num((double)nResult);
@@ -1030,9 +1446,22 @@ static JSVal api_dispatch(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *pArgv, v
             cd_i64 nSize = arg_i64(pCtx, nArgc, pArgv, 1, 0);
             char *pString = arg_string(pCtx, nArgc, pArgv, 2);
             cd_i64 nResult = 0;
+            /* Only findString is measured; find_ansiString is the same search
+             * under a second name and the reference does not profile it. */
+            cd_i64 nStart = (id == A_findString) ? cdie_profile_start(pEngine) : -1;
 
             fix_offset_size(pEngine, &nOffset, &nSize);
             nResult = xb_find_ansi_string(pFile, nOffset, nSize, pString);
+
+            if (nStart >= 0) {
+                char sOffset[24];
+                char sSize[24];
+
+                value_to_hex_ex((cd_u64)nOffset, sOffset, sizeof(sOffset));
+                value_to_hex_ex((cd_u64)nSize, sSize, sizeof(sSize));
+                cdie_profile_end(pEngine, nStart, "findString[%s]: %s %s", pString, sOffset, sSize);
+            }
+
             cd_free(pString);
 
             return js_num((double)nResult);
@@ -1067,28 +1496,73 @@ static JSVal api_dispatch(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *pArgv, v
         case A_findByte: {
             cd_i64 nOffset = arg_i64(pCtx, nArgc, pArgv, 0, 0);
             cd_i64 nSize = arg_i64(pCtx, nArgc, pArgv, 1, 0);
+            cd_u8 nValue = (cd_u8)arg_i64(pCtx, nArgc, pArgv, 2, 0);
+            cd_i64 nResult = 0;
+            cd_i64 nStart = cdie_profile_start(pEngine);
 
             fix_offset_size(pEngine, &nOffset, &nSize);
+            nResult = xb_find_u8(pFile, nOffset, nSize, nValue);
 
-            return js_num((double)xb_find_u8(pFile, nOffset, nSize, (cd_u8)arg_i64(pCtx, nArgc, pArgv, 2, 0)));
+            if (nStart >= 0) {
+                char sOffset[24];
+                char sSize[24];
+
+                value_to_hex_ex((cd_u64)nOffset, sOffset, sizeof(sOffset));
+                value_to_hex_ex((cd_u64)nSize, sSize, sizeof(sSize));
+                /* XBinary::valueToHex of a fixed-width integer: always the
+                 * full field, unlike valueToHexEx above. */
+                cdie_profile_end(pEngine, nStart, "findByte[%0*llx]: %s %s", 2, (unsigned long long)nValue, sOffset, sSize);
+            }
+
+            return js_num((double)nResult);
         }
 
         case A_findWord: {
             cd_i64 nOffset = arg_i64(pCtx, nArgc, pArgv, 0, 0);
             cd_i64 nSize = arg_i64(pCtx, nArgc, pArgv, 1, 0);
+            cd_u16 nValue = (cd_u16)arg_i64(pCtx, nArgc, pArgv, 2, 0);
+            cd_i64 nResult = 0;
+            cd_i64 nStart = cdie_profile_start(pEngine);
 
             fix_offset_size(pEngine, &nOffset, &nSize);
+            nResult = xb_find_u16(pFile, nOffset, nSize, nValue);
 
-            return js_num((double)xb_find_u16(pFile, nOffset, nSize, (cd_u16)arg_i64(pCtx, nArgc, pArgv, 2, 0)));
+            if (nStart >= 0) {
+                char sOffset[24];
+                char sSize[24];
+
+                value_to_hex_ex((cd_u64)nOffset, sOffset, sizeof(sOffset));
+                value_to_hex_ex((cd_u64)nSize, sSize, sizeof(sSize));
+                /* XBinary::valueToHex of a fixed-width integer: always the
+                 * full field, unlike valueToHexEx above. */
+                cdie_profile_end(pEngine, nStart, "findWord[%0*llx]: %s %s", 4, (unsigned long long)nValue, sOffset, sSize);
+            }
+
+            return js_num((double)nResult);
         }
 
         case A_findDword: {
             cd_i64 nOffset = arg_i64(pCtx, nArgc, pArgv, 0, 0);
             cd_i64 nSize = arg_i64(pCtx, nArgc, pArgv, 1, 0);
+            cd_u32 nValue = (cd_u32)arg_i64(pCtx, nArgc, pArgv, 2, 0);
+            cd_i64 nResult = 0;
+            cd_i64 nStart = cdie_profile_start(pEngine);
 
             fix_offset_size(pEngine, &nOffset, &nSize);
+            nResult = xb_find_u32(pFile, nOffset, nSize, nValue);
 
-            return js_num((double)xb_find_u32(pFile, nOffset, nSize, (cd_u32)arg_i64(pCtx, nArgc, pArgv, 2, 0)));
+            if (nStart >= 0) {
+                char sOffset[24];
+                char sSize[24];
+
+                value_to_hex_ex((cd_u64)nOffset, sOffset, sizeof(sOffset));
+                value_to_hex_ex((cd_u64)nSize, sSize, sizeof(sSize));
+                /* XBinary::valueToHex of a fixed-width integer: always the
+                 * full field, unlike valueToHexEx above. */
+                cdie_profile_end(pEngine, nStart, "findDword[%0*llx]: %s %s", 8, (unsigned long long)nValue, sOffset, sSize);
+            }
+
+            return js_num((double)nResult);
         }
 
         case A_getEntryPointOffset: return js_num((double)pe_entry_point_offset(pEngine));
@@ -1119,9 +1593,20 @@ static JSVal api_dispatch(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *pArgv, v
             cd_i64 nSize = arg_i64(pCtx, nArgc, pArgv, 1, 0);
             char *pSignature = arg_string(pCtx, nArgc, pArgv, 2);
             int bResult = 0;
+            cd_i64 nStart = cdie_profile_start(pEngine);
 
             fix_offset_size(pEngine, &nOffset, &nSize);
             bResult = (xb_find_signature(pFile, pMap, nOffset, nSize, pSignature) != -1) ? 1 : 0;
+
+            if (nStart >= 0) {
+                char sOffset[24];
+                char sSize[24];
+
+                value_to_hex_ex((cd_u64)nOffset, sOffset, sizeof(sOffset));
+                value_to_hex_ex((cd_u64)nSize, sSize, sizeof(sSize));
+                cdie_profile_end(pEngine, nStart, "isSignaturePresent[%s]: %s %s", pSignature, sOffset, sSize);
+            }
+
             cd_free(pSignature);
 
             return js_bool(bResult);
@@ -1166,11 +1651,15 @@ static JSVal api_dispatch(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *pArgv, v
             char *pSignature = arg_string(pCtx, nArgc, pArgv, 1);
             int bResult = 0;
             int nIndex = (int)nNumber + (pEngine->bHasPE ? 1 : 0);
+            cd_i64 nStart = cdie_profile_start(pEngine);
 
             if ((nIndex >= 0) && (nIndex < pMap->nCount)) {
                 bResult = (xb_find_signature(pFile, pMap, pMap->pRecords[nIndex].nOffset, pMap->pRecords[nIndex].nSize, pSignature) != -1) ? 1 : 0;
             }
 
+            /* The reference passes the section number as a plain decimal and
+             * leaves the trailing space of its two-argument format. */
+            cdie_profile_end(pEngine, nStart, "isSignatureInSectionPresent[%s]: %lld ", pSignature, (long long)nNumber);
             cd_free(pSignature);
 
             return js_bool(bResult);
@@ -1200,13 +1689,41 @@ static JSVal api_dispatch(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *pArgv, v
 
         case A_isPlainText: return js_bool(is_plain_text(pFile));
 
-        /* Not ported; see LIMITATIONS.md. isText mirrors the reference, which
-         * ORs the three flags together.                                    */
-        case A_isUTF8Text:
-        case A_isUnicodeText: return js_bool(0);
-        case A_isText: return js_bool(is_plain_text(pFile));
+        case A_isUTF8Text: return js_bool(is_utf8_text(pFile));
+        /* m_bIsUnicodeText is set only on the getUnicodeType branch of the
+         * constructor, so it means "not UNICODE_TYPE_NONE".                */
+        case A_isUnicodeText: return js_bool(unicode_type(pFile) != 0);
+        /* isText ORs the three flags together, as the reference does. */
+        case A_isText: return js_bool(is_plain_text(pFile) || is_utf8_text(pFile) || (unicode_type(pFile) != 0));
 
-        case A_getHeaderString: return js_str(pCtx, "");
+        /* Binary_Script's constructor fills m_sHeaderString with the head of
+         * the file in the first encoding that answers: read_unicodeString
+         * past the byte order mark, then read_utf8String past a UTF-8 mark,
+         * then read_ansiString from the start. Anything that is not text at
+         * all keeps the empty string the member was constructed with. The
+         * length is always qMin(size, 0x1000).                             */
+        case A_getHeaderString: {
+            cd_i64 nMaxSize = pFile ? pFile->nSize : 0;
+            int nUnicode = unicode_type(pFile);
+
+            if (nMaxSize > 0x1000) {
+                nMaxSize = 0x1000;
+            }
+
+            if (nUnicode != 0) {
+                return str_take(pCtx, xb_unicode_string(pFile, 2, nMaxSize, (nUnicode == 2) ? 1 : 0));
+            }
+
+            if (is_utf8_text(pFile)) {
+                return str_take(pCtx, xb_utf8_string(pFile, 3, nMaxSize));
+            }
+
+            if (is_plain_text(pFile)) {
+                return str_take(pCtx, xb_ansi_string(pFile, 0, nMaxSize));
+            }
+
+            return js_str(pCtx, "");
+        }
 
         case A_getDisasmLength: {
             cd_i64 nAddress = arg_i64(pCtx, nArgc, pArgv, 0, 0);
@@ -1265,11 +1782,32 @@ static JSVal api_dispatch(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *pArgv, v
         case A_getScanID: return js_str(pCtx, "");
         case A_getStartOffset: return js_num(0);
 
+        /* XBinary::bytesCountToString with the default base of 1024 that
+         * Binary_Script::bytesCountToString leaves in place: the plain byte
+         * count below the base, otherwise the scaled value with exactly two
+         * fraction digits. QString::number(d, 'f', 2) rounds ties away from
+         * zero, which is what x_dtoa_fixed does.                           */
         case A_bytesCountToString: {
-            cd_i64 nValue = arg_i64(pCtx, nArgc, pArgv, 0, 0);
-            char sBuf[64];
+            cd_u64 nValue = arg_u64(pCtx, nArgc, pArgv, 0);
+            const cd_u64 nBase = 1024;
+            char sValue[64];
+            char sBuf[96];
 
-            x_snprintf(sBuf, sizeof(sBuf), "%lld", (long long)nValue);
+            if (nValue < nBase) {
+                x_snprintf(sBuf, sizeof(sBuf), "%llu Bytes", (unsigned long long)nValue);
+            } else if (nValue < (nBase * nBase)) {
+                x_dtoa_fixed((double)nValue / (double)nBase, 2, sValue, sizeof(sValue));
+                x_snprintf(sBuf, sizeof(sBuf), "%s KiB", sValue);
+            } else if (nValue < (nBase * nBase * nBase)) {
+                x_dtoa_fixed((double)nValue / (double)(nBase * nBase), 2, sValue, sizeof(sValue));
+                x_snprintf(sBuf, sizeof(sBuf), "%s MiB", sValue);
+            } else if (nValue < (nBase * nBase * nBase * nBase)) {
+                x_dtoa_fixed((double)nValue / (double)(nBase * nBase * nBase), 2, sValue, sizeof(sValue));
+                x_snprintf(sBuf, sizeof(sBuf), "%s GiB", sValue);
+            } else {
+                x_dtoa_fixed((double)nValue / (double)(nBase * nBase * nBase * nBase), 2, sValue, sizeof(sValue));
+                x_snprintf(sBuf, sizeof(sBuf), "%s TiB", sValue);
+            }
 
             return js_str(pCtx, sBuf);
         }
@@ -1294,6 +1832,11 @@ static JSVal api_dispatch(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *pArgv, v
             if (pEngine->fileType == XFT_JAR) {
                 /* XJAR::getFileFormatInfo: osName = OSNAME_JVM. */
                 return js_str(pCtx, "JVM");
+            }
+
+            if (pEngine->fileType == XFT_COM) {
+                /* XCOM::getOsName: OSNAME_MSDOS. */
+                return js_str(pCtx, "MS-DOS");
             }
 
             return js_str(pCtx, "Windows");
@@ -1378,6 +1921,11 @@ static JSVal api_dispatch(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *pArgv, v
                 return js_str(pCtx, "Universal, Data");
             }
 
+            if (pEngine->fileType == XFT_COM) {
+                /* XCOM: getArch() = "8086", getMode() = MODE_16. */
+                return js_str(pCtx, "8086, 16-bit");
+            }
+
             if (!pEngine->bHasPE) {
                 return js_str(pCtx, "");
             }
@@ -1423,10 +1971,10 @@ static JSVal api_dispatch(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *pArgv, v
             }
 
             if (pEngine->bHasPdf) {
-                char *pFilters = xpdf_filters(&pEngine->pdf);
-                JSVal result = js_str(pCtx, pFilters);
+                char *pInfo = xpdf_info(&pEngine->pdf);
+                JSVal result = js_str(pCtx, pInfo);
 
-                cd_free(pFilters);
+                cd_free(pInfo);
 
                 return result;
             }
@@ -1510,6 +2058,8 @@ static JSVal api_dispatch(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *pArgv, v
              * No stock signature calls it, so it is reported as false rather
              * than threading value-type information through the token list.  */
             return js_bool(0);
+
+        case A_isEncrypted: return js_bool(pEngine->bHasPdf ? pdf_is_encrypted(&pEngine->pdf) : 0);
 
         /* ------------------------------------------------------- DEX  */
         case A_isDexStringPresent: {
@@ -1646,8 +2196,46 @@ static JSVal api_dispatch(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *pArgv, v
         case A_getFormatMessages: return js_new_array(pCtx);
         case A_getListOfCompressionMethods: return js_new_array(pCtx);
 
-        case A_startTiming: return js_num(0);
-        case A_endTiming: return js_num(0);
+        case A_startTiming: {
+            /* The reference hands out a random 32-bit handle and keeps the
+             * running timer in a map; a counter is the same contract without
+             * the collisions. The handle is issued whether or not profiling
+             * is on, so a script's endTiming() always finds it. */
+            cd_i64 nHandle = ++pEngine->nNextTimingHandle;
+
+            if (pEngine->nTimingCount >= pEngine->nTimingCapacity) {
+                pEngine->nTimingCapacity = pEngine->nTimingCapacity ? (pEngine->nTimingCapacity * 2) : 8;
+                pEngine->pTimings = (TimingRecord *)cd_realloc(pEngine->pTimings, (size_t)pEngine->nTimingCapacity * sizeof(TimingRecord));
+            }
+
+            pEngine->pTimings[pEngine->nTimingCount].nHandle = nHandle;
+            pEngine->pTimings[pEngine->nTimingCount].nStart = cdie_profile_start(pEngine);
+            pEngine->nTimingCount++;
+
+            return js_num((double)nHandle);
+        }
+
+        case A_endTiming: {
+            cd_i64 nHandle = arg_i64(pCtx, nArgc, pArgv, 0, 0);
+            char *pInfo = arg_string(pCtx, nArgc, pArgv, 1);
+            int i = 0;
+
+            for (i = 0; i < pEngine->nTimingCount; i++) {
+                if (pEngine->pTimings[i].nHandle != nHandle) {
+                    continue;
+                }
+
+                cdie_profile_end(pEngine, pEngine->pTimings[i].nStart, "%s", pInfo);
+                x_memmove(&pEngine->pTimings[i], &pEngine->pTimings[i + 1], (size_t)(pEngine->nTimingCount - i - 1) * sizeof(TimingRecord));
+                pEngine->nTimingCount--;
+
+                break;
+            }
+
+            cd_free(pInfo);
+
+            return js_num(0);
+        }
 
         case A_detectZLIB:
         case A_detectGZIP:
@@ -1692,9 +2280,30 @@ static JSVal api_dispatch(JSCtx *pCtx, JSVal thisVal, int nArgc, JSVal *pArgv, v
             return js_num((double)pPE->pRichRecords[nIndex].nCount);
         }
 
-        case A_getDosStubOffset: return js_num(64);
-        case A_getDosStubSize: return js_num((double)(pEngine->bHasPE ? (pPE->nLfanew - 64) : 0));
-        case A_isDosStubPresent: return js_bool(pEngine->bHasPE && ((pPE->nLfanew - 64) > 0));
+        /* XMSDOS::getDosStubSize clamps e_lfanew - sizeof(IMAGE_DOS_HEADEREX)
+         * at zero, and MSDOS_Script's constructor keeps offset and size at 0
+         * unless isDosStubPresent(). A PE whose e_lfanew is at or below 0x40
+         * therefore reports offset 0 and size 0, not offset 64 and a negative
+         * size.                                                            */
+        case A_getDosStubOffset:
+        case A_getDosStubSize:
+        case A_isDosStubPresent: {
+            cd_i64 nStubSize = pEngine->bHasPE ? (pPE->nLfanew - 64) : 0;
+
+            if (nStubSize < 0) {
+                nStubSize = 0;
+            }
+
+            if (id == A_getDosStubSize) {
+                return js_num((double)nStubSize);
+            }
+
+            if (id == A_isDosStubPresent) {
+                return js_bool(nStubSize != 0);
+            }
+
+            return js_num((double)((nStubSize != 0) ? 64 : 0));
+        }
 
         /* ----------------------------------------------------------- PE */
         case A_getNumberOfSections:
@@ -2927,6 +3536,7 @@ static const ApiEntry g_apiTable[] = {
     {"getStringValuesByKey", A_getStringValuesByKey, 1},
     {"getValuesByKey", A_getValuesByKey, 1},
     {"isValuesHexByKey", A_isValuesHexByKey, 1},
+    {"isEncrypted", A_isEncrypted, 0},
 
     {"isDexStringPresent", A_isDexStringPresent, 1},
     {"isDexItemStringPresent", A_isDexItemStringPresent, 1},
@@ -3003,13 +3613,16 @@ void cdie_install_api(DieEngine *pEngine)
     }
 
     {
-        /* Util exposes only the 64-bit arithmetic helpers (Util_script). */
+        /* Util exposes the seven public slots of Util_script. */
         JSVal util = js_new_object(pCtx);
 
         js_def_method(pCtx, util, "div64", api_dispatch, 2, (void *)(size_t)A_div64);
         js_def_method(pCtx, util, "divu64", api_dispatch, 2, (void *)(size_t)A_divu64);
         js_def_method(pCtx, util, "shlu64", api_dispatch, 2, (void *)(size_t)A_shlu64);
         js_def_method(pCtx, util, "shru64", api_dispatch, 2, (void *)(size_t)A_shru64);
+        js_def_method(pCtx, util, "shl64", api_dispatch, 2, (void *)(size_t)A_shl64);
+        js_def_method(pCtx, util, "shr64", api_dispatch, 2, (void *)(size_t)A_shr64);
+        js_def_method(pCtx, util, "secondsToTimeStr", api_dispatch, 1, (void *)(size_t)A_secondsToTimeStr);
         js_set(pCtx, global, "Util", util);
         js_release(pCtx, util);
     }

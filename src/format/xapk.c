@@ -38,6 +38,10 @@
 
 /* -------------------------------------------------------------------- ZIP */
 
+/* APK_MANIFEST_LIMIT: XAPK::isValid refuses a manifest whose declared sizes
+ * are zero or larger than this, and never decompresses more than that. */
+#define XAPK_MANIFEST_LIMIT (16 * 1024 * 1024)
+
 /* Reads the whole ZIP member "AndroidManifest.xml" into pOut. Returns 1 on
  * success. Only STORE (0) and DEFLATE (8) are handled; that is all an APK
  * uses for the manifest. */
@@ -116,7 +120,13 @@ static int zip_read_manifest(XBFile *pFile, CDBuf *pOut)
             cd_u16 nLocalExtraLen = 0;
             cd_i64 nDataOffset = 0;
 
-            if ((nLocalOffset + 30) > nSize) {
+            /* XAPK::isValid: both declared sizes must be non-zero and no
+             * larger than APK_MANIFEST_LIMIT, or the file is not an APK.   */
+            if ((nUncompSize == 0) || (nUncompSize > XAPK_MANIFEST_LIMIT) || (nCompSize == 0) || (nCompSize > XAPK_MANIFEST_LIMIT)) {
+                return 0;
+            }
+
+            if (((cd_i64)nLocalOffset + 30) > nSize) {
                 return 0;
             }
 
@@ -124,22 +134,35 @@ static int zip_read_manifest(XBFile *pFile, CDBuf *pOut)
                 return 0;
             }
 
-            nLocalNameLen = xb_u16(pFile, nLocalOffset + 26, 0);
-            nLocalExtraLen = xb_u16(pFile, nLocalOffset + 28, 0);
+            nLocalNameLen = xb_u16(pFile, (cd_i64)nLocalOffset + 26, 0);
+            nLocalExtraLen = xb_u16(pFile, (cd_i64)nLocalOffset + 28, 0);
             nDataOffset = (cd_i64)nLocalOffset + 30 + nLocalNameLen + nLocalExtraLen;
 
             if ((nDataOffset + (cd_i64)nCompSize) > nSize) {
                 return 0;
             }
 
+            /* XAPK::isValid finishes on
+             * baManifest.size() == record.spInfo.nUncompressedSize, so a
+             * manifest that does not yield exactly the declared number of
+             * bytes makes the file a plain ZIP rather than an APK.          */
             if (nMethod == 0) {
+                /* A STORE record decompresses to its nDataSize bytes. */
+                if (nCompSize != nUncompSize) {
+                    return 0;
+                }
+
                 cdbuf_append(pOut, pData + nDataOffset, nCompSize);
 
                 return 1;
             }
 
             if (nMethod == 8) {
-                return inflate_raw(pData + nDataOffset, nCompSize, nUncompSize, pOut);
+                if (!inflate_raw(pData + nDataOffset, nCompSize, nUncompSize, XAPK_MANIFEST_LIMIT + 1, pOut)) {
+                    return 0;
+                }
+
+                return (pOut->nSize == (size_t)nUncompSize) ? 1 : 0;
             }
 
             return 0;
@@ -153,14 +176,30 @@ static int zip_read_manifest(XBFile *pFile, CDBuf *pOut)
 
 /* ------------------------------------------------------------------- AXML */
 
-/* Android binary XML chunk types (subset). */
+/* Android binary XML chunk types (only the ones the parser acts on; the
+ * remaining RES_XML_* codes - 0x0101 END_NAMESPACE, 0x0103 END_ELEMENT,
+ * 0x0180 RESOURCE_MAP - are skipped by chunk size). */
 #define AXML_RES_STRING_POOL 0x0001
 #define AXML_RES_XML 0x0003
 #define AXML_RES_XML_START_NAMESPACE 0x0100
-#define AXML_RES_XML_END_NAMESPACE 0x0101
 #define AXML_RES_XML_START_ELEMENT 0x0102
-#define AXML_RES_XML_END_ELEMENT 0x0103
-#define AXML_RES_XML_RESOURCE_MAP 0x0180
+
+/* ResStringPool flags. The encoding is selected by UTF8_FLAG alone; bit 0 is
+ * SORTED_FLAG and says nothing about the encoding. */
+#define AXML_STRING_POOL_UTF8_FLAG 0x0100
+
+/* Total attributes decoded per manifest. Only crafted AXML, where many
+ * START_ELEMENT chunks overlap and each declares 0xFFFF attributes, ever
+ * approaches this; the largest real manifests use a few hundred. */
+#define AXML_MAX_ATTRIBUTES 100000
+
+/* Ceiling on the decoded manifest text. The attribute budget alone does not
+ * bound the output: every one of those attributes may point at a string-pool
+ * entry of up to 0x10000 bytes, so a 2 MB crafted manifest can still ask for
+ * gigabytes. A real AndroidManifest.xml decodes to a few hundred KB at most
+ * (the largest here is well under 1 MB), so this only ever trips on crafted
+ * input. */
+#define AXML_MAX_OUTPUT (16 * 1024 * 1024)
 
 /* A parsed AXML string pool: strings live in a single joined buffer, indexed
  * through the offset array. */
@@ -172,6 +211,15 @@ typedef struct {
     size_t nOffsetsBase; /* start of the u32 offset array */
     size_t nStringsBase; /* start of the string data       */
 } AxmlPool;
+
+static cd_u8 rd8(const unsigned char *pData, size_t nSize, size_t nOffset)
+{
+    if (nOffset + 1 > nSize) {
+        return 0;
+    }
+
+    return pData[nOffset];
+}
 
 static cd_u16 rd16(const unsigned char *pData, size_t nSize, size_t nOffset)
 {
@@ -196,9 +244,10 @@ static cd_u32 rd32(const unsigned char *pData, size_t nSize, size_t nOffset)
 static void axml_append_string(const AxmlPool *pPool, cd_u32 nIndex, CDBuf *pOut)
 {
     size_t nStrOffset = 0;
+    size_t nBase = 0;
     cd_u32 nStrOffsetRel = 0;
-    cd_u16 nLen = 0;
-    cd_u16 k = 0;
+    cd_u32 nLen = 0;
+    cd_u32 k = 0;
 
     if (nIndex >= pPool->nStringCount) {
         return;
@@ -206,13 +255,39 @@ static void axml_append_string(const AxmlPool *pPool, cd_u32 nIndex, CDBuf *pOut
 
     nStrOffsetRel = rd32(pPool->pData, pPool->nSize, pPool->nOffsetsBase + (size_t)nIndex * 4);
     nStrOffset = pPool->nStringsBase + nStrOffsetRel;
-    nLen = rd16(pPool->pData, pPool->nSize, nStrOffset);
 
-    if (pPool->nFlags) {
-        /* UTF-8 pool: copy the bytes as Latin-1, matching the reference's
-         * read_ansiString. Each byte becomes one UTF-8 code point.          */
+    if (pPool->nFlags & AXML_STRING_POOL_UTF8_FLAG) {
+        /* UTF-8 entry: a UTF-16 character count then a UTF-8 byte count, each
+         * one or two bytes with the high bit of the first marking the longer
+         * form (_readStringPoolString). The bytes that follow are already
+         * UTF-8; read_utf8String caps the run at 0x10000 and stops at the
+         * first NUL.                                                        */
+        cd_u8 nLen16 = 0;
+        cd_u8 nLen8 = 0;
+
+        nBase = nStrOffset;
+        nLen16 = rd8(pPool->pData, pPool->nSize, nBase);
+        nBase += 1;
+
+        if (nLen16 & 0x80) {
+            nBase += 1;
+        }
+
+        nLen8 = rd8(pPool->pData, pPool->nSize, nBase);
+        nBase += 1;
+        nLen = nLen8;
+
+        if (nLen8 & 0x80) {
+            nLen = ((cd_u32)(nLen8 & 0x7F) << 8) | rd8(pPool->pData, pPool->nSize, nBase);
+            nBase += 1;
+        }
+
+        if (nLen > 0x10000) {
+            nLen = 0x10000;
+        }
+
         for (k = 0; k < nLen; k++) {
-            size_t nAt = nStrOffset + 2 + k;
+            size_t nAt = nBase + k;
             unsigned char nByte = 0;
 
             if (nAt >= pPool->nSize) {
@@ -221,20 +296,35 @@ static void axml_append_string(const AxmlPool *pPool, cd_u32 nIndex, CDBuf *pOut
 
             nByte = pPool->pData[nAt];
 
-            if (nByte < 0x80) {
-                cdbuf_append_ch(pOut, (char)nByte);
-            } else {
-                cdbuf_append_ch(pOut, (char)(0xC0 | (nByte >> 6)));
-                cdbuf_append_ch(pOut, (char)(0x80 | (nByte & 0x3F)));
+            if (nByte == 0) {
+                break;
             }
+
+            cdbuf_append_ch(pOut, (char)nByte);
         }
 
         return;
     }
 
-    /* UTF-16LE pool: decode to UTF-8, handling the surrogate pair range. */
+    /* UTF-16LE entry: a code-unit count of one or two units, 0x8000 marking
+     * the longer form. read_unicodeString gives nothing at all for a count of
+     * 0x10000 or more. */
+    nBase = nStrOffset;
+    nLen = rd16(pPool->pData, pPool->nSize, nBase);
+    nBase += 2;
+
+    if (nLen & 0x8000) {
+        nLen = ((nLen & 0x7FFF) << 16) | rd16(pPool->pData, pPool->nSize, nBase);
+        nBase += 2;
+    }
+
+    if (nLen >= 0x10000) {
+        return;
+    }
+
+    /* Decode to UTF-8, handling the surrogate pair range. */
     for (k = 0; k < nLen; k++) {
-        size_t nAt = nStrOffset + 2 + (size_t)k * 2;
+        size_t nAt = nBase + (size_t)k * 2;
         cd_u32 nUnit = 0;
 
         if (nAt + 2 > pPool->nSize) {
@@ -243,8 +333,14 @@ static void axml_append_string(const AxmlPool *pPool, cd_u32 nIndex, CDBuf *pOut
 
         nUnit = (cd_u32)pPool->pData[nAt] | ((cd_u32)pPool->pData[nAt + 1] << 8);
 
-        if ((nUnit >= 0xD800) && (nUnit <= 0xDBFF) && ((size_t)(k + 1) < nLen)) {
-            cd_u32 nLow = rd16(pPool->pData, pPool->nSize, nStrOffset + 2 + (size_t)(k + 1) * 2);
+        /* read_unicodeString stops at the first NUL code unit, even when the
+         * declared count is longer. */
+        if (nUnit == 0) {
+            break;
+        }
+
+        if ((nUnit >= 0xD800) && (nUnit <= 0xDBFF) && ((k + 1) < nLen)) {
+            cd_u32 nLow = rd16(pPool->pData, pPool->nSize, nBase + (size_t)(k + 1) * 2);
 
             if ((nLow >= 0xDC00) && (nLow <= 0xDFFF)) {
                 nUnit = 0x10000 + ((nUnit - 0xD800) << 10) + (nLow - 0xDC00);
@@ -327,6 +423,7 @@ static char *axml_decode(const unsigned char *pData, size_t nSize)
     AxmlNamespaces ns;
     size_t nOffset = 0;
     int bHavePool = 0;
+    size_t nAttrBudget = AXML_MAX_ATTRIBUTES;
 
     x_memset(&pool, 0, sizeof(pool));
     x_memset(&ns, 0, sizeof(ns));
@@ -350,6 +447,10 @@ static char *axml_decode(const unsigned char *pData, size_t nSize)
         cd_u32 nChunkSize = rd32(pData, nSize, nOffset + 4);
 
         if ((nChunkSize == 0) || (nOffset + nChunkSize > nSize) || (nChunkSize < nHeaderSize)) {
+            break;
+        }
+
+        if (out.nSize >= AXML_MAX_OUTPUT) {
             break;
         }
 
@@ -381,9 +482,27 @@ static char *axml_decode(const unsigned char *pData, size_t nSize)
                 cd_u8 nDataType = 0;
                 cd_u32 nAttrData = 0;
 
+                /* Bounded by the file, as the reference is: a chunk may
+                 * understate its own size and still carry the attributes.  */
                 if (nAt + 20 > nSize) {
                     break;
                 }
+
+                /* Each attribute can emit a string-pool entry of up to
+                 * 0x10000 bytes, so the attribute budget alone does not bound
+                 * the decoded text. */
+                if (out.nSize >= AXML_MAX_OUTPUT) {
+                    break;
+                }
+
+                /* Overlapping START_ELEMENT chunks that each declare 0xFFFF
+                 * attributes make this quadratic, so the decode as a whole
+                 * gets a budget. Real manifests use a few hundred.          */
+                if (nAttrBudget == 0) {
+                    break;
+                }
+
+                nAttrBudget--;
 
                 nAttrNs = rd32(pData, nSize, nAt + 0);
                 nAttrName = rd32(pData, nSize, nAt + 4);

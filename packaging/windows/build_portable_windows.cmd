@@ -45,6 +45,8 @@ set "PACKAGE_DIR=%RELEASE_DIR%\%PACKAGE_NAME%"
 set "CPACK_DIR=%WORK_ROOT%\cpack"
 set "CPACK_OUTPUT_DIR=%WORK_ROOT%\output"
 
+rem DB_ARG is passed as a single quoted token at the call site below, so a
+rem CDIE_DATABASE_DIR under Program Files or a profile directory survives.
 set "DB_ARG="
 if not "%CDIE_DATABASE_DIR%"=="" set "DB_ARG=-DCDIE_DATABASE_DIR=%CDIE_DATABASE_DIR%"
 
@@ -56,7 +58,12 @@ mkdir "%WORK_ROOT%"
 if errorlevel 1 exit /b 1
 
 echo Configuring %PACKAGE_SUFFIX% build...
-cmake -S "%PROJECT_ROOT%" -B "%BUILD_DIR%" -G "%CMAKE_GENERATOR_NAME%" -A %CMAKE_PLATFORM% %DB_ARG%
+if defined DB_ARG (
+    echo Signature database: %CDIE_DATABASE_DIR%
+    cmake -S "%PROJECT_ROOT%" -B "%BUILD_DIR%" -G "%CMAKE_GENERATOR_NAME%" -A %CMAKE_PLATFORM% "%DB_ARG%"
+) else (
+    cmake -S "%PROJECT_ROOT%" -B "%BUILD_DIR%" -G "%CMAKE_GENERATOR_NAME%" -A %CMAKE_PLATFORM%
+)
 if errorlevel 1 exit /b 1
 
 echo Building %PACKAGE_SUFFIX% Release...
@@ -85,6 +92,20 @@ if exist "%CPACK_OUTPUT_DIR%" rmdir /s /q "%CPACK_OUTPUT_DIR%"
 echo Installing portable package folder...
 cmake --install "%BUILD_DIR%" --config Release --prefix "%PACKAGE_DIR%"
 if errorlevel 1 exit /b 1
+
+rem A package that quietly lost its signatures -- a mistyped or unquoted
+rem CDIE_DATABASE_DIR fails the EXISTS test in CMakeLists.txt and only prints
+rem one STATUS line -- is worse than a failed build, so assert on it here.
+rem Set CDIE_DATABASE_DIR=NONE to package the binary alone on purpose.
+if /i not "%CDIE_DATABASE_DIR%"=="NONE" (
+    if not exist "%PACKAGE_DIR%\db\" (
+        echo No signature database in the package:
+        echo   %PACKAGE_DIR%\db
+        echo Set CDIE_DATABASE_DIR to a directory holding db, db_extra and db_custom,
+        echo or to NONE to package the binary alone.
+        exit /b 1
+    )
+)
 
 echo Creating portable zip with CPack...
 cpack --config "%CPACK_CONFIG%" -G ZIP -C Release -B "%CPACK_DIR%" -D "CPACK_OUTPUT_FILE_PREFIX=%CPACK_OUTPUT_DIR%"

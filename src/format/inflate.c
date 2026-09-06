@@ -38,6 +38,8 @@ typedef struct {
     int nBitBuf;    /* bits already pulled in       */
     int nBitCount;  /* how many bits are in nBitBuf  */
     int bError;
+    size_t nMaxSize; /* hard output ceiling, 0 = none */
+    int bLimit;      /* set once that ceiling is hit  */
 } BitState;
 
 /* A canonical Huffman table: pnCount[len] is how many codes have that length,
@@ -52,6 +54,10 @@ typedef struct {
 #define INFL_MAXDCODES 30
 #define INFL_MAXCODES (INFL_MAXLCODES + INFL_MAXDCODES)
 #define INFL_FIXLCODES 288
+
+/* Ceiling on the pre-allocation driven by the caller's declared uncompressed
+ * size; anything larger is grown on demand instead. */
+#define INFL_MAX_RESERVE (1024 * 1024)
 
 static int infl_bits(BitState *pState, int nNeed)
 {
@@ -182,6 +188,12 @@ static int infl_codes(BitState *pState, const Huffman *pLen, const Huffman *pDis
                 return 0;
             }
 
+            if ((pState->nMaxSize != 0) && (pOut->nSize >= pState->nMaxSize)) {
+                pState->bLimit = 1;
+
+                return 1;
+            }
+
             cdbuf_append_ch(pOut, (char)(unsigned char)nSymbol);
         } else {
             int nLength = 0;
@@ -218,6 +230,12 @@ static int infl_codes(BitState *pState, const Huffman *pLen, const Huffman *pDis
             }
 
             for (i = 0; i < nLength; i++) {
+                if ((pState->nMaxSize != 0) && (pOut->nSize >= pState->nMaxSize)) {
+                    pState->bLimit = 1;
+
+                    return 1;
+                }
+
                 cdbuf_append_ch(pOut, pOut->pData[pOut->nSize - (size_t)nDistance]);
             }
         }
@@ -227,6 +245,8 @@ static int infl_codes(BitState *pState, const Huffman *pLen, const Huffman *pDis
 static int infl_stored(BitState *pState, size_t nExpectedSize, CDBuf *pOut)
 {
     unsigned int nLen = 0;
+    unsigned int nComplement = 0;
+    size_t nCopy = 0;
 
     /* Stored blocks are byte aligned: drop the partial bit buffer. */
     pState->nBitBuf = 0;
@@ -238,8 +258,14 @@ static int infl_stored(BitState *pState, size_t nExpectedSize, CDBuf *pOut)
 
     nLen = (unsigned int)pState->pData[pState->nByte] | ((unsigned int)pState->pData[pState->nByte + 1] << 8);
 
-    /* The next two bytes are the one's complement of the length. */
+    /* The next two bytes are the one's complement of the length (RFC 1951
+     * 3.2.4); zlib abandons the stream when they disagree. */
+    nComplement = (unsigned int)pState->pData[pState->nByte + 2] | ((unsigned int)pState->pData[pState->nByte + 3] << 8);
     pState->nByte += 4;
+
+    if (nLen != ((~nComplement) & 0xFFFF)) {
+        return 0;
+    }
 
     if (pState->nByte + nLen > pState->nSize) {
         return 0;
@@ -249,7 +275,14 @@ static int infl_stored(BitState *pState, size_t nExpectedSize, CDBuf *pOut)
         return 0;
     }
 
-    cdbuf_append(pOut, pState->pData + pState->nByte, nLen);
+    nCopy = nLen;
+
+    if ((pState->nMaxSize != 0) && ((pOut->nSize + nLen) > pState->nMaxSize)) {
+        nCopy = (pOut->nSize < pState->nMaxSize) ? (pState->nMaxSize - pOut->nSize) : 0;
+        pState->bLimit = 1;
+    }
+
+    cdbuf_append(pOut, pState->pData + pState->nByte, nCopy);
     pState->nByte += nLen;
 
     return 1;
@@ -299,6 +332,7 @@ static int infl_dynamic(BitState *pState, size_t nExpectedSize, CDBuf *pOut)
     int nDistCodes = 0;
     int nCodeCodes = 0;
     int nIndex = 0;
+    int nLeft = 0;
 
     nLenCodes = infl_bits(pState, 5) + 257;
     nDistCodes = infl_bits(pState, 5) + 1;
@@ -373,24 +407,31 @@ static int infl_dynamic(BitState *pState, size_t nExpectedSize, CDBuf *pOut)
     lenCode.pnCount = nLenCount;
     lenCode.pnSymbol = nLenSymbol;
 
-    if (infl_construct(&lenCode, nLengths, nLenCodes) < 0) {
+    nLeft = infl_construct(&lenCode, nLengths, nLenCodes);
+
+    /* An under-subscribed code is only legal for the single length-1 code
+     * case; zlib rejects every other incomplete set. */
+    if ((nLeft != 0) && ((nLeft < 0) || (nLenCodes != nLenCount[0] + nLenCount[1]))) {
         return 0;
     }
 
     distCode.pnCount = nDistCount;
     distCode.pnSymbol = nDistSymbol;
 
-    if (infl_construct(&distCode, nLengths + nLenCodes, nDistCodes) < 0) {
+    nLeft = infl_construct(&distCode, nLengths + nLenCodes, nDistCodes);
+
+    if ((nLeft != 0) && ((nLeft < 0) || (nDistCodes != nDistCount[0] + nDistCount[1]))) {
         return 0;
     }
 
     return infl_codes(pState, &lenCode, &distCode, nExpectedSize, pOut);
 }
 
-int inflate_raw(const unsigned char *pSource, size_t nSourceSize, size_t nExpectedSize, CDBuf *pOut)
+int inflate_raw(const unsigned char *pSource, size_t nSourceSize, size_t nExpectedSize, size_t nMaxSize, CDBuf *pOut)
 {
     BitState state;
     int bFinal = 0;
+    size_t nReserve = 0;
 
     state.pData = pSource;
     state.nSize = nSourceSize;
@@ -398,9 +439,19 @@ int inflate_raw(const unsigned char *pSource, size_t nSourceSize, size_t nExpect
     state.nBitBuf = 0;
     state.nBitCount = 0;
     state.bError = 0;
+    state.nMaxSize = nMaxSize;
+    state.bLimit = 0;
 
-    if (nExpectedSize != 0) {
-        cdbuf_reserve(pOut, nExpectedSize + 1);
+    /* The declared size comes straight out of the file, so it only steers the
+     * pre-allocation up to a sane point; past that the buffer just grows. */
+    nReserve = nExpectedSize;
+
+    if (nReserve > INFL_MAX_RESERVE) {
+        nReserve = INFL_MAX_RESERVE;
+    }
+
+    if (nReserve != 0) {
+        cdbuf_reserve(pOut, nReserve + 1);
     }
 
     do {
@@ -427,6 +478,10 @@ int inflate_raw(const unsigned char *pSource, size_t nSourceSize, size_t nExpect
             }
         } else {
             return 0;
+        }
+
+        if (state.bLimit) {
+            return 1;
         }
     } while (!bFinal);
 

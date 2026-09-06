@@ -37,7 +37,7 @@ typedef enum {
     N_BOOL,
     N_ARRAY,
     N_OBJECT,
-    N_PROP,      /* key/value pair inside an object literal */
+    N_PROP,      /* key/value pair inside an object literal, num = key size */
     N_FUNCTION,  /* a = params list, b = body block, str = name */
     N_CALL,      /* a = callee, list = arguments */
     N_NEW,       /* a = callee, list = arguments */
@@ -112,6 +112,11 @@ struct JSNode {
     JSNodeType type;
     JSOp op;
     int nLine;
+    /* Length and hash of pStr, filled in on the first identifier lookup:
+     * variable access would otherwise rehash the same name endlessly.     */
+    cd_u8 bStrKey;
+    size_t nStrSize;
+    cd_u32 nStrHash;
     double nNum;
     char *pStr;
     char *pStr2;

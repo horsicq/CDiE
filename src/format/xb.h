@@ -128,6 +128,9 @@ char *xb_ucsd_string(XBFile *pFile, cd_i64 nOffset);
 char *xb_uuid(XBFile *pFile, cd_i64 nOffset);
 /* Reads a NUL-terminated UTF-16 string, converted to UTF-8 (caller frees). */
 char *xb_unicode_string(XBFile *pFile, cd_i64 nOffset, cd_i64 nMaxSize, int bBigEndian);
+/* As xb_unicode_string, but also reports the number of UTF-16 code units the
+ * string occupies on disk - which is not the length of the UTF-8 result. */
+char *xb_unicode_string_n(XBFile *pFile, cd_i64 nOffset, cd_i64 nMaxSize, int bBigEndian, cd_i64 *pnUnits);
 /* Reads a NUL-terminated UTF-8 string (caller frees). */
 char *xb_utf8_string(XBFile *pFile, cd_i64 nOffset, cd_i64 nMaxSize);
 

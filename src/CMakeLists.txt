@@ -3,9 +3,9 @@
 # The project has no external dependencies: the JavaScript engine, the binary
 # format parsers and the signature engine all live in this source tree.
 
-set(CMAKE_C_STANDARD 99)
-set(CMAKE_C_STANDARD_REQUIRED ON)
-set(CMAKE_C_EXTENSIONS OFF)
+# The C standard and the warning flags are set in the top-level CMakeLists so
+# that lib/ and tests/ -- which are siblings of this directory, not children --
+# are held to the same bar. Do not re-add them here.
 
 set(X_COMPANYNAME       "NTInfo")
 set(X_PROJECTNAME       "cdie")
@@ -13,13 +13,6 @@ set(X_MAINTAINER        "horsicq@gmail.com")
 set(X_DESCRIPTION       "Detect It Easy console engine (C port)")
 set(X_HOMEPAGE          "http://ntinfo.biz")
 set(X_ORIGINAL_FILENAME "cdie")
-
-if(MSVC)
-    add_compile_definitions(_CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
-    add_compile_options(/W3)
-else()
-    add_compile_options(-Wall -Wextra -Wno-unused-parameter)
-endif()
 
 set(CDIE_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/global.h

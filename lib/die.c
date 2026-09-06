@@ -159,6 +159,10 @@ static char *die_wide_to_utf8(const wchar_t *pWide)
 
 static wchar_t *die_utf8_to_wide(const char *pUtf8)
 {
+    if (pUtf8 == NULL) {
+        pUtf8 = "";
+    }
+
     return (wchar_t *)x_utf8_to_utf16(pUtf8);
 }
 #else
@@ -167,6 +171,13 @@ static char *die_wide_to_utf8(const wchar_t *pWide)
 {
     CDBuf buf;
     size_t i = 0;
+
+    /* NULL is a supported argument (it is how the A side asks for the default
+     * database), so it must map to the empty string rather than fault, the
+     * way XBinary::_fromWCharArray guards its own pointer. */
+    if (pWide == NULL) {
+        return cd_strdup("");
+    }
 
     cdbuf_init(&buf);
 
@@ -193,12 +204,24 @@ static char *die_wide_to_utf8(const wchar_t *pWide)
     return cdbuf_detach(&buf, NULL);
 }
 
+/* Decodes UTF-8 with the same replacement behaviour QString::fromUtf8 applies:
+ * an ill-formed lead byte, a truncated sequence or a missing continuation byte
+ * each produce U+FFFD and advance the input by exactly one byte. Without that
+ * a stray 0xFF lifted out of a scanned binary would swallow the three bytes
+ * after it, so the W exports and the A exports disagreed on the same file. */
 static wchar_t *die_utf8_to_wide(const char *pUtf8)
 {
-    size_t nLen = x_strlen(pUtf8);
-    wchar_t *pResult = (wchar_t *)cd_malloc((nLen + 1) * sizeof(wchar_t));
+    size_t nLen = 0;
+    wchar_t *pResult = NULL;
     size_t nOut = 0;
     size_t i = 0;
+
+    if (pUtf8 == NULL) {
+        pUtf8 = "";
+    }
+
+    nLen = x_strlen(pUtf8);
+    pResult = (wchar_t *)cd_malloc((nLen + 1) * sizeof(wchar_t));
 
     if (pResult == NULL) {
         return NULL;
@@ -208,6 +231,8 @@ static wchar_t *die_utf8_to_wide(const char *pUtf8)
         unsigned char c = (unsigned char)pUtf8[i];
         unsigned long nCp = 0;
         int nExtra = 0;
+        int bOk = 1;
+        int k = 0;
 
         if (c < 0x80) {
             nCp = c;
@@ -218,16 +243,36 @@ static wchar_t *die_utf8_to_wide(const char *pUtf8)
         } else if ((c & 0xF0) == 0xE0) {
             nCp = c & 0x0F;
             nExtra = 2;
-        } else {
+        } else if ((c & 0xF8) == 0xF0) {
             nCp = c & 0x07;
             nExtra = 3;
+        } else {
+            /* 0x80-0xBF is a stray continuation byte, 0xF8-0xFF is not a
+             * lead byte at all. */
+            bOk = 0;
         }
 
-        i++;
+        if (bOk) {
+            for (k = 0; k < nExtra; k++) {
+                unsigned char nNext = (i + 1 + (size_t)k < nLen) ? (unsigned char)pUtf8[i + 1 + (size_t)k] : 0;
 
-        while ((nExtra-- > 0) && (i < nLen)) {
-            nCp = (nCp << 6) | (pUtf8[i] & 0x3F);
-            i++;
+                if ((nNext & 0xC0) != 0x80) {
+                    bOk = 0;
+                    break;
+                }
+
+                nCp = (nCp << 6) | (nNext & 0x3F);
+            }
+        }
+
+        if (bOk) {
+            i += (size_t)(1 + nExtra);
+        } else {
+            /* One U+FFFD for the whole maximal subpart -- the lead byte plus
+             * whatever continuation bytes did validate -- which is what Qt
+             * emits, rather than one per byte. k is 0 for a bad lead byte. */
+            nCp = 0xFFFD;
+            i += (size_t)(1 + k);
         }
 
         pResult[nOut++] = (wchar_t)nCp;
@@ -249,10 +294,16 @@ static wchar_t *die_dup_result_w(const char *pUtf8)
 
 /* --- the actual scans --------------------------------------------------- */
 
-/* Loads pDatabasePath as the single main database, scans pFileName (or a
- * memory buffer when pFileName is NULL), formats, and returns a UTF-8 string
- * (empty on failure). */
-static char *die_scan_common(const char *pFileName, const void *pMemory, int nMemorySize, unsigned int nFlags, const char *pDatabasePath, DBase *pPreloaded)
+/* Loads pDatabasePath as the single main database, scans pFileName (bFileMode)
+ * or a memory buffer, formats, and returns a UTF-8 string (empty on failure).
+ *
+ * bFileMode is explicit rather than derived from pFileName != NULL: a NULL
+ * name must fail like an unopenable file (empty string, as die_lib.cpp does
+ * with a null QString) instead of falling through to a zero-byte memory scan,
+ * which would report a fabricated "Binary / Unknown" for a file that was
+ * never opened. */
+static char *die_scan_common(int bFileMode, const char *pFileName, const void *pMemory, int nMemorySize, unsigned int nFlags, const char *pDatabasePath,
+                             DBase *pPreloaded)
 {
     ScanOptions options;
     ScanResult result;
@@ -261,6 +312,10 @@ static char *die_scan_common(const char *pFileName, const void *pMemory, int nMe
     char *pFormatted = NULL;
     char *pResultString = NULL;
     int bOk = 0;
+
+    if (bFileMode && (pFileName == NULL)) {
+        return cd_strdup("");
+    }
 
     die_options_from_flags(&options, nFlags);
 
@@ -274,7 +329,7 @@ static char *die_scan_common(const char *pFileName, const void *pMemory, int nMe
         pDb = &localDb;
     }
 
-    if (pFileName != NULL) {
+    if (bFileMode) {
         bOk = cdie_scan_file(pFileName, pDb, &options, &result);
     } else {
         bOk = cdie_scan_memory(pMemory, (cd_i64)nMemorySize, pDb, &options, &result);
@@ -302,14 +357,14 @@ static char *die_scan_common(const char *pFileName, const void *pMemory, int nMe
 
 DIE_API char *DIE_ScanFileA(char *pszFileName, unsigned int nFlags, char *pszDatabase)
 {
-    return die_scan_common(pszFileName, NULL, 0, nFlags, pszDatabase, NULL);
+    return die_scan_common(1, pszFileName, NULL, 0, nFlags, pszDatabase, NULL);
 }
 
 DIE_API wchar_t *DIE_ScanFileW(wchar_t *pwszFileName, unsigned int nFlags, wchar_t *pwszDatabase)
 {
     char *pFileName = die_wide_to_utf8(pwszFileName);
     char *pDatabase = die_wide_to_utf8(pwszDatabase);
-    char *pResult = die_scan_common(pFileName, NULL, 0, nFlags, pDatabase, NULL);
+    char *pResult = die_scan_common(1, pFileName, NULL, 0, nFlags, pDatabase, NULL);
     wchar_t *pWide = die_dup_result_w(pResult);
 
     cd_free(pFileName);
@@ -321,13 +376,13 @@ DIE_API wchar_t *DIE_ScanFileW(wchar_t *pwszFileName, unsigned int nFlags, wchar
 
 DIE_API char *DIE_ScanMemoryA(char *pMemory, int nMemorySize, unsigned int nFlags, char *pszDatabase)
 {
-    return die_scan_common(NULL, pMemory, nMemorySize, nFlags, pszDatabase, NULL);
+    return die_scan_common(0, NULL, pMemory, nMemorySize, nFlags, pszDatabase, NULL);
 }
 
 DIE_API wchar_t *DIE_ScanMemoryW(char *pMemory, int nMemorySize, unsigned int nFlags, wchar_t *pwszDatabase)
 {
     char *pDatabase = die_wide_to_utf8(pwszDatabase);
-    char *pResult = die_scan_common(NULL, pMemory, nMemorySize, nFlags, pDatabase, NULL);
+    char *pResult = die_scan_common(0, NULL, pMemory, nMemorySize, nFlags, pDatabase, NULL);
     wchar_t *pWide = die_dup_result_w(pResult);
 
     cd_free(pDatabase);
@@ -367,13 +422,13 @@ DIE_API int DIE_LoadDatabaseW(wchar_t *pwszDatabase)
 
 DIE_API char *DIE_ScanFileExA(char *pszFileName, unsigned int nFlags)
 {
-    return die_scan_common(pszFileName, NULL, 0, nFlags, NULL, g_bDbLoaded ? &g_db : NULL);
+    return die_scan_common(1, pszFileName, NULL, 0, nFlags, NULL, g_bDbLoaded ? &g_db : NULL);
 }
 
 DIE_API wchar_t *DIE_ScanFileExW(wchar_t *pwszFileName, unsigned int nFlags)
 {
     char *pFileName = die_wide_to_utf8(pwszFileName);
-    char *pResult = die_scan_common(pFileName, NULL, 0, nFlags, NULL, g_bDbLoaded ? &g_db : NULL);
+    char *pResult = die_scan_common(1, pFileName, NULL, 0, nFlags, NULL, g_bDbLoaded ? &g_db : NULL);
     wchar_t *pWide = die_dup_result_w(pResult);
 
     cd_free(pFileName);
@@ -384,12 +439,12 @@ DIE_API wchar_t *DIE_ScanFileExW(wchar_t *pwszFileName, unsigned int nFlags)
 
 DIE_API char *DIE_ScanMemoryExA(char *pMemory, int nMemorySize, unsigned int nFlags)
 {
-    return die_scan_common(NULL, pMemory, nMemorySize, nFlags, NULL, g_bDbLoaded ? &g_db : NULL);
+    return die_scan_common(0, NULL, pMemory, nMemorySize, nFlags, NULL, g_bDbLoaded ? &g_db : NULL);
 }
 
 DIE_API wchar_t *DIE_ScanMemoryExW(char *pMemory, int nMemorySize, unsigned int nFlags)
 {
-    char *pResult = die_scan_common(NULL, pMemory, nMemorySize, nFlags, NULL, g_bDbLoaded ? &g_db : NULL);
+    char *pResult = die_scan_common(0, NULL, pMemory, nMemorySize, nFlags, NULL, g_bDbLoaded ? &g_db : NULL);
     wchar_t *pWide = die_dup_result_w(pResult);
 
     cd_free(pResult);
@@ -412,7 +467,7 @@ DIE_API int __stdcall DIE_VB_ScanFile(wchar_t *pwszFileName, unsigned int nFlags
 {
     char *pFileName = die_wide_to_utf8(pwszFileName);
     char *pDatabase = die_wide_to_utf8(pwszDatabase);
-    char *pResult = die_scan_common(pFileName, NULL, 0, nFlags, pDatabase, NULL);
+    char *pResult = die_scan_common(1, pFileName, NULL, 0, nFlags, pDatabase, NULL);
     wchar_t *pWide = die_utf8_to_wide(pResult);
     int nLen = 0;
     int nOut = 0;

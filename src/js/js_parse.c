@@ -25,17 +25,24 @@
 #include "js_lex.h"
 
 
+/* Bound on the recursive descent. Nesting this deep does not occur in a
+ * signature script, while the C stack of a 1 MB thread does not survive
+ * much more.                                                           */
+#define JS_MAX_PARSE_DEPTH 200
+
 typedef struct {
     JSLexer lexer;
     size_t nPos;
     char *pError;
     const char *pName;
     int bError; /* set once; every accessor then reports end of input */
+    int nDepth; /* recursive descent depth, capped at JS_MAX_PARSE_DEPTH */
 } JSParser;
 
 static JSNode *parse_statement(JSParser *pParser);
 static JSNode *parse_expression(JSParser *pParser, int bNoIn);
 static JSNode *parse_assignment(JSParser *pParser, int bNoIn);
+static JSNode *parse_unary(JSParser *pParser);
 static JSNode *parse_function(JSParser *pParser, int bExpression);
 
 /* ------------------------------------------------------------------ util  */
@@ -56,32 +63,35 @@ static void node_add(JSNode *pNode, JSNode *pChild)
     pNode->ppList[pNode->nList++] = pChild;
 }
 
+/* The parser folds left-associative chains iteratively, so 'a+a+a+...' is a
+ * shallow parse but an arbitrarily long ->a spine. That spine is therefore
+ * unrolled here instead of recursed over.                                  */
 void js_free_node(JSNode *pNode)
 {
-    size_t i = 0;
+    while (pNode != NULL) {
+        JSNode *pLeft = pNode->a;
+        size_t i = 0;
 
-    if (pNode == NULL) {
-        return;
+        js_free_node(pNode->b);
+        js_free_node(pNode->c);
+        js_free_node(pNode->d);
+
+        for (i = 0; i < pNode->nList; i++) {
+            js_free_node(pNode->ppList[i]);
+        }
+
+        for (i = 0; i < pNode->nVarNames; i++) {
+            cd_free(pNode->ppVarNames[i]);
+        }
+
+        cd_free(pNode->ppVarNames);
+        cd_free(pNode->ppList);
+        cd_free(pNode->pStr);
+        cd_free(pNode->pStr2);
+        cd_free(pNode);
+
+        pNode = pLeft;
     }
-
-    js_free_node(pNode->a);
-    js_free_node(pNode->b);
-    js_free_node(pNode->c);
-    js_free_node(pNode->d);
-
-    for (i = 0; i < pNode->nList; i++) {
-        js_free_node(pNode->ppList[i]);
-    }
-
-    for (i = 0; i < pNode->nVarNames; i++) {
-        cd_free(pNode->ppVarNames[i]);
-    }
-
-    cd_free(pNode->ppVarNames);
-    cd_free(pNode->ppList);
-    cd_free(pNode->pStr);
-    cd_free(pNode->pStr2);
-    cd_free(pNode);
 }
 
 /* After an error the stream reports end of input, so every loop and every
@@ -118,6 +128,21 @@ static void parse_error(JSParser *pParser, const char *pMessage)
     cd_free(pParser->pError);
     pParser->pError = cd_strdup(sBuf);
     pParser->bError = 1;
+}
+
+/* Guards one level of the descent. A refused level reports the error and
+ * returns 0, which unwinds through the existing bError plumbing.        */
+static int enter_recursion(JSParser *pParser)
+{
+    if (pParser->nDepth >= JS_MAX_PARSE_DEPTH) {
+        parse_error(pParser, "too much recursion");
+
+        return 0;
+    }
+
+    pParser->nDepth++;
+
+    return 1;
 }
 
 static int accept(JSParser *pParser, JSTokType type)
@@ -194,22 +219,23 @@ static JSNode *parse_object_literal(JSParser *pParser)
         JSNode *pProp = node_new(N_PROP, tok(pParser)->nLine);
 
         if (tok(pParser)->type == T_STRING) {
-            pProp->pStr = cd_strdup(tok(pParser)->pText);
+            /* The lexer keeps embedded NULs, so the key carries its byte
+             * count the same way N_STR does.                            */
+            pProp->pStr = cd_strndup(tok(pParser)->pText, tok(pParser)->nTextSize);
+            pProp->nNum = (double)tok(pParser)->nTextSize;
             pParser->nPos++;
         } else if (tok(pParser)->type == T_NUMBER) {
             char sBuf[64];
-            double nValue = tok(pParser)->nNum;
 
-            if (nValue == (double)(cd_i64)nValue) {
-                x_snprintf(sBuf, sizeof(sBuf), "%lld", (long long)nValue);
-            } else {
-                x_snprintf(sBuf, sizeof(sBuf), "%.17g", nValue);
-            }
-
+            /* ECMAScript ToString(Number), so the literal key and a computed
+             * lookup of the same number agree.                              */
+            x_dtoa_shortest(tok(pParser)->nNum, sBuf, sizeof(sBuf));
             pProp->pStr = cd_strdup(sBuf);
+            pProp->nNum = (double)x_strlen(sBuf);
             pParser->nPos++;
         } else {
             pProp->pStr = property_name(pParser);
+            pProp->nNum = (pProp->pStr != NULL) ? (double)x_strlen(pProp->pStr) : 0;
         }
 
         expect(pParser, T_COLON, "':'");
@@ -371,8 +397,14 @@ static JSNode *parse_member_tail(JSParser *pParser, JSNode *pBase, int bAllowCal
 
 static JSNode *parse_new(JSParser *pParser)
 {
-    JSNode *pNode = node_new(N_NEW, tok(pParser)->nLine);
+    JSNode *pNode = NULL;
     JSNode *pCallee = NULL;
+
+    if (!enter_recursion(pParser)) {
+        return NULL;
+    }
+
+    pNode = node_new(N_NEW, tok(pParser)->nLine);
 
     expect(pParser, T_NEW, "'new'");
 
@@ -388,6 +420,8 @@ static JSNode *parse_new(JSParser *pParser)
     if (tok(pParser)->type == T_LPAREN) {
         parse_arguments(pParser, pNode);
     }
+
+    pParser->nDepth--;
 
     return parse_member_tail(pParser, pNode, 1);
 }
@@ -423,7 +457,7 @@ static JSNode *parse_postfix(JSParser *pParser)
     return pNode;
 }
 
-static JSNode *parse_unary(JSParser *pParser)
+static JSNode *parse_unary_inner(JSParser *pParser)
 {
     JSToken *pTok = tok(pParser);
     JSOp op = OP_NONE;
@@ -461,6 +495,20 @@ static JSNode *parse_unary(JSParser *pParser)
     }
 
     return parse_postfix(pParser);
+}
+
+static JSNode *parse_unary(JSParser *pParser)
+{
+    JSNode *pNode = NULL;
+
+    if (!enter_recursion(pParser)) {
+        return NULL;
+    }
+
+    pNode = parse_unary_inner(pParser);
+    pParser->nDepth--;
+
+    return pNode;
 }
 
 typedef struct {
@@ -564,8 +612,15 @@ static JSOp assign_op(JSTokType type)
 
 static JSNode *parse_assignment(JSParser *pParser, int bNoIn)
 {
-    JSNode *pLeft = parse_conditional(pParser, bNoIn);
-    JSOp op = assign_op(tok(pParser)->type);
+    JSNode *pLeft = NULL;
+    JSOp op = OP_NONE;
+
+    if (!enter_recursion(pParser)) {
+        return NULL;
+    }
+
+    pLeft = parse_conditional(pParser, bNoIn);
+    op = assign_op(tok(pParser)->type);
 
     if (op != OP_NONE) {
         JSNode *pNode = NULL;
@@ -579,9 +634,10 @@ static JSNode *parse_assignment(JSParser *pParser, int bNoIn)
         pParser->nPos++;
         pNode->a = pLeft;
         pNode->b = parse_assignment(pParser, bNoIn);
-
-        return pNode;
+        pLeft = pNode;
     }
+
+    pParser->nDepth--;
 
     return pLeft;
 }
@@ -805,7 +861,7 @@ static JSNode *parse_try(JSParser *pParser)
     return pNode;
 }
 
-static JSNode *parse_statement(JSParser *pParser)
+static JSNode *parse_statement_inner(JSParser *pParser)
 {
     JSToken *pTok = tok(pParser);
 
@@ -934,6 +990,20 @@ static JSNode *parse_statement(JSParser *pParser)
 
         return pNode;
     }
+}
+
+static JSNode *parse_statement(JSParser *pParser)
+{
+    JSNode *pNode = NULL;
+
+    if (!enter_recursion(pParser)) {
+        return NULL;
+    }
+
+    pNode = parse_statement_inner(pParser);
+    pParser->nDepth--;
+
+    return pNode;
 }
 
 /* ---------------------------------------------------------------- driver  */

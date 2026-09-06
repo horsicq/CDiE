@@ -75,6 +75,13 @@ int x_isinf(double nValue)
     return (nBits == 0x7FF0000000000000ull) ? 1 : 0;
 }
 
+int x_signbit(double nValue)
+{
+    /* The bit itself, so that -0.0 and a negative NaN answer 1 where a
+     * comparison against zero would not.                                   */
+    return (int)(math_bits(nValue) >> 63);
+}
+
 double x_fabs(double nValue)
 {
     return math_from_bits(math_bits(nValue) & 0x7FFFFFFFFFFFFFFFull);
@@ -259,6 +266,12 @@ static const double MATH_LN2_LO = 1.90821492927058770002e-10;
 static const double MATH_INV_LN2 = 1.44269504088896338700e+00;
 static const double MATH_INV_LN10 = 4.34294481903251827651e-01;
 static const double MATH_PI_2 = 1.57079632679489661923e+00;
+/* math_sin_core / math_cos_core are minimax polynomials fitted on
+ * [-pi/4, pi/4]; outside it they are not sine and cosine at all, and past
+ * about 0.9 they already return magnitudes above 1. The reduction therefore
+ * keeps going until the remainder is back inside that interval - the limit
+ * is the domain of the cores, not a convergence tolerance. */
+static const double MATH_REDUCE_LIMIT = 7.85398163397448309616e-01; /* pi/4 */
 
 double x_log(double nValue)
 {
@@ -411,11 +424,17 @@ double x_pow(double nBase, double nExponent)
     }
 
     if (nBase == 0) {
+        /* IEEE 754 / ECMAScript 21.3.2.26: a negative zero base keeps its
+         * sign when the exponent is an odd integer. The == test above is
+         * true for -0.0 as well, so the sign bit is what decides.          */
+        int bOddExponent = ((nExponent == math_trunc(nExponent)) && (x_fmod(nExponent, 2.0) != 0)) ? 1 : 0;
+        int bNegative = (((math_bits(nBase) >> 63) != 0) && bOddExponent) ? 1 : 0;
+
         if (nExponent < 0) {
-            return x_inf();
+            return bNegative ? -x_inf() : x_inf();
         }
 
-        return 0.0;
+        return bNegative ? -0.0 : 0.0;
     }
 
     /* Integer exponents are done by squaring so that the common cases stay
@@ -475,15 +494,79 @@ static double math_cos_core(double x)
                                                z * (-1.13596475577881948265e-11)))))));
 }
 
-/* Reduces x modulo pi/2 and reports the quadrant. */
+/* The quadrant contributed by one reduction pass: nRounded modulo 4, with a
+ * negative nRounded counted the way two's complement would.
+ *
+ * nRounded can be far outside long long range for a large x, where the
+ * conversion is undefined, so the cast is taken only below 2^62. At or above
+ * that the exponent is at least 62 and the 52-bit fraction puts the unit in
+ * the last place at 2^10 or more, so the double is an exact multiple of 4
+ * and the remainder is zero without any conversion. The result is exact -
+ * this is bit arithmetic, not an approximation.                            */
+static int math_quadrant_step(double nRounded)
+{
+    double nAbs = x_fabs(nRounded);
+    int nStep = 0;
+
+    if (nAbs < 4611686018427387904.0) { /* 2^62 */
+        nStep = (int)((long long)nAbs & 3);
+    }
+
+    if ((nRounded < 0) && (nStep != 0)) {
+        nStep = 4 - nStep;
+    }
+
+    return nStep;
+}
+
+/* Reduces x modulo pi/2 and reports the quadrant.
+ *
+ * The two-part pi/2 below keeps the reduction accurate for moderate
+ * arguments, but once |x| is large enough that nRounded * pi/2 rounds by
+ * more than pi/4 the remainder is out of range and the core polynomials,
+ * evaluated far outside [-pi/4, pi/4], return values a sine cannot take -
+ * up to +/-inf. Applying the split again brings the remainder back into
+ * range. Such arguments are still not reduced accurately (that needs a
+ * multi-word pi/2), but the result stays a value in [-1, 1].              */
 static int math_reduce(double x, double *pnReduced)
 {
-    double nQuotient = x / MATH_PI_2;
-    double nRounded = math_trunc(nQuotient + ((nQuotient >= 0) ? 0.5 : -0.5));
-    int nQuadrant = (int)((long long)nRounded & 3);
+    double r = x;
+    int nQuadrant = 0;
+    int i = 0;
 
-    /* Two-part pi/2 keeps the reduction accurate for moderate arguments. */
-    *pnReduced = (x - nRounded * 1.57079632673412561417e+00) - nRounded * 6.07710050650619224932e-11;
+    /* Each pass drops the remainder by roughly the working precision, so a
+     * DBL_MAX argument needs about twenty of them; the bound is only there
+     * so the loop cannot spin. */
+    for (i = 0; i < 64; i++) {
+        double nQuotient = r / MATH_PI_2;
+        double nRounded = math_trunc(nQuotient + ((nQuotient >= 0) ? 0.5 : -0.5));
+        int nStep = 0;
+
+        if (nRounded == 0) {
+            break;
+        }
+
+        /* Only the low two bits of nRounded matter. x_fmod would give the
+         * same answer but costs a repeated-subtraction loop per pass, which
+         * for a large argument dominates the whole call.                   */
+        nStep = math_quadrant_step(nRounded);
+
+        nQuadrant = (nQuadrant + nStep) & 3;
+
+        r = (r - nRounded * 1.57079632673412561417e+00) - nRounded * 6.07710050650619224932e-11;
+
+        /* One pass is the whole reduction for every argument the two-part
+         * pi/2 can handle: the remainder is then already inside [-pi/4,
+         * pi/4] and the loop leaves it untouched. A remainder still outside
+         * the cores' domain means the subtraction cancelled, and one more
+         * pass brings it back - a value just past the boundary needs at most
+         * one, since subtracting pi/2 from it lands just inside.           */
+        if (x_fabs(r) <= MATH_REDUCE_LIMIT) {
+            break;
+        }
+    }
+
+    *pnReduced = r;
 
     return nQuadrant;
 }

@@ -20,15 +20,12 @@
  */
 
 /* The project compiles as strict ISO C99 (CMAKE_C_EXTENSIONS OFF), which
- * hides everything POSIX behind feature test macros: without these, S_IFMT
- * and friends are undeclared and readlink has no prototype. The macros have
- * to come before the first include, so they lead the file.                 */
+ * hides everything POSIX behind feature test macros: without this one,
+ * readlink and the S_IS* macros have no declaration. It has to come before
+ * the first include, so it leads the file.                                 */
 #if !defined(_WIN32)
 #if !defined(_POSIX_C_SOURCE)
 #define _POSIX_C_SOURCE 200809L
-#endif
-#if !defined(_DEFAULT_SOURCE)
-#define _DEFAULT_SOURCE 1
 #endif
 /* macOS keeps a good deal of <dirent.h> and <sys/stat.h> behind this one. */
 #if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
@@ -113,7 +110,7 @@ int cd_path_is_dir(const char *pPath)
         return 0;
     }
 
-    return ((st.st_mode & S_IFMT) == S_IFDIR) ? 1 : 0;
+    return S_ISDIR(st.st_mode) ? 1 : 0;
 #endif
 }
 
@@ -140,7 +137,7 @@ int cd_path_is_file(const char *pPath)
         return 0;
     }
 
-    return ((st.st_mode & S_IFMT) == S_IFREG) ? 1 : 0;
+    return S_ISREG(st.st_mode) ? 1 : 0;
 #endif
 }
 
@@ -148,7 +145,7 @@ char *cd_read_file(const char *pPath, cd_i64 *pnSize)
 {
     void *pFile = x_fopen(pPath, "rb");
     char *pData = NULL;
-    long nSize = 0;
+    cd_i64 nSize = 0;
     size_t nRead = 0;
 
     if (pnSize) {
@@ -164,9 +161,16 @@ char *cd_read_file(const char *pPath, cd_i64 *pnSize)
         return NULL;
     }
 
-    nSize = x_ftell(pFile);
+    nSize = (cd_i64)x_ftell(pFile);
 
     if (nSize < 0) {
+        x_fclose(pFile);
+        return NULL;
+    }
+
+    /* The whole file goes into one allocation, so the size has to fit a
+     * size_t with room for the terminator. */
+    if ((cd_u64)nSize >= (cd_u64)(size_t)-1) {
         x_fclose(pFile);
         return NULL;
     }
@@ -275,7 +279,7 @@ int cd_list_dir(const char *pPath, CDVec *pVec)
         pEntry->nSize = 0;
 
         if (stat(pEntry->pPath, &st) == 0) {
-            pEntry->type = ((st.st_mode & S_IFMT) == S_IFDIR) ? CD_ENTRY_DIR : CD_ENTRY_FILE;
+            pEntry->type = S_ISDIR(st.st_mode) ? CD_ENTRY_DIR : CD_ENTRY_FILE;
             pEntry->nSize = (cd_i64)st.st_size;
         }
 

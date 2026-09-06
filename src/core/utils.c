@@ -33,10 +33,23 @@
  * utils_math.c (the math functions), utils_fp.c (double <-> decimal string)
  * and utils_entry.c (startup, argv, the compiler support routines).
  *
- * Floating point conversions are deliberately absent from the formatter
- * below: the JavaScript layer calls x_dtoa_* directly, so %e/%f/%g are never
- * needed and wsprintfA's lack of them costs nothing.
+ * The formatter below spells %e, %f and %g out of x_dtoa_cformat, so a
+ * diagnostic that prints a double reads the same on a CRT-free Windows build
+ * as it does anywhere else. %a has no digit generator here and no caller in
+ * the project; it keeps a marker.
  */
+
+/* The hosted half of the clock below is POSIX, and the project compiles as
+ * strict ISO C99 (CMAKE_C_EXTENSIONS OFF), which hides clock_gettime and
+ * CLOCK_MONOTONIC without this. It has to precede the first include.       */
+#if !defined(_WIN32)
+#if !defined(_POSIX_C_SOURCE)
+#define _POSIX_C_SOURCE 200809L
+#endif
+#if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
+#define _DARWIN_C_SOURCE 1
+#endif
+#endif
 
 #include "utils.h"
 
@@ -122,6 +135,7 @@ char *x_utf16_to_utf8(const void *pUtf16)
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <time.h>
 #endif
 
 #if defined(_MSC_VER)
@@ -472,7 +486,7 @@ void x_free(void *pPtr)
 /*  Process                                                                  */
 /* ------------------------------------------------------------------------ */
 
-void x_exit(int nCode)
+X_NORETURN void x_exit(int nCode)
 {
 #if defined(_WIN32)
     ExitProcess((UINT)nCode);
@@ -627,13 +641,17 @@ static int x_digit_value(char nChar, int nBase)
     return nValue;
 }
 
-static unsigned long long x_parse_integer(const char *pString, char **ppEnd, int nBase, int *pbNegative)
+/* Accumulates the digits and reports overflow instead of wrapping, so the
+ * callers can saturate the way the C library does. */
+static unsigned long long x_parse_integer(const char *pString, const char **ppEnd, int nBase, int *pbNegative, int *pbOverflow)
 {
+    const unsigned long long nUnsignedMax = ~0ull;
     const char *p = pString;
     unsigned long long nResult = 0;
     int bAny = 0;
 
     *pbNegative = 0;
+    *pbOverflow = 0;
 
     while (x_is_space_char(*p)) {
         p++;
@@ -660,32 +678,59 @@ static unsigned long long x_parse_integer(const char *pString, char **ppEnd, int
             break;
         }
 
-        nResult = nResult * (unsigned long long)nBase + (unsigned long long)nDigit;
+        if (nResult > ((nUnsignedMax - (unsigned long long)nDigit) / (unsigned long long)nBase)) {
+            *pbOverflow = 1;
+        } else {
+            nResult = nResult * (unsigned long long)nBase + (unsigned long long)nDigit;
+        }
+
         bAny = 1;
         p++;
     }
 
     if (ppEnd) {
-        *ppEnd = (char *)(bAny ? p : pString);
+        *ppEnd = bAny ? p : pString;
     }
 
     return nResult;
 }
 
-long x_strtol(const char *pString, char **ppEnd, int nBase)
+long x_strtol(const char *pString, const char **ppEnd, int nBase)
 {
+    /* LONG_MAX without <limits.h>: the header is not part of the wrapped set. */
+    const unsigned long long nLongMax = (unsigned long long)((unsigned long)-1 >> 1);
     int bNegative = 0;
-    unsigned long long nValue = x_parse_integer(pString, ppEnd, nBase, &bNegative);
+    int bOverflow = 0;
+    unsigned long long nValue = x_parse_integer(pString, ppEnd, nBase, &bNegative, &bOverflow);
 
-    return bNegative ? -(long)nValue : (long)nValue;
+    if (bNegative) {
+        if (bOverflow || (nValue > (nLongMax + 1ull))) {
+            nValue = nLongMax + 1ull;
+        }
+
+        /* The magnitude of LONG_MIN has no positive long, so the negation is
+         * done on the unsigned type. */
+        return (long)(0ul - (unsigned long)nValue);
+    }
+
+    if (bOverflow || (nValue > nLongMax)) {
+        nValue = nLongMax;
+    }
+
+    return (long)nValue;
 }
 
-unsigned long long x_strtoull(const char *pString, char **ppEnd, int nBase)
+unsigned long long x_strtoull(const char *pString, const char **ppEnd, int nBase)
 {
     int bNegative = 0;
-    unsigned long long nValue = x_parse_integer(pString, ppEnd, nBase, &bNegative);
+    int bOverflow = 0;
+    unsigned long long nValue = x_parse_integer(pString, ppEnd, nBase, &bNegative, &bOverflow);
 
-    return bNegative ? (unsigned long long)(-(long long)nValue) : nValue;
+    if (bOverflow) {
+        return ~0ull; /* ULLONG_MAX, as strtoull() saturates */
+    }
+
+    return bNegative ? (unsigned long long)(0ull - nValue) : nValue;
 }
 
 int x_rand(void)
@@ -774,21 +819,38 @@ int x_fclose(void *pFile)
 
 size_t x_fread(void *pBuffer, size_t nSize, size_t nCount, void *pFile)
 {
-    DWORD nRead = 0;
     size_t nTotal = nSize * nCount;
+    size_t nDone = 0;
 
-    if ((pFile == NULL) || (nTotal == 0)) {
+    if ((pFile == NULL) || (nSize == 0) || (nTotal == 0)) {
         return 0;
     }
 
-    if (!ReadFile((HANDLE)pFile, pBuffer, (DWORD)nTotal, &nRead, NULL)) {
-        return 0;
+    /* ReadFile counts in a DWORD, so a request of 4 GiB or more is split
+     * into chunks rather than truncated by the cast. */
+    while (nDone < nTotal) {
+        size_t nChunk = nTotal - nDone;
+        DWORD nRead = 0;
+
+        if (nChunk > 0x40000000u) {
+            nChunk = 0x40000000u;
+        }
+
+        if (!ReadFile((HANDLE)pFile, (char *)pBuffer + nDone, (DWORD)nChunk, &nRead, NULL)) {
+            break;
+        }
+
+        nDone += (size_t)nRead;
+
+        if (nRead < (DWORD)nChunk) {
+            break; /* end of file */
+        }
     }
 
-    return (size_t)nRead / nSize;
+    return nDone / nSize;
 }
 
-int x_fseek(void *pFile, long nOffset, int nOrigin)
+int x_fseek(void *pFile, long long nOffset, int nOrigin)
 {
     LARGE_INTEGER liDistance;
     DWORD nMethod = FILE_BEGIN;
@@ -803,12 +865,12 @@ int x_fseek(void *pFile, long nOffset, int nOrigin)
         nMethod = FILE_END;
     }
 
-    liDistance.QuadPart = nOffset;
+    liDistance.QuadPart = (LONGLONG)nOffset;
 
     return SetFilePointerEx((HANDLE)pFile, liDistance, NULL, nMethod) ? 0 : -1;
 }
 
-long x_ftell(void *pFile)
+long long x_ftell(void *pFile)
 {
     LARGE_INTEGER liZero;
     LARGE_INTEGER liPosition;
@@ -824,7 +886,7 @@ long x_ftell(void *pFile)
         return -1;
     }
 
-    return (long)liPosition.QuadPart;
+    return (long long)liPosition.QuadPart;
 }
 
 void x_rewind(void *pFile)
@@ -875,9 +937,10 @@ size_t x_fread(void *pBuffer, size_t nSize, size_t nCount, void *pFile)
     return fread(pBuffer, nSize, nCount, (FILE *)pFile);
 }
 
-int x_fseek(void *pFile, long nOffset, int nOrigin)
+int x_fseek(void *pFile, long long nOffset, int nOrigin)
 {
     int nWhence = SEEK_SET;
+    long nSeek = (long)nOffset;
 
     if (nOrigin == X_SEEK_CUR) {
         nWhence = SEEK_CUR;
@@ -885,12 +948,19 @@ int x_fseek(void *pFile, long nOffset, int nOrigin)
         nWhence = SEEK_END;
     }
 
-    return fseek((FILE *)pFile, nOffset, nWhence);
+    /* fseek() carries a long. That is 64 bit on the LP64 targets cdie ships
+     * for; where it is narrower the offset simply cannot be expressed, and
+     * fseeko() is not visible under -std=c99.                              */
+    if ((long long)nSeek != nOffset) {
+        return -1;
+    }
+
+    return fseek((FILE *)pFile, nSeek, nWhence);
 }
 
-long x_ftell(void *pFile)
+long long x_ftell(void *pFile)
 {
-    return ftell((FILE *)pFile);
+    return (long long)ftell((FILE *)pFile);
 }
 
 void x_rewind(void *pFile)
@@ -912,11 +982,15 @@ int x_fflush(void *pStream)
 #if defined(_WIN32)
 
 /* A printf subset covering everything cdie uses: %s %c %d %i %u %o %x %X %p
- * %% with the -, +, space, 0 and # flags, a width, a precision, and the h,
- * hh, l, ll and z length modifiers.
+ * %e %E %f %F %g %G %% with the -, +, space, 0 and # flags, a width, a
+ * precision, and the h, hh, l, ll and z length modifiers.
  *
- * There is no floating point conversion on purpose - every double that cdie
- * prints goes through x_dtoa_shortest / x_dtoa_fixed / x_dtoa_precision.    */
+ * The floating point conversions are laid out here and generate their digits
+ * in x_dtoa_cformat; %a is the one specifier without a generator, and the
+ * only one that still prints a marker. Everything cdie itself prints as a
+ * number still goes through x_dtoa_shortest / x_dtoa_fixed /
+ * x_dtoa_precision - these exist so a diagnostic that reaches for %g reads
+ * the same here as it does on a hosted build.                              */
 
 typedef struct {
     char *pBuffer;
@@ -983,7 +1057,46 @@ static int fmt_unsigned(char *pBuffer, unsigned long long nValue, unsigned int n
     return nCount;
 }
 
-int x_vsnprintf(char *pBuffer, size_t nSize, const char *pFormat, X_VA_LIST args)
+/* Emits one integer conversion: the sign or 0x prefix, the zeros the
+ * precision asks for, then the digits, the whole thing padded to the field
+ * width. The precision zeros go straight into the sink, so a precision read
+ * from the format or from va_arg cannot overrun the caller's digit buffer,
+ * however large it is.                                                     */
+static void fmt_emit_number(XFormatSink *pSink, const char *pPrefix, int nPrefix, const char *pDigits, int nDigits, int nZeros, int nWidth, int bLeft,
+                            int bZero)
+{
+    /* nZeros comes from the precision and can be as large as an int holds,
+     * so the field width is reduced by it rather than compared against a
+     * sum that would overflow. */
+    int nOut = nPrefix + nDigits;
+    int nPad = ((nWidth > nZeros) && ((nWidth - nZeros) > nOut)) ? (nWidth - nZeros - nOut) : 0;
+    int i = 0;
+
+    if ((!bLeft) && (!bZero)) {
+        fmt_pad(pSink, ' ', nPad);
+    }
+
+    for (i = 0; i < nPrefix; i++) {
+        fmt_put(pSink, pPrefix[i]);
+    }
+
+    /* The zero padding of the 0 flag goes after the sign, not before it. */
+    if ((!bLeft) && bZero) {
+        fmt_pad(pSink, '0', nPad);
+    }
+
+    fmt_pad(pSink, '0', nZeros);
+
+    for (i = 0; i < nDigits; i++) {
+        fmt_put(pSink, pDigits[i]);
+    }
+
+    if (bLeft) {
+        fmt_pad(pSink, ' ', nPad);
+    }
+}
+
+X_PRINTF_LIKE(3, 0) int x_vsnprintf(char *pBuffer, size_t nSize, const char *pFormat, X_VA_LIST args)
 {
     XFormatSink sink;
     const char *p = pFormat;
@@ -1107,9 +1220,10 @@ int x_vsnprintf(char *pBuffer, size_t nSize, const char *pFormat, X_VA_LIST args
             case 'i': {
                 long long nValue = 0;
                 char sDigits[80];
-                char sOut[84];
+                char sPrefix[2];
                 int nDigits = 0;
-                int nOut = 0;
+                int nPrefix = 0;
+                int nZeros = 0;
                 unsigned long long nMagnitude = 0;
                 int bNegative = 0;
 
@@ -1127,18 +1241,25 @@ int x_vsnprintf(char *pBuffer, size_t nSize, const char *pFormat, X_VA_LIST args
                 nMagnitude = bNegative ? (unsigned long long)(-(nValue + 1)) + 1ull : (unsigned long long)nValue;
                 nDigits = fmt_unsigned(sDigits, nMagnitude, 10, 0);
 
-                if (bNegative) {
-                    sOut[nOut++] = '-';
-                } else if (bPlus) {
-                    sOut[nOut++] = '+';
-                } else if (bSpace) {
-                    sOut[nOut++] = ' ';
+                /* C99 7.19.6.1: a precision of zero prints nothing for the
+                 * value zero, and a larger one zero-extends the digits. */
+                if ((nPrecision == 0) && (nMagnitude == 0)) {
+                    nDigits = 0;
                 }
 
-                x_memcpy(sOut + nOut, sDigits, (size_t)nDigits);
-                nOut += nDigits;
+                if (nPrecision > nDigits) {
+                    nZeros = nPrecision - nDigits;
+                }
 
-                fmt_emit(&sink, sOut, (size_t)nOut, nWidth, bLeft, bZero && (nPrecision < 0));
+                if (bNegative) {
+                    sPrefix[nPrefix++] = '-';
+                } else if (bPlus) {
+                    sPrefix[nPrefix++] = '+';
+                } else if (bSpace) {
+                    sPrefix[nPrefix++] = ' ';
+                }
+
+                fmt_emit_number(&sink, sPrefix, nPrefix, sDigits, nDigits, nZeros, nWidth, bLeft, bZero && (nPrecision < 0));
                 break;
             }
 
@@ -1149,9 +1270,10 @@ int x_vsnprintf(char *pBuffer, size_t nSize, const char *pFormat, X_VA_LIST args
             case 'p': {
                 unsigned long long nValue = 0;
                 char sDigits[80];
-                char sOut[88];
+                char sPrefix[2];
                 int nDigits = 0;
-                int nOut = 0;
+                int nPrefix = 0;
+                int nZeros = 0;
                 unsigned int nBase = 10;
                 int bUpper = (*p == 'X') ? 1 : 0;
 
@@ -1174,22 +1296,27 @@ int x_vsnprintf(char *pBuffer, size_t nSize, const char *pFormat, X_VA_LIST args
                 }
 
                 if (bAlt && nBase == 16 && nValue) {
-                    sOut[nOut++] = '0';
-                    sOut[nOut++] = bUpper ? 'X' : 'x';
+                    sPrefix[nPrefix++] = '0';
+                    sPrefix[nPrefix++] = bUpper ? 'X' : 'x';
                 }
 
                 nDigits = fmt_unsigned(sDigits, nValue, nBase, bUpper);
 
-                while (nDigits < nPrecision) {
-                    x_memmove(sDigits + 1, sDigits, (size_t)nDigits);
-                    sDigits[0] = '0';
-                    nDigits++;
+                if ((nPrecision == 0) && (nValue == 0)) {
+                    nDigits = 0;
                 }
 
-                x_memcpy(sOut + nOut, sDigits, (size_t)nDigits);
-                nOut += nDigits;
+                if (nPrecision > nDigits) {
+                    nZeros = nPrecision - nDigits;
+                }
 
-                fmt_emit(&sink, sOut, (size_t)nOut, nWidth, bLeft, bZero && (nPrecision < 0));
+                /* C99 7.19.6.1: # widens an octal conversion just enough to
+                 * put a zero in front of it. */
+                if (bAlt && (nBase == 8) && (nZeros == 0) && ((nDigits == 0) || (sDigits[0] != '0'))) {
+                    nZeros = 1;
+                }
+
+                fmt_emit_number(&sink, sPrefix, nPrefix, sDigits, nDigits, nZeros, nWidth, bLeft, bZero && (nPrecision < 0));
                 break;
             }
 
@@ -1198,11 +1325,44 @@ int x_vsnprintf(char *pBuffer, size_t nSize, const char *pFormat, X_VA_LIST args
             case 'e':
             case 'E':
             case 'g':
-            case 'G':
+            case 'G': {
+                double nValue = va_arg(args, double);
+                /* The widest conversion is %f of a value near DBL_MAX at the
+                 * precision ceiling: 309 integer digits, the point and 400
+                 * fraction digits. */
+                char sText[768];
+                char sPrefix[2];
+                int nDigits = 0;
+                int nPrefix = 0;
+                int bSpecial = (x_isnan(nValue) || x_isinf(nValue)) ? 1 : 0;
+
+                /* The conversion produces the magnitude only, so the sign is
+                 * a prefix like the one an integer conversion carries. */
+                if (x_signbit(nValue)) {
+                    sPrefix[nPrefix++] = '-';
+                } else if (bPlus) {
+                    sPrefix[nPrefix++] = '+';
+                } else if (bSpace) {
+                    sPrefix[nPrefix++] = ' ';
+                }
+
+                nDigits = x_dtoa_cformat(nValue, *p, nPrecision, bAlt, sText, sizeof(sText));
+
+                if (nDigits > (int)(sizeof(sText) - 1)) {
+                    nDigits = (int)(sizeof(sText) - 1);
+                }
+
+                /* C99 7.19.6.1: the 0 flag is ignored for an infinity or a
+                 * NaN, which pad with spaces like a string. */
+                fmt_emit_number(&sink, sPrefix, nPrefix, sText, nDigits, 0, nWidth, bLeft, bZero && (!bSpecial));
+                break;
+            }
+
             case 'a':
             case 'A': {
-                /* Not supported by design; consume the argument so the
-                 * varargs cursor stays in step and emit a marker.          */
+                /* Hexadecimal floating point has no generator here and no
+                 * caller in the project; consume the argument so the varargs
+                 * cursor stays in step and emit a marker.                   */
                 (void)va_arg(args, double);
                 fmt_emit(&sink, "<float>", 7, nWidth, bLeft, 0);
                 break;
@@ -1232,14 +1392,14 @@ int x_vsnprintf(char *pBuffer, size_t nSize, const char *pFormat, X_VA_LIST args
 
 #else /* not _WIN32 */
 
-int x_vsnprintf(char *pBuffer, size_t nSize, const char *pFormat, X_VA_LIST args)
+X_PRINTF_LIKE(3, 0) int x_vsnprintf(char *pBuffer, size_t nSize, const char *pFormat, X_VA_LIST args)
 {
     return vsnprintf(pBuffer, nSize, pFormat, args);
 }
 
 #endif /* _WIN32 */
 
-int x_snprintf(char *pBuffer, size_t nSize, const char *pFormat, ...)
+X_PRINTF_LIKE(3, 4) int x_snprintf(char *pBuffer, size_t nSize, const char *pFormat, ...)
 {
     X_VA_LIST args;
     int nResult = 0;
@@ -1253,7 +1413,7 @@ int x_snprintf(char *pBuffer, size_t nSize, const char *pFormat, ...)
 
 /* Formatted output goes through x_vsnprintf and then one write, so the
  * Windows path never touches the CRT stdio layer.                          */
-static int x_vfprintf_stream(void *pStream, const char *pFormat, X_VA_LIST args)
+X_PRINTF_LIKE(2, 0) static int x_vfprintf_stream(void *pStream, const char *pFormat, X_VA_LIST args)
 {
     char sStack[1024];
     X_VA_LIST copy;
@@ -1287,7 +1447,7 @@ static int x_vfprintf_stream(void *pStream, const char *pFormat, X_VA_LIST args)
     }
 }
 
-int x_printf(const char *pFormat, ...)
+X_PRINTF_LIKE(1, 2) int x_printf(const char *pFormat, ...)
 {
     X_VA_LIST args;
     int nResult = 0;
@@ -1299,7 +1459,7 @@ int x_printf(const char *pFormat, ...)
     return nResult;
 }
 
-int x_fprintf(void *pStream, const char *pFormat, ...)
+X_PRINTF_LIKE(2, 3) int x_fprintf(void *pStream, const char *pFormat, ...)
 {
     X_VA_LIST args;
     int nResult = 0;
@@ -1309,6 +1469,43 @@ int x_fprintf(void *pStream, const char *pFormat, ...)
     X_VA_END(args);
 
     return nResult;
+}
+
+/* ------------------------------------------------------------------------ */
+/*  Clock                                                                    */
+/* ------------------------------------------------------------------------ */
+
+long long x_clock_ms(void)
+{
+#if defined(_WIN32)
+    LARGE_INTEGER nFrequency;
+    LARGE_INTEGER nCounter;
+
+    /* QueryPerformanceCounter is in KERNEL32, so the CRT-free build reaches
+     * it like every other primitive in this file. */
+    if (QueryPerformanceFrequency(&nFrequency) && (nFrequency.QuadPart > 0) && QueryPerformanceCounter(&nCounter)) {
+        long long nTicks = (long long)nCounter.QuadPart;
+        long long nPerSecond = (long long)nFrequency.QuadPart;
+
+        /* Split into whole seconds and a remainder: scaling the raw tick
+         * count by 1000 overflows after a few weeks of uptime. */
+        return (nTicks / nPerSecond) * 1000 + ((nTicks % nPerSecond) * 1000) / nPerSecond;
+    }
+
+    /* Pre-Vista fallback: 32-bit milliseconds, so a reading wraps once every
+     * 49 days. A difference of two readings is still right either side of
+     * the wrap for every interval this is used to measure. */
+    return (long long)GetTickCount();
+#else
+    struct timespec time;
+
+    if (clock_gettime(CLOCK_MONOTONIC, &time) == 0) {
+        return (long long)time.tv_sec * 1000 + (long long)(time.tv_nsec / 1000000);
+    }
+
+    /* No monotonic clock: processor time is the next best answer. */
+    return (long long)(((double)clock() * 1000.0) / (double)CLOCKS_PER_SEC);
+#endif
 }
 
 /* Math lives in utils_math.c; double/decimal conversion in utils_fp.c. */

@@ -23,6 +23,7 @@
  * then every applicable detection script in database order.               */
 
 #include "cdie.h"
+#include "../core/cd_fs.h"
 #include "../format/xft.h"
 
 
@@ -168,7 +169,72 @@ static void stable_sort_records(ScanRecord *pRecords, int nCount)
     }
 }
 
-static XFileType pick_file_type(XFTSet *pSet)
+/* DOS MZ files can carry an archive after the image.  DiE reports the ZIP
+ * overlay even when the executable itself is packed (for example PKLITE).
+ * The PE parser already exposes overlays; retain the corresponding DOS case
+ * here so the C console produces the same record. */
+static void add_msdos_zip_overlay(DieEngine *pEngine)
+{
+    const unsigned char *pData = pEngine->file.pData;
+    cd_i64 nSize = pEngine->file.nSize;
+    cd_i64 nOverlay = -1;
+    cd_u16 nLastPage = 0;
+    cd_u16 nPages = 0;
+    ScanResult *pResult = pEngine->pResult;
+    ScanRecord *pRecord = NULL;
+
+    if ((pEngine->fileType != XFT_MSDOS) || (nSize < 6) || (pData[0] != 'M') || (pData[1] != 'Z')) {
+        return;
+    }
+
+    nLastPage = (cd_u16)pData[2] | ((cd_u16)pData[3] << 8);
+    nPages = (cd_u16)pData[4] | ((cd_u16)pData[5] << 8);
+    nOverlay = (cd_i64)nPages * 512;
+    if (nLastPage) {
+        nOverlay -= 512 - nLastPage;
+    }
+
+    if ((nOverlay < 0) || ((nOverlay + 4) > nSize) || (pData[nOverlay] != 'P') || (pData[nOverlay + 1] != 'K') ||
+        (pData[nOverlay + 2] != 3) || (pData[nOverlay + 3] != 4)) {
+        return;
+    }
+
+    if (pResult->nCount + 1 > pResult->nCapacity) {
+        pResult->nCapacity = pResult->nCapacity ? (pResult->nCapacity * 2) : 16;
+        pResult->pRecords = (ScanRecord *)cd_realloc(pResult->pRecords, (size_t)pResult->nCapacity * sizeof(ScanRecord));
+    }
+
+    pRecord = &pResult->pRecords[pResult->nCount++];
+    x_memset(pRecord, 0, sizeof(*pRecord));
+    pRecord->pType = cd_strdup("Overlay");
+    pRecord->pName = cd_strdup("ZIP archive");
+    pRecord->pVersion = cd_strdup("");
+    pRecord->pInfo = cd_strdup("");
+    pRecord->nPrio = cdie_type_to_prio("Overlay");
+}
+
+/* XCOM::isValid, whole: a COM image is loaded at 0x100 and has to fit in the
+ * 64 KiB segment, so anything no larger than this can be one.              */
+#define XCOM_MAX_SIZE (0x10000 - 0x100)
+
+/* XBinary::getDeviceFileSuffix(getDevice()).toUpper() == "COM". */
+static int has_com_suffix(const char *pFileName)
+{
+    char *pSuffix = NULL;
+    int bResult = 0;
+
+    if (pFileName == NULL) {
+        return 0;
+    }
+
+    pSuffix = cd_path_suffix(pFileName);
+    bResult = (cd_stricmp_ascii(pSuffix, "COM") == 0) ? 1 : 0;
+    cd_free(pSuffix);
+
+    return bResult;
+}
+
+static XFileType pick_file_type(XBFile *pFile, XFTSet *pSet)
 {
     if (xft_contains(pSet, XFT_PE32)) return XFT_PE32;
     if (xft_contains(pSet, XFT_PE64)) return XFT_PE64;
@@ -199,6 +265,18 @@ static XFileType pick_file_type(XFTSet *pSet)
     if (xft_contains(pSet, XFT_JAVACLASS)) return XFT_JAVACLASS;
     if (xft_contains(pSet, XFT_PYC)) return XFT_PYC;
 
+    /* g_arrPrefFileTypeOrder puts FT_COM ahead of FT_TEXT/FT_DATA/FT_BINARY,
+     * and XBinary::getFileTypes inserts FT_COM only when nothing else was
+     * recognised (the set still holds just FT_BINARY) or the file is plain
+     * text, the size leaves room for the 0x100-byte PSP, and the file suffix
+     * uppercases to "COM". Reaching the fallback below is this port's form of
+     * that first condition. A file without the suffix still meets the COM
+     * scripts: scan_engine_run's binary arm runs them the way the reference's
+     * last scanProcess branch does.                                        */
+    if ((pFile->nSize <= XCOM_MAX_SIZE) && has_com_suffix(pFile->pFileName)) {
+        return XFT_COM;
+    }
+
     return XFT_BINARY;
 }
 
@@ -209,12 +287,21 @@ static void run_script(DieEngine *pEngine, DBSignature *pRecord, int bCallDetect
     JSVal detect;
     JSVal args[3];
     JSVal callResult;
+    cd_i64 nProfileStart = -1;
 
     /* Setting CDIE_TRACE traces the script order, which is the quickest way
      * to find the culprit when a rule misbehaves on an unusual input.      */
     if (x_getenv("CDIE_TRACE")) {
         x_fprintf(x_stderr(), "[cdie] %s\n", pRecord->pName);
         x_fflush(x_stderr());
+    }
+
+    /* DiE_Script::_executeSignature announces the script, times it and
+     * reports "<name>: [n ms]" afterwards. Only detection scripts go through
+     * it; the _init scripts are evaluated elsewhere and are not measured.  */
+    if (bCallDetect) {
+        cdie_profile_text(pEngine, pRecord->pName);
+        nProfileStart = cdie_profile_start(pEngine);
     }
 
     js_clear_error(pCtx);
@@ -225,6 +312,7 @@ static void run_script(DieEngine *pEngine, DBSignature *pRecord, int bCallDetect
         x_snprintf(sBuf, sizeof(sBuf), "%s: %s", pRecord->pName, js_error(pCtx));
         result_add_error(pEngine->pResult, sBuf);
         js_clear_error(pCtx);
+        cdie_profile_end(pEngine, nProfileStart, "%s:", pRecord->pName);
 
         return;
     }
@@ -239,6 +327,7 @@ static void run_script(DieEngine *pEngine, DBSignature *pRecord, int bCallDetect
     if (!js_is_callable(detect)) {
         js_release(pCtx, detect);
         js_release(pCtx, global);
+        cdie_profile_end(pEngine, nProfileStart, "%s:", pRecord->pName);
 
         return;
     }
@@ -260,15 +349,19 @@ static void run_script(DieEngine *pEngine, DBSignature *pRecord, int bCallDetect
     js_release(pCtx, callResult);
     js_release(pCtx, detect);
     js_release(pCtx, global);
+
+    cdie_profile_end(pEngine, nProfileStart, "%s:", pRecord->pName);
 }
 
-/* The scan proper, over an already-populated XBFile (the struct is taken by
- * value and closed here). Both cdie_scan_file and cdie_scan_memory funnel
- * through this so the two entry points share one verified path. */
-static int scan_engine_run(XBFile *pOpenedFile, DBase *pDb, ScanOptions *pOptions, ScanResult *pResult)
+/* One detection pass over an already-populated XBFile for a single file type.
+ * The file is borrowed, not closed, so the FT_COM arm below can run the pass
+ * twice; the caller sorts the merged record list. bAddUnknown mirrors the
+ * reference's _processDetect flag: when it is 0 an empty pass stays empty
+ * instead of gaining the "Unknown" record.                                 */
+static int scan_run_pass(XBFile *pOpenedFile, XFileType fileType, int bIsCliAssembly, DBase *pDb, ScanOptions *pOptions, ScanResult *pResult,
+                         int bAddUnknown)
 {
     DieEngine engine;
-    XFTSet set;
     XBMemoryMap binaryMap;
     int i = 0;
     int nGlobalInit = -1;
@@ -277,12 +370,11 @@ static int scan_engine_run(XBFile *pOpenedFile, DBase *pDb, ScanOptions *pOption
     x_memset(&engine, 0, sizeof(engine));
     engine.file = *pOpenedFile;
 
-    xft_detect(&engine.file, &set);
-    engine.fileType = pick_file_type(&set);
+    engine.fileType = fileType;
     /* A .NET PE is typed both as PE and CLI assembly; the primary type stays
      * PE, but the CLI-assembly flag drives the DOTNET object and the
      * PE/DOTNET scripts. */
-    engine.bIsCliAssembly = xft_contains(&set, XFT_CLI_ASSEMBLY);
+    engine.bIsCliAssembly = bIsCliAssembly;
     engine.pDb = pDb;
     engine.pOptions = pOptions;
     engine.pResult = pResult;
@@ -366,13 +458,16 @@ static int scan_engine_run(XBFile *pOpenedFile, DBase *pDb, ScanOptions *pOption
         }
     }
 
-    for (i = 0; (i < pDb->nCount) && (!engine.bStop); i++) {
+    /* cd_alloc_oom() is always false unless the soft out-of-memory policy is
+     * armed, which only the shared library does; there it ends the scan at
+     * the next script boundary instead of ending the process. */
+    for (i = 0; (i < pDb->nCount) && (!engine.bStop) && (!cd_alloc_oom()); i++) {
         if (should_execute(&pDb->pRecords[i], engine.fileType, engine.bIsCliAssembly, pOptions)) {
             run_script(&engine, &pDb->pRecords[i], 1);
         }
     }
 
-    if (pResult->nCount == 0) {
+    if (bAddUnknown && (pResult->nCount == 0)) {
         ScanRecord *pRecord = NULL;
 
         pResult->pRecords = (ScanRecord *)cd_calloc(1, sizeof(ScanRecord));
@@ -387,9 +482,7 @@ static int scan_engine_run(XBFile *pOpenedFile, DBase *pDb, ScanOptions *pOption
         pResult->nCount = 1;
     }
 
-    if (pOptions->bSort) {
-        stable_sort_records(pResult->pRecords, pResult->nCount);
-    }
+    add_msdos_zip_overlay(&engine);
 
     js_free(engine.pJs);
 
@@ -399,6 +492,7 @@ static int scan_engine_run(XBFile *pOpenedFile, DBase *pDb, ScanOptions *pOption
     }
 
     cd_free(engine.pBlackList);
+    cdie_profile_free(&engine);
 
     if (engine.bHasPE) {
         xpe_free(&engine.pe);
@@ -438,9 +532,170 @@ static int scan_engine_run(XBFile *pOpenedFile, DBase *pDb, ScanOptions *pOption
         xzip_free(&engine.zip);
     }
 
-    xb_close(&engine.file);
-
     return 1;
+}
+
+/* Moves every record and error of pFrom into pTo - to the front when bFront
+ * is set, otherwise after what is already there - leaving pFrom empty. The
+ * record strings change owner, so only the arrays are freed.               */
+static void result_merge(ScanResult *pTo, ScanResult *pFrom, int bFront)
+{
+    int nTotal = 0;
+
+    if (pFrom->nCount > 0) {
+        int nAt = bFront ? 0 : pTo->nCount;
+
+        nTotal = pFrom->nCount + pTo->nCount;
+
+        if (nTotal > pTo->nCapacity) {
+            pTo->nCapacity = nTotal;
+            pTo->pRecords = (ScanRecord *)cd_realloc(pTo->pRecords, (size_t)nTotal * sizeof(ScanRecord));
+        }
+
+        if (bFront && (pTo->nCount > 0)) {
+            x_memmove(pTo->pRecords + pFrom->nCount, pTo->pRecords, (size_t)pTo->nCount * sizeof(ScanRecord));
+        }
+
+        x_memcpy(pTo->pRecords + nAt, pFrom->pRecords, (size_t)pFrom->nCount * sizeof(ScanRecord));
+        pTo->nCount = nTotal;
+    }
+
+    if (pFrom->nErrorCount > 0) {
+        int nErrors = pFrom->nErrorCount + pTo->nErrorCount;
+        int nAt = bFront ? 0 : pTo->nErrorCount;
+        int i = 0;
+
+        pTo->ppErrors = (char **)cd_realloc(pTo->ppErrors, (size_t)nErrors * sizeof(char *));
+
+        if (bFront && (pTo->nErrorCount > 0)) {
+            x_memmove(pTo->ppErrors + pFrom->nErrorCount, pTo->ppErrors, (size_t)pTo->nErrorCount * sizeof(char *));
+        }
+
+        for (i = 0; i < pFrom->nErrorCount; i++) {
+            pTo->ppErrors[nAt + i] = pFrom->ppErrors[i];
+        }
+
+        pTo->nErrorCount = nErrors;
+    }
+
+    cd_free(pFrom->pRecords);
+    cd_free(pFrom->ppErrors);
+    cd_free(pFrom->pFileName);
+    x_memset(pFrom, 0, sizeof(*pFrom));
+}
+
+/* XScanEngine's hasNonGenericCOMRecords. _COM.0.sg answers for every file
+ * that reaches it, so a COM pass only counts when it produced something
+ * beyond the operating-system and format lines it always emits.            */
+static int com_has_non_generic(ScanResult *pResult)
+{
+    int i = 0;
+
+    for (i = 0; i < pResult->nCount; i++) {
+        char *pType = cdie_translate_type(pResult->pRecords[i].pType);
+        int bGeneric = ((cd_stricmp_ascii(pType, "Operation system") == 0) || (cd_stricmp_ascii(pType, "Format") == 0)) ? 1 : 0;
+
+        cd_free(pType);
+
+        if (!bGeneric) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+/* The scan proper, over an already-populated XBFile (the struct is taken by
+ * value and closed here). Both cdie_scan_file and cdie_scan_memory funnel
+ * through this so the two entry points share one verified path. */
+static int scan_engine_run(XBFile *pOpenedFile, DBase *pDb, ScanOptions *pOptions, ScanResult *pResult)
+{
+    XFTSet set;
+    XFileType fileType = XFT_BINARY;
+    int bIsCliAssembly = 0;
+    int nResult = 0;
+#if defined(DIE_BUILD_SHARED)
+    /* Inside a host process an allocation failure must not take the process
+     * with it, so the shared library runs the scan under the soft policy and
+     * reports the failure as a failed scan. The console and the static
+     * library keep the abort, and with it their exact behaviour. */
+    int bSoftOom = cd_alloc_begin_soft_oom();
+#endif
+
+    xft_detect(pOpenedFile, &set);
+    fileType = pick_file_type(pOpenedFile, &set);
+    bIsCliAssembly = xft_contains(&set, XFT_CLI_ASSEMBLY);
+
+    if (fileType == XFT_COM) {
+        /* XScanEngine::scanProcess's FT_COM arm is two passes: a deep scan
+         * runs the FT_BINARY scripts first, and the FT_COM pass adds its
+         * "Unknown" record only when that produced nothing. The binary
+         * records come first in the merged list, and a file that answered as
+         * binary is reported as Binary rather than COM.                    */
+        ScanResult binResult;
+        int bIsBinary = 0;
+
+        x_memset(&binResult, 0, sizeof(binResult));
+
+        if (pOptions->bDeepScan) {
+            scan_run_pass(pOpenedFile, XFT_BINARY, bIsCliAssembly, pDb, pOptions, &binResult, 0);
+            bIsBinary = (binResult.nCount > 0);
+        }
+
+        nResult = scan_run_pass(pOpenedFile, XFT_COM, bIsCliAssembly, pDb, pOptions, pResult, !bIsBinary);
+
+        result_merge(pResult, &binResult, 1);
+        pResult->fileType = bIsBinary ? XFT_BINARY : XFT_COM;
+    } else if ((fileType == XFT_BINARY) && (pOpenedFile->nSize <= XCOM_MAX_SIZE)) {
+        /* XScanEngine::scanProcess's last arm - everything no format claimed
+         * - offers the file to the COM scripts before the binary ones, which
+         * is the only way the 248 COM signatures run on a file that is not
+         * named *.com. XCOM::isValid is nothing but the size test above: a
+         * COM image loads at 0x100 and cannot cross the 64 KiB segment.
+         *
+         * The reference copies the options and clears the verbose flag for
+         * that pass, so the COM "Operation system" line stays out, and never
+         * lets it add "Unknown". Its records are kept only when one of them
+         * is neither an operating system nor a format, and that same answer
+         * is what suppresses the binary pass's own "Unknown".              */
+        ScanResult comResult;
+        ScanOptions comOptions = *pOptions;
+        int bIsCom = 0;
+
+        x_memset(&comResult, 0, sizeof(comResult));
+        comOptions.bVerbose = 0;
+
+        scan_run_pass(pOpenedFile, XFT_COM, bIsCliAssembly, pDb, &comOptions, &comResult, 0);
+        bIsCom = com_has_non_generic(&comResult);
+
+        nResult = scan_run_pass(pOpenedFile, XFT_BINARY, bIsCliAssembly, pDb, pOptions, pResult, !bIsCom);
+
+        if (bIsCom) {
+            result_merge(pResult, &comResult, 0);
+        } else {
+            scan_result_free(&comResult);
+        }
+    } else {
+        nResult = scan_run_pass(pOpenedFile, fileType, bIsCliAssembly, pDb, pOptions, pResult, 1);
+    }
+
+    if (pOptions->bSort) {
+        stable_sort_records(pResult->pRecords, pResult->nCount);
+    }
+
+    xb_close(pOpenedFile);
+
+#if defined(DIE_BUILD_SHARED)
+    if (bSoftOom) {
+        if (cd_alloc_oom()) {
+            nResult = 0;
+        }
+
+        cd_alloc_end_soft_oom();
+    }
+#endif
+
+    return nResult;
 }
 
 int cdie_scan_file(const char *pFileName, DBase *pDb, ScanOptions *pOptions, ScanResult *pResult)
@@ -470,8 +725,11 @@ int cdie_scan_memory(const void *pData, cd_i64 nSize, DBase *pDb, ScanOptions *p
         nSize = 0;
     }
 
-    /* A private copy so xb_close can free it like a file-backed buffer. */
-    file.pData = (unsigned char *)cd_malloc((size_t)(nSize > 0 ? nSize : 1));
+    /* A private copy so xb_close can free it like a file-backed buffer. The
+     * size is the caller's, so this is one of the allocations that has to be
+     * allowed to fail rather than end the process; the NULL check below is
+     * what makes cd_try_malloc the right primitive here. */
+    file.pData = (unsigned char *)cd_try_malloc((size_t)(nSize > 0 ? nSize : 1));
 
     if (file.pData == NULL) {
         return 0;

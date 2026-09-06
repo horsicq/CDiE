@@ -102,6 +102,27 @@ static int operand_size(DisasmState *pState)
     return 4;
 }
 
+/* x86 tops out at 15 bytes per instruction; a longer decode means the byte run
+ * is not an instruction at all. The Capstone-backed reference falls back to a
+ * one-byte "db" there, so step a single byte and report no mnemonic. */
+#define XDISASM_MAX_LENGTH 15
+
+static void disasm_finish(const DisasmState *pState, XDisasmResult *pResult)
+{
+    cd_i64 nLength = pState->nPos - pState->nStart;
+
+    if (nLength > XDISASM_MAX_LENGTH) {
+        x_memset(pResult, 0, sizeof(*pResult));
+        nLength = 1;
+    }
+
+    if (nLength <= 0) {
+        nLength = 1;
+    }
+
+    pResult->nSize = (int)nLength;
+}
+
 static void set_mnemonic(XDisasmResult *pResult, const char *pText)
 {
     size_t nSize = x_strlen(pText);
@@ -143,7 +164,15 @@ XDisasmResult xdisasm(XBFile *pFile, cd_i64 nOffset, int nBits)
 
     /* Legacy prefixes. */
     while (!bDone) {
-        cd_u8 nByte = peek(&state);
+        cd_u8 nByte = 0;
+
+        /* Never walk past the 15-byte instruction limit: a long run of prefix
+         * bytes is not an instruction, and scanning it all is wasted work. */
+        if ((state.nPos - state.nStart) >= XDISASM_MAX_LENGTH) {
+            break;
+        }
+
+        nByte = peek(&state);
 
         switch (nByte) {
             case 0xF0:
@@ -238,7 +267,7 @@ XDisasmResult xdisasm(XBFile *pFile, cd_i64 nOffset, int nBits)
             }
         }
 
-        result.nSize = (int)(state.nPos - state.nStart);
+        disasm_finish(&state, &result);
 
         return result;
     }
@@ -250,7 +279,7 @@ XDisasmResult xdisasm(XBFile *pFile, cd_i64 nOffset, int nBits)
         if (nLow <= 3) {
             set_mnemonic(&result, g_pGroup1[nGroup]);
             modrm(&state);
-            result.nSize = (int)(state.nPos - state.nStart);
+            disasm_finish(&state, &result);
 
             return result;
         }
@@ -258,7 +287,7 @@ XDisasmResult xdisasm(XBFile *pFile, cd_i64 nOffset, int nBits)
         if (nLow == 4) {
             set_mnemonic(&result, g_pGroup1[nGroup]);
             state.nPos += 1;
-            result.nSize = (int)(state.nPos - state.nStart);
+            disasm_finish(&state, &result);
 
             return result;
         }
@@ -266,7 +295,7 @@ XDisasmResult xdisasm(XBFile *pFile, cd_i64 nOffset, int nBits)
         if (nLow == 5) {
             set_mnemonic(&result, g_pGroup1[nGroup]);
             state.nPos += (state.bOperand16 ? 2 : 4);
-            result.nSize = (int)(state.nPos - state.nStart);
+            disasm_finish(&state, &result);
 
             return result;
         }
@@ -274,14 +303,14 @@ XDisasmResult xdisasm(XBFile *pFile, cd_i64 nOffset, int nBits)
 
     if ((nOpcode >= 0x50) && (nOpcode <= 0x57)) {
         set_mnemonic(&result, "PUSH");
-        result.nSize = (int)(state.nPos - state.nStart);
+        disasm_finish(&state, &result);
 
         return result;
     }
 
     if ((nOpcode >= 0x58) && (nOpcode <= 0x5F)) {
         set_mnemonic(&result, "POP");
-        result.nSize = (int)(state.nPos - state.nStart);
+        disasm_finish(&state, &result);
 
         return result;
     }
@@ -292,14 +321,14 @@ XDisasmResult xdisasm(XBFile *pFile, cd_i64 nOffset, int nBits)
         x_snprintf(sBuf, sizeof(sBuf), "J%s", g_pCondition[nOpcode & 0x0F]);
         set_mnemonic(&result, sBuf);
         state.nPos += 1;
-        result.nSize = (int)(state.nPos - state.nStart);
+        disasm_finish(&state, &result);
 
         return result;
     }
 
     if ((nOpcode >= 0x90) && (nOpcode <= 0x97)) {
         set_mnemonic(&result, (nOpcode == 0x90) ? "NOP" : "XCHG");
-        result.nSize = (int)(state.nPos - state.nStart);
+        disasm_finish(&state, &result);
 
         return result;
     }
@@ -307,7 +336,7 @@ XDisasmResult xdisasm(XBFile *pFile, cd_i64 nOffset, int nBits)
     if ((nOpcode >= 0xB0) && (nOpcode <= 0xB7)) {
         set_mnemonic(&result, "MOV");
         state.nPos += 1;
-        result.nSize = (int)(state.nPos - state.nStart);
+        disasm_finish(&state, &result);
 
         return result;
     }
@@ -315,7 +344,7 @@ XDisasmResult xdisasm(XBFile *pFile, cd_i64 nOffset, int nBits)
     if ((nOpcode >= 0xB8) && (nOpcode <= 0xBF)) {
         set_mnemonic(&result, "MOV");
         state.nPos += (state.bRexW ? 8 : (state.bOperand16 ? 2 : 4));
-        result.nSize = (int)(state.nPos - state.nStart);
+        disasm_finish(&state, &result);
 
         return result;
     }
@@ -434,11 +463,7 @@ XDisasmResult xdisasm(XBFile *pFile, cd_i64 nOffset, int nBits)
             break;
     }
 
-    result.nSize = (int)(state.nPos - state.nStart);
-
-    if (result.nSize <= 0) {
-        result.nSize = 1;
-    }
+    disasm_finish(&state, &result);
 
     return result;
 }

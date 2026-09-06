@@ -412,16 +412,19 @@ int xmach_parse(XBFile *pFile, XMACH *pMach)
             cd_u32 nNsects = xb_u32(pFile, nNsectsOffset, bBE);
             cd_i64 nSectOffset = nOffset + (bSeg64 ? 72 : 56);
             cd_i64 nSectSize = bSeg64 ? 80 : 68;
+            cd_i64 nCmdEnd = nOffset + (cd_i64)nCmdSize;
             cd_u32 s = 0;
 
-            if (nNsects > 0x10000) {
+            /* XMACH::getSectionRecords rejects any nsects that does not fit
+             * in a byte, so the walk stays inside the segment command.      */
+            if (nNsects & 0xFFFFFF00u) {
                 nNsects = 0;
             }
 
             for (s = 0; s < nNsects; s++) {
                 XMachSection *pSection = NULL;
 
-                if (nSectOffset + nSectSize > pFile->nSize) {
+                if ((nSectOffset + nSectSize > pFile->nSize) || (nSectOffset + nSectSize > nCmdEnd)) {
                     break;
                 }
 

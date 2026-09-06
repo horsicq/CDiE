@@ -83,9 +83,27 @@ static int read_chunk(XJpeg *pJpeg, cd_i64 nOffset, XJpegChunk *pChunk)
         pChunk->nDataSize = JPEG_SIGNATURE_SIZE;
     } else if (pChunk->nId == JPEG_MARKER_DRI) {
         pChunk->nDataSize = JPEG_DRI_SEGMENT_SIZE;
-    } else if (pChunk->nId != JPEG_MARKER_STUFFED_ZERO) {
-        pChunk->nDataSize = JPEG_SIGNATURE_SIZE + xb_u16(pJpeg->pFile, nOffset + JPEG_SIGNATURE_SIZE, 1);
+    } else if ((pChunk->nId != JPEG_MARKER_STUFFED_ZERO) && (pChunk->nId != JPEG_MARKER_PREFIX)) {
+        cd_u16 nLength = 0;
+
+        if (nOffset + JPEG_SEGMENT_HEADER_SIZE > pJpeg->pFile->nSize) {
+            return 0;
+        }
+
+        nLength = xb_u16(pJpeg->pFile, nOffset + JPEG_SIGNATURE_SIZE, 1);
+
+        /* A declared length below 2 does not even cover its own length field;
+         * the reference rejects the chunk instead of producing a short one. */
+        if (nLength < 2) {
+            return 0;
+        }
+
+        pChunk->nDataSize = JPEG_SIGNATURE_SIZE + nLength;
     } else {
+        return 0;
+    }
+
+    if (pChunk->nDataSize > pJpeg->pFile->nSize - nOffset) {
         return 0;
     }
 
@@ -96,6 +114,7 @@ static void parse_chunks(XJpeg *pJpeg)
 {
     cd_i64 nOffset = 0;
     int nCapacity = 0;
+    int bComplete = 0;
 
     for (;;) {
         XJpegChunk chunk;
@@ -114,36 +133,76 @@ static void parse_chunks(XJpeg *pJpeg)
 
         if (chunk.nId == JPEG_MARKER_SOS) {
             cd_i64 nDataOffset = nOffset;
-            XJpegChunk entropy;
+            cd_i64 nEntropyEnd = pJpeg->pFile->nSize;
+            cd_i64 nNextMarker = -1;
 
-            for (;;) {
-                nOffset = xb_find_u8(pJpeg->pFile, nOffset, -1, JPEG_MARKER_PREFIX);
+            /* Entropy-coded data may contain stuffed zeroes, runs of 0xFF fill
+             * bytes and restart markers; none of those end the scan. */
+            while (nOffset < pJpeg->pFile->nSize) {
+                cd_i64 nPrefixOffset = xb_find_u8(pJpeg->pFile, nOffset, -1, JPEG_MARKER_PREFIX);
+                cd_i64 nIdOffset = 0;
+                cd_u8 nId = 0;
 
-                if (nOffset == -1) {
+                if ((nPrefixOffset < 0) || (nPrefixOffset >= pJpeg->pFile->nSize - 1)) {
                     break;
                 }
 
-                if (xb_u8(pJpeg->pFile, nOffset + 1) != JPEG_MARKER_STUFFED_ZERO) {
+                nIdOffset = nPrefixOffset + 1;
+
+                while ((nIdOffset < pJpeg->pFile->nSize) && (xb_u8(pJpeg->pFile, nIdOffset) == JPEG_MARKER_PREFIX)) {
+                    nIdOffset++;
+                }
+
+                if (nIdOffset >= pJpeg->pFile->nSize) {
                     break;
                 }
 
-                nOffset++;
+                nId = xb_u8(pJpeg->pFile, nIdOffset);
+
+                if ((nId == JPEG_MARKER_STUFFED_ZERO) || is_restart_marker(nId)) {
+                    nOffset = nIdOffset + 1;
+
+                    continue;
+                }
+
+                nEntropyEnd = nPrefixOffset;
+                nNextMarker = nIdOffset - 1;
+
+                break;
             }
 
-            x_memset(&entropy, 0, sizeof(entropy));
-            entropy.bEntropyCodedData = 1;
-            entropy.nDataOffset = nDataOffset;
-            entropy.nDataSize = ((nOffset == -1) ? pJpeg->pFile->nSize : nOffset) - nDataOffset;
-            chunk_add(pJpeg, &entropy, &nCapacity);
+            if (nEntropyEnd > nDataOffset) {
+                XJpegChunk entropy;
+
+                x_memset(&entropy, 0, sizeof(entropy));
+                entropy.bEntropyCodedData = 1;
+                entropy.nDataOffset = nDataOffset;
+                entropy.nDataSize = nEntropyEnd - nDataOffset;
+                chunk_add(pJpeg, &entropy, &nCapacity);
+            }
+
+            if (nNextMarker < 0) {
+                break;
+            }
+
+            nOffset = nNextMarker;
         }
 
         if (chunk.nId == JPEG_MARKER_EOI) {
+            bComplete = 1;
+
             break;
         }
 
         if (pJpeg->nChunkCount > 100000) {
             break;
         }
+    }
+
+    /* A walk that never reached EOI describes nothing the reference would
+     * report: XJpeg::getChunks drops the whole list in that case. */
+    if (!bComplete) {
+        pJpeg->nChunkCount = 0;
     }
 }
 
@@ -192,6 +251,13 @@ static void parse_comment(XJpeg *pJpeg)
             continue;
         }
 
+        /* XJpeg::getComment skips a segment that cannot hold a payload or that
+         * does not fit in the file, and never reads past the declared length. */
+        if ((pJpeg->pChunks[i].nDataSize <= JPEG_SEGMENT_HEADER_SIZE) || (pJpeg->pChunks[i].nDataOffset < 0) ||
+            (pJpeg->pChunks[i].nDataOffset > pJpeg->pFile->nSize - pJpeg->pChunks[i].nDataSize)) {
+            continue;
+        }
+
         {
             char *pPart = xb_ansi_string(pJpeg->pFile, pJpeg->pChunks[i].nDataOffset + JPEG_SEGMENT_HEADER_SIZE,
                                          pJpeg->pChunks[i].nDataSize - JPEG_SEGMENT_HEADER_SIZE);
@@ -229,6 +295,7 @@ static void parse_dqt_md5(XJpeg *pJpeg)
     XBFile temp;
     char *pHash = NULL;
     size_t k = 0;
+    unsigned char nEmpty = 0;
 
     cdbuf_init(&buf);
 
@@ -252,9 +319,11 @@ static void parse_dqt_md5(XJpeg *pJpeg)
         }
     }
 
-    /* xb_md5 works on an XBFile, so the collected payload is wrapped in one. */
+    /* xb_md5 works on an XBFile, so the collected payload is wrapped in one.
+     * An empty collection still needs a non-NULL pData; nSize is 0 then, so
+     * nEmpty is never read.                                                  */
     x_memset(&temp, 0, sizeof(temp));
-    temp.pData = (unsigned char *)(buf.pData ? buf.pData : (char *)"");
+    temp.pData = buf.pData ? (unsigned char *)buf.pData : &nEmpty;
     temp.nSize = (cd_i64)buf.nSize;
 
     pHash = xb_md5(&temp, 0, temp.nSize);

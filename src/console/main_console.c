@@ -40,7 +40,9 @@ static void print_help(void)
     x_printf("  -u, --heuristicscan       Heuristic scan.\n");
     x_printf("  -g, --aggressivecscan     Aggressive scan.\n");
     x_printf("  -b, --verbose             Verbose output.\n");
-    x_printf("  -f, --format              Format the result strings.\n");
+    x_printf("  -f, --format              Format the result strings (the default).\n");
+    x_printf("      --noformat            Do not format the result strings.\n");
+    x_printf("      --nocolor             Disable color output (cdie never colors).\n");
     x_printf("  -U, --hideunknown         Hide unknown results.\n");
     x_printf("  -M, --messages            Show engine messages.\n");
     x_printf("  -l, --profiling           Show profiling information.\n");
@@ -56,6 +58,18 @@ static void print_help(void)
     x_printf("\n");
     x_printf("Target:\n");
     x_printf("  target                    The file or directory to open.\n");
+}
+
+/* Frees the cd_strdup'd elements and then the vector itself. */
+static void free_string_vector(CDVec *pVec)
+{
+    size_t i = 0;
+
+    for (i = 0; i < pVec->nSize; i++) {
+        cd_free(pVec->ppData[i]);
+    }
+
+    cdvec_free(pVec);
 }
 
 static char *resolve_database_path(const char *pPath, const char *pDefaultName)
@@ -117,6 +131,11 @@ int x_main(int argc, char *argv[])
     int bDatabaseLoaded = 0;
 
     scan_options_init(&options);
+    /* diec formats the result strings by default, and printing exactly what
+     * diec prints is the acceptance test, so the console front end turns the
+     * option on before the command line is parsed. -f/--format stays an
+     * explicit enable, --noformat is the opt-out. */
+    options.bFormatResult = 1;
     x_memset(&db, 0, sizeof(db));
     cdvec_init(&vecTargets);
     cdvec_init(&vecFiles);
@@ -127,15 +146,15 @@ int x_main(int argc, char *argv[])
         if ((x_strcmp(pArg, "-h") == 0) || (x_strcmp(pArg, "--help") == 0) || (x_strcmp(pArg, "-?") == 0)) {
             print_help();
             scan_options_free(&options);
-            cdvec_free(&vecTargets);
-            cdvec_free(&vecFiles);
+            free_string_vector(&vecTargets);
+            free_string_vector(&vecFiles);
 
             return CR_SUCCESS;
         } else if ((x_strcmp(pArg, "-v") == 0) || (x_strcmp(pArg, "--version") == 0)) {
             x_printf("%s %s\n", X_APPLICATIONDISPLAYNAME, X_APPLICATIONVERSION);
             scan_options_free(&options);
-            cdvec_free(&vecTargets);
-            cdvec_free(&vecFiles);
+            free_string_vector(&vecTargets);
+            free_string_vector(&vecFiles);
 
             return CR_SUCCESS;
         } else if ((x_strcmp(pArg, "-r") == 0) || (x_strcmp(pArg, "--recursivescan") == 0)) {
@@ -151,6 +170,12 @@ int x_main(int argc, char *argv[])
             options.bVerbose = 1;
         } else if ((x_strcmp(pArg, "-f") == 0) || (x_strcmp(pArg, "--format") == 0)) {
             options.bFormatResult = 1;
+        } else if (x_strcmp(pArg, "--noformat") == 0) {
+            options.bFormatResult = 0;
+            /* cdie never emits color, so diec's --nocolor is already the
+             * behaviour; it is taken to keep diec command lines working. */
+        } else if (x_strcmp(pArg, "--nocolor") == 0) {
+            /* nothing to do */
         } else if ((x_strcmp(pArg, "-U") == 0) || (x_strcmp(pArg, "-hu") == 0) || (x_strcmp(pArg, "--hideunknown") == 0)) {
             options.bHideUnknown = 1;
         } else if ((x_strcmp(pArg, "-M") == 0) || (x_strcmp(pArg, "-m") == 0) || (x_strcmp(pArg, "--messages") == 0)) {
@@ -202,10 +227,11 @@ int x_main(int argc, char *argv[])
     if ((vecTargets.nSize == 0) && (!bShowDatabase)) {
         print_help();
         scan_options_free(&options);
-        cdvec_free(&vecTargets);
-        cdvec_free(&vecFiles);
+        free_string_vector(&vecTargets);
+        free_string_vector(&vecFiles);
 
-        return CR_SUCCESS;
+        /* An unknown option already set nResult; do not report success. */
+        return nResult;
     }
 
     bDatabaseLoaded = db_load(&db, options.pMainDatabasePath, DB_MAIN);
@@ -291,16 +317,8 @@ int x_main(int argc, char *argv[])
         scan_result_free(&result);
     }
 
-    for (i = 0; i < (int)vecTargets.nSize; i++) {
-        cd_free(vecTargets.ppData[i]);
-    }
-
-    for (i = 0; i < (int)vecFiles.nSize; i++) {
-        cd_free(vecFiles.ppData[i]);
-    }
-
-    cdvec_free(&vecTargets);
-    cdvec_free(&vecFiles);
+    free_string_vector(&vecTargets);
+    free_string_vector(&vecFiles);
     db_free(&db);
     scan_options_free(&options);
 

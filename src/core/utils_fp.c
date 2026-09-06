@@ -32,6 +32,7 @@
  *                               (ECMAScript Number::toString)
  *   x_dtoa_fixed      double  -> fixed number of fraction digits (toFixed)
  *   x_dtoa_precision  double  -> fixed number of significant digits
+ *   x_dtoa_cformat    double  -> printf's %e / %f / %g, C99 rules
  *
  * The shortest-digit generator is the classic Steele & White / Dragon4
  * free-format algorithm.
@@ -455,7 +456,7 @@ static double decimal_to_double(const char *pDigits, int nDigitCount, int nExpon
     }
 }
 
-double x_strtod(const char *pString, char **ppEnd)
+double x_strtod(const char *pString, const char **ppEnd)
 {
     const char *p = pString;
     const char *pStart = pString;
@@ -482,7 +483,7 @@ double x_strtod(const char *pString, char **ppEnd)
     /* Infinity / NaN, matching what the JavaScript layer expects. */
     if ((p[0] == 'I') && (x_strncmp(p, "Infinity", 8) == 0)) {
         if (ppEnd) {
-            *ppEnd = (char *)(p + 8);
+            *ppEnd = p + 8;
         }
 
         return bNegative ? -x_inf() : x_inf();
@@ -490,7 +491,7 @@ double x_strtod(const char *pString, char **ppEnd)
 
     if ((p[0] == 'N') && (x_strncmp(p, "NaN", 3) == 0)) {
         if (ppEnd) {
-            *ppEnd = (char *)(p + 3);
+            *ppEnd = p + 3;
         }
 
         return x_nan();
@@ -534,7 +535,7 @@ double x_strtod(const char *pString, char **ppEnd)
 
     if (!bSeenDigit) {
         if (ppEnd) {
-            *ppEnd = (char *)pStart;
+            *ppEnd = pStart;
         }
 
         return 0.0;
@@ -567,7 +568,7 @@ double x_strtod(const char *pString, char **ppEnd)
     }
 
     if (ppEnd) {
-        *ppEnd = (char *)p;
+        *ppEnd = p;
     }
 
     /* A dropped non-zero digit is folded back in as a trailing 1 so that an
@@ -740,12 +741,6 @@ static int dtoa_digits_counted(double nValue, int nWanted, char *pDigits, int *p
     /* Find the decimal exponent: the smallest nK with value < 10^nK. */
     nK = 0;
 
-    for (;;) {
-        big_copy(&tmp, &den);
-        big_mul_pow10(&tmp, (nK >= 0) ? 0 : 0);
-        break;
-    }
-
     {
         /* Compare num/den against 10^nK by scaling whichever side is needed. */
         XBig lhs;
@@ -790,7 +785,10 @@ static int dtoa_digits_counted(double nValue, int nWanted, char *pDigits, int *p
                 break;
             }
 
-            if (nK < -320) {
+            /* The smallest subnormal needs nK = -323, so the guard sits
+             * below the subnormal floor; -340 matches the range check in
+             * decimal_to_double. */
+            if (nK < -340) {
                 break;
             }
         }
@@ -1263,6 +1261,199 @@ int x_dtoa_precision(double nValue, int nDigits, char *pBuffer, size_t nBufferSi
             for (i = 0; i < nDigits; i++) {
                 out_char(&out, sDigits[i]);
             }
+        }
+    }
+
+    return out_finish(&out);
+}
+
+/* ------------------------------------------------------------------------ */
+/*  printf conversions                                                       */
+/* ------------------------------------------------------------------------ */
+
+/* The three entry points above answer ECMAScript questions; %e, %f and %g
+ * are C questions and differ in the details (the exponent is at least two
+ * digits, %g switches to the exponential form at e < -4 rather than e < -6
+ * and drops the trailing zeros the ECMAScript forms keep). They share the
+ * digit generator, so the difference is entirely in the layout below.
+ *
+ * Two deliberate departures from a hosted printf, both a consequence of
+ * reusing the generator:
+ *   - a tie rounds away from zero, where a hosted printf rounds to even, so
+ *     x_dtoa_cformat(0.5, 'f', 0, ...) is "1" and glibc's "%.0f" is "0";
+ *   - dtoa_digits_counted stops after 440 digits, so a precision that would
+ *     reach past that on a very large value is padded with zeros instead of
+ *     continuing the exact expansion.
+ * Neither is reachable from anything the project prints; both are cheaper to
+ * write down than to remove.                                                */
+
+#define CFMT_MAX_PRECISION 400
+
+/* One fraction digit of a fixed-point layout: pDigits holds nCount digits
+ * whose decimal point sits after nPoint of them, and everything outside that
+ * window is a zero.                                                         */
+static char cfmt_fraction_digit(const char *pDigits, int nCount, int nPoint, int nIndex)
+{
+    int nAt = nPoint + nIndex;
+
+    if ((nAt < 0) || (nAt >= nCount)) {
+        return '0';
+    }
+
+    return pDigits[nAt];
+}
+
+/* %f of a non-negative, finite nValue. bStrip drops the trailing zeros of
+ * the fraction, which is what %g does without the # flag.                   */
+static void cfmt_fixed(double nValue, int nPrecision, int bAlt, int bStrip, XOut *pOut)
+{
+    char sDigits[460];
+    int nCount = 0;
+    int nPoint = 0;
+    int nFraction = 0;
+    int i = 0;
+
+    if (nValue != 0) {
+        nCount = dtoa_digits_counted(nValue, nPrecision, sDigits, &nPoint, 1);
+    }
+
+    if (nPoint <= 0) {
+        out_char(pOut, '0');
+    } else {
+        for (i = 0; i < nPoint; i++) {
+            out_char(pOut, (i < nCount) ? sDigits[i] : '0');
+        }
+    }
+
+    nFraction = nPrecision;
+
+    if (bStrip) {
+        while ((nFraction > 0) && (cfmt_fraction_digit(sDigits, nCount, nPoint, nFraction - 1) == '0')) {
+            nFraction--;
+        }
+    }
+
+    if ((nFraction > 0) || bAlt) {
+        out_char(pOut, '.');
+    }
+
+    for (i = 0; i < nFraction; i++) {
+        out_char(pOut, cfmt_fraction_digit(sDigits, nCount, nPoint, i));
+    }
+}
+
+/* %e of a non-negative, finite nValue. The exponent carries a sign and at
+ * least two digits, which is the one place C and ECMAScript disagree on the
+ * spelling of the same number.                                              */
+static void cfmt_exponential(double nValue, int nPrecision, int bAlt, int bStrip, int bUpper, XOut *pOut)
+{
+    char sDigits[460];
+    int nCount = 0;
+    int nPoint = 1;
+    int nExponent = 0;
+    int nFraction = 0;
+    int i = 0;
+
+    if (nValue != 0) {
+        nCount = dtoa_digits_counted(nValue, nPrecision + 1, sDigits, &nPoint, 0);
+    }
+
+    while (nCount < (nPrecision + 1)) {
+        sDigits[nCount++] = '0';
+    }
+
+    nExponent = (nValue != 0) ? (nPoint - 1) : 0;
+    nFraction = nPrecision;
+
+    if (bStrip) {
+        while ((nFraction > 0) && (sDigits[nFraction] == '0')) {
+            nFraction--;
+        }
+    }
+
+    out_char(pOut, sDigits[0]);
+
+    if ((nFraction > 0) || bAlt) {
+        out_char(pOut, '.');
+    }
+
+    for (i = 1; i <= nFraction; i++) {
+        out_char(pOut, sDigits[i]);
+    }
+
+    out_char(pOut, bUpper ? 'E' : 'e');
+    out_char(pOut, (nExponent >= 0) ? '+' : '-');
+
+    if (nExponent < 0) {
+        nExponent = -nExponent;
+    }
+
+    if (nExponent < 10) {
+        out_char(pOut, '0');
+    }
+
+    out_int(pOut, nExponent);
+}
+
+int x_dtoa_cformat(double nValue, char nConversion, int nPrecision, int bAlt, char *pBuffer, size_t nBufferSize)
+{
+    XOut out;
+    int bUpper = ((nConversion == 'E') || (nConversion == 'F') || (nConversion == 'G')) ? 1 : 0;
+
+    out.pBuffer = pBuffer;
+    out.nCapacity = nBufferSize;
+    out.nWritten = 0;
+
+    /* C99 7.19.6.1: an infinity prints as "inf" and a NaN as "nan", in the
+     * case of the conversion specifier. The sign belongs to the caller, so
+     * neither carries one here.                                            */
+    if (x_isnan(nValue)) {
+        out_text(&out, bUpper ? "NAN" : "nan");
+
+        return out_finish(&out);
+    }
+
+    if (x_isinf(nValue)) {
+        out_text(&out, bUpper ? "INF" : "inf");
+
+        return out_finish(&out);
+    }
+
+    nValue = x_fabs(nValue);
+
+    if (nPrecision < 0) {
+        nPrecision = 6;
+    }
+
+    if (nPrecision > CFMT_MAX_PRECISION) {
+        nPrecision = CFMT_MAX_PRECISION;
+    }
+
+    if ((nConversion == 'f') || (nConversion == 'F')) {
+        cfmt_fixed(nValue, nPrecision, bAlt, 0, &out);
+    } else if ((nConversion == 'e') || (nConversion == 'E')) {
+        cfmt_exponential(nValue, nPrecision, bAlt, 0, bUpper, &out);
+    } else {
+        /* %g. A precision of zero means one significant digit, and the style
+         * is chosen from the exponent the value has once it is rounded to
+         * that many digits - which is what the generator hands back.       */
+        char sDigits[460];
+        int nPoint = 1;
+        int nExponent = 0;
+
+        if (nPrecision == 0) {
+            nPrecision = 1;
+        }
+
+        if (nValue != 0) {
+            dtoa_digits_counted(nValue, nPrecision, sDigits, &nPoint, 0);
+            nExponent = nPoint - 1;
+        }
+
+        if ((nExponent < -4) || (nExponent >= nPrecision)) {
+            cfmt_exponential(nValue, nPrecision - 1, bAlt, !bAlt, bUpper, &out);
+        } else {
+            cfmt_fixed(nValue, nPrecision - 1 - nExponent, bAlt, !bAlt, &out);
         }
     }
 

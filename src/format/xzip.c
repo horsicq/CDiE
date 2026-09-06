@@ -26,9 +26,15 @@
 /* XArchive::getRecords stops after this many members. */
 #define XZIP_MAX_RECORDS 20000
 
+/* XJAR::getFileFormatInfo reads only the head of each *.class candidate:
+ * XArchive::decompress(&record, pPdStruct, 0, 0x100). */
+#define XZIP_CLASS_PROBE_SIZE 0x100
+
 /* Decompresses the member described by a central-directory entry (only the
- * STORE and DEFLATE methods, which is all the manifest ever uses). */
-static int zip_read_member(XBFile *pFile, cd_u16 nMethod, cd_u32 nCompSize, cd_u32 nUncompSize, cd_u32 nLocalOffset, CDBuf *pOut)
+ * STORE and DEFLATE methods, which is all the manifest ever uses). nMaxSize
+ * caps the produced bytes the way XArchive::decompress's nDecompressedLimit
+ * does; 0 means the whole member. */
+static int zip_read_member(XBFile *pFile, cd_u16 nMethod, cd_u32 nCompSize, cd_u32 nUncompSize, cd_u32 nLocalOffset, size_t nMaxSize, CDBuf *pOut)
 {
     cd_i64 nSize = pFile->nSize;
     const unsigned char *pData = pFile->pData;
@@ -53,13 +59,19 @@ static int zip_read_member(XBFile *pFile, cd_u16 nMethod, cd_u32 nCompSize, cd_u
     }
 
     if (nMethod == 0) {
-        cdbuf_append(pOut, pData + nDataOffset, nCompSize);
+        size_t nCopy = nCompSize;
+
+        if ((nMaxSize != 0) && (nCopy > nMaxSize)) {
+            nCopy = nMaxSize;
+        }
+
+        cdbuf_append(pOut, pData + nDataOffset, nCopy);
 
         return 1;
     }
 
     if (nMethod == 8) {
-        return inflate_raw(pData + nDataOffset, nCompSize, nUncompSize, pOut);
+        return inflate_raw(pData + nDataOffset, nCompSize, nUncompSize, nMaxSize, pOut);
     }
 
     return 0;
@@ -100,6 +112,7 @@ static const char *jvm_base_version(cd_u16 nMajor)
         case 0x48: return "Java SE 28";
         case 0x49: return "Java SE 29";
         case 0x4A: return "Java SE 30";
+        default: break;
     }
 
     return NULL;
@@ -233,7 +246,7 @@ int xzip_parse(XBFile *pFile, XZip *pZip)
 
             cdbuf_init(&manifest);
 
-            if (zip_read_member(pFile, nMethod, nCompSize, nUncompSize, nLocalOffset, &manifest)) {
+            if (zip_read_member(pFile, nMethod, nCompSize, nUncompSize, nLocalOffset, 0, &manifest)) {
                 pZip->pManifestText = cdbuf_detach(&manifest, NULL);
             } else {
                 cdbuf_free(&manifest);
@@ -245,7 +258,7 @@ int xzip_parse(XBFile *pFile, XZip *pZip)
 
             cdbuf_init(&json);
 
-            if (zip_read_member(pFile, nMethod, nCompSize, nUncompSize, nLocalOffset, &json)) {
+            if (zip_read_member(pFile, nMethod, nCompSize, nUncompSize, nLocalOffset, 0, &json)) {
                 pZip->pPackageJson = cdbuf_detach(&json, NULL);
             } else {
                 cdbuf_free(&json);
@@ -260,7 +273,7 @@ int xzip_parse(XBFile *pFile, XZip *pZip)
 
             cdbuf_init(&klass);
 
-            if (zip_read_member(pFile, nMethod, nCompSize, nUncompSize, nLocalOffset, &klass) && (klass.nSize > 10)) {
+            if (zip_read_member(pFile, nMethod, nCompSize, nUncompSize, nLocalOffset, XZIP_CLASS_PROBE_SIZE, &klass) && (klass.nSize > 10)) {
                 const unsigned char *pClass = (const unsigned char *)klass.pData;
                 cd_u32 nMagic = ((cd_u32)pClass[0] << 24) | ((cd_u32)pClass[1] << 16) | ((cd_u32)pClass[2] << 8) | (cd_u32)pClass[3];
 

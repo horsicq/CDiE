@@ -35,6 +35,9 @@ extern "C" {
 typedef struct {
     XBFile *pFile;
     CDVec vecObjects; /* each entry a CDVec* of char* tokens */
+    CDVec vecRefs;    /* parallel to vecObjects: where each object starts, so
+                       * the /ObjStm scan can go back to the file for the
+                       * stream body. Entries are private to xpdf.c. */
     int bValid;
 } XPDF;
 
@@ -47,6 +50,11 @@ char *xpdf_version(XPDF *pPdf);
 /* The "/Filter" values joined with ", " — what appears in the format line's
  * brackets. Heap string, possibly empty. */
 char *xpdf_filters(XPDF *pPdf);
+
+/* getInfo: the format-line options - the sorted filter list, the
+ * /Title.../ModDate metadata block, the linearization note and the suspicious
+ * keys - joined with "; ". Heap string, possibly empty. */
+char *xpdf_info(XPDF *pPdf);
 
 /* The bytes of the second-line "%..." comment as hex. Heap string. */
 char *xpdf_header_comment_hex(XPDF *pPdf);

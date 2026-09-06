@@ -135,10 +135,12 @@ int db_load(DBase *pDb, const char *pPath, DBKind kind)
         }
     }
 
-    /* Each database is sorted on its own and appended after the previous
-     * ones, which is how the reference engine orders its signature list.   */
-    if (pDb->nCount - nBefore > 1) {
-        x_qsort(pDb->pRecords + nBefore, (size_t)(pDb->nCount - nBefore), sizeof(DBSignature), compare_signatures);
+    /* XScanEngine::loadDatabase sorts the records it has just read, appends
+     * them and then sorts the whole accumulated list again, so an extra or
+     * custom database interleaves with the main one by (file type, priority,
+     * name) instead of trailing it.                                        */
+    if (pDb->nCount > 1) {
+        x_qsort(pDb->pRecords, (size_t)pDb->nCount, sizeof(DBSignature), compare_signatures);
     }
 
     return (pDb->nCount > nBefore) ? 1 : 0;
@@ -148,7 +150,6 @@ int db_load(DBase *pDb, const char *pPath, DBKind kind)
  * name contains more than one dot, otherwise "9".                          */
 static const char *signature_priority(const char *pName, char *pBuf, size_t nBufSize)
 {
-    const char *pFirst = NULL;
     const char *pLast = NULL;
     const char *p = pName;
     int nDots = 0;
@@ -156,11 +157,6 @@ static const char *signature_priority(const char *pName, char *pBuf, size_t nBuf
     for (p = pName; *p; p++) {
         if (*p == '.') {
             nDots++;
-
-            if (pFirst == NULL) {
-                pFirst = p;
-            }
-
             pLast = p;
         }
     }
@@ -203,6 +199,14 @@ static const char *signature_priority(const char *pName, char *pBuf, size_t nBuf
     return pBuf;
 }
 
+/* Note: sort_signature_prio extracts the priority section only when BOTH
+ * names hold more than one dot, so in the reference a pair involving a
+ * single-dot name compares "9" against "9". Porting that literally was tried
+ * and measured worse: the reference comparator is intransitive over this
+ * mix, so its result depends on std::sort's partitioning, and matching the
+ * rule under x_qsort moved the script order further from diec (7 differing
+ * positions instead of 3 on the .NET corpus). The simple per-name form is
+ * kept deliberately; see the port notes.                                   */
 static int compare_signatures(const void *pLeft, const void *pRight)
 {
     const DBSignature *pA = (const DBSignature *)pLeft;

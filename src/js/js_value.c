@@ -40,7 +40,13 @@ JSStr *jsstr_new(JSCtx *pCtx, const char *pData, size_t nSize)
 
     pStr->pData[nSize] = 0;
 
+    pStr->pPrevAll = NULL;
     pStr->pNextAll = pCtx->pAllStrings;
+
+    if (pCtx->pAllStrings) {
+        pCtx->pAllStrings->pPrevAll = pStr;
+    }
+
     pCtx->pAllStrings = pStr;
 
     return pStr;
@@ -57,14 +63,28 @@ JSStr *jsstr_ref(JSStr *pStr)
 
 void jsstr_unref(JSCtx *pCtx, JSStr *pStr)
 {
-    (void)pCtx;
-
-    if (pStr) {
-        pStr->nRef--;
-        /* Strings are freed by the final sweep; the counter is kept for
-         * diagnostics only. Freeing here would require removing the entry
-         * from the engine-wide list which is not worth the extra bookkeeping. */
+    if (pStr == NULL) {
+        return;
     }
+
+    pStr->nRef--;
+
+    if (pStr->nRef > 0) {
+        return;
+    }
+
+    if (pStr->pPrevAll) {
+        pStr->pPrevAll->pNextAll = pStr->pNextAll;
+    } else {
+        pCtx->pAllStrings = pStr->pNextAll;
+    }
+
+    if (pStr->pNextAll) {
+        pStr->pNextAll->pPrevAll = pStr->pPrevAll;
+    }
+
+    cd_free(pStr->pData);
+    cd_free(pStr);
 }
 
 /* -------------------------------------------------------------- property  */
@@ -72,6 +92,29 @@ void jsstr_unref(JSCtx *pCtx, JSStr *pStr)
 void jsprops_init(JSPropMap *pMap)
 {
     x_memset(pMap, 0, sizeof(*pMap));
+}
+
+/* Puts value into an entry: the entry takes over the caller's reference and
+ * the previous one is released. A stored object also carries a count of the
+ * property maps that hold it, and jsobj_unref refuses to free anything with
+ * a map still pointing at it. A caller that releases one time too many then
+ * costs a delayed reclamation - the entry lives until the final sweep, as
+ * everything did before - instead of leaving a dangling entry behind.     */
+void jsprop_store(JSCtx *pCtx, JSProp *pProp, JSVal value)
+{
+    JSVal old = pProp->value;
+
+    if (value.tag == JT_OBJ) {
+        value.u.o->nMapRefs++;
+    }
+
+    pProp->value = value;
+
+    if (old.tag == JT_OBJ) {
+        old.u.o->nMapRefs--;
+    }
+
+    js_release(pCtx, old);
 }
 
 void jsprops_free(JSCtx *pCtx, JSPropMap *pMap)
@@ -82,6 +125,10 @@ void jsprops_free(JSCtx *pCtx, JSPropMap *pMap)
         cd_free(pMap->pEntries[i].pKey);
 
         if (!pMap->pEntries[i].bDeleted) {
+            if (pMap->pEntries[i].value.tag == JT_OBJ) {
+                pMap->pEntries[i].value.u.o->nMapRefs--;
+            }
+
             js_release(pCtx, pMap->pEntries[i].value);
         }
     }
@@ -119,16 +166,14 @@ static void jsprops_rehash(JSPropMap *pMap)
     }
 }
 
-JSProp *jsprops_find(JSPropMap *pMap, const char *pKey, size_t nKeySize)
+JSProp *jsprops_find_hashed(JSPropMap *pMap, const char *pKey, size_t nKeySize, cd_u32 nHash)
 {
-    cd_u32 nHash = 0;
     size_t nSlot = 0;
 
     if (pMap->nIndexSize == 0) {
         return NULL;
     }
 
-    nHash = cd_hash_str(pKey, nKeySize);
     nSlot = nHash & (pMap->nIndexSize - 1);
 
     for (;;) {
@@ -141,7 +186,7 @@ JSProp *jsprops_find(JSPropMap *pMap, const char *pKey, size_t nKeySize)
         {
             JSProp *pProp = &pMap->pEntries[nIndex];
 
-            if ((pProp->nHash == nHash) && (x_strlen(pProp->pKey) == nKeySize) && (x_memcmp(pProp->pKey, pKey, nKeySize) == 0)) {
+            if ((pProp->nHash == nHash) && (pProp->nKeySize == nKeySize) && (x_memcmp(pProp->pKey, pKey, nKeySize) == 0)) {
                 if (pProp->bDeleted) {
                     return NULL;
                 }
@@ -152,6 +197,15 @@ JSProp *jsprops_find(JSPropMap *pMap, const char *pKey, size_t nKeySize)
 
         nSlot = (nSlot + 1) & (pMap->nIndexSize - 1);
     }
+}
+
+JSProp *jsprops_find(JSPropMap *pMap, const char *pKey, size_t nKeySize)
+{
+    if (pMap->nIndexSize == 0) {
+        return NULL;
+    }
+
+    return jsprops_find_hashed(pMap, pKey, nKeySize, cd_hash_str(pKey, nKeySize));
 }
 
 JSProp *jsprops_put(JSCtx *pCtx, JSPropMap *pMap, const char *pKey, size_t nKeySize)
@@ -177,9 +231,10 @@ JSProp *jsprops_put(JSCtx *pCtx, JSPropMap *pMap, const char *pKey, size_t nKeyS
 
         pProp = &pMap->pEntries[nIndex];
 
-        if ((pProp->nHash == nHash) && (x_strlen(pProp->pKey) == nKeySize) && (x_memcmp(pProp->pKey, pKey, nKeySize) == 0)) {
+        if ((pProp->nHash == nHash) && (pProp->nKeySize == nKeySize) && (x_memcmp(pProp->pKey, pKey, nKeySize) == 0)) {
             if (pProp->bDeleted) {
                 pProp->bDeleted = 0;
+                pProp->bDontEnum = 0;
                 pProp->value = js_undefined();
                 pMap->nLive++;
             }
@@ -199,6 +254,7 @@ JSProp *jsprops_put(JSCtx *pCtx, JSPropMap *pMap, const char *pKey, size_t nKeyS
 
     pProp = &pMap->pEntries[pMap->nSize];
     pProp->pKey = cd_strndup(pKey, nKeySize);
+    pProp->nKeySize = nKeySize;
     pProp->nHash = nHash;
     pProp->value = js_undefined();
     pProp->bDeleted = 0;
@@ -223,8 +279,7 @@ int jsprops_del(JSCtx *pCtx, JSPropMap *pMap, const char *pKey)
         return 0;
     }
 
-    js_release(pCtx, pProp->value);
-    pProp->value = js_undefined();
+    jsprop_store(pCtx, pProp, js_undefined());
     pProp->bDeleted = 1;
     pMap->nLive--;
 
@@ -246,7 +301,13 @@ JSObj *jsobj_new(JSCtx *pCtx, JSClass cls, JSObj *pProto)
 
     jsprops_init(&pObj->props);
 
+    pObj->pPrevAll = NULL;
     pObj->pNextAll = pCtx->pAllObjects;
+
+    if (pCtx->pAllObjects) {
+        pCtx->pAllObjects->pPrevAll = pObj;
+    }
+
     pCtx->pAllObjects = pObj;
 
     return pObj;
@@ -261,16 +322,66 @@ JSObj *jsobj_ref(JSObj *pObj)
     return pObj;
 }
 
+/* Deepest chain of nested frees; anything below is handed to the final
+ * sweep rather than risking the native stack on a long object chain.     */
+#define JS_MAX_FREE_DEPTH 96
+
 void jsobj_unref(JSCtx *pCtx, JSObj *pObj)
 {
-    (void)pCtx;
+    int i = 0;
 
-    if (pObj) {
-        pObj->nRef--;
-        /* Objects are reclaimed by the final sweep (see js_free). Reference
-         * cycles are pervasive in JavaScript (scope <-> closure), so eager
-         * freeing would be incorrect without a tracing collector.           */
+    if (pObj == NULL) {
+        return;
     }
+
+    pObj->nRef--;
+
+    if (pObj->nRef > 0) {
+        return;
+    }
+
+    /* Objects that take part in a reference cycle - a closure and its scope,
+     * a constructor and its prototype - never reach zero and are reclaimed
+     * by the final sweep in js_free. Everything else goes now.            */
+    if (pObj->bSweeping || (pObj->nMapRefs > 0) || (pCtx->nFreeDepth >= JS_MAX_FREE_DEPTH)) {
+        return;
+    }
+
+    pObj->bSweeping = 1;
+
+    if (pObj->pPrevAll) {
+        pObj->pPrevAll->pNextAll = pObj->pNextAll;
+    } else {
+        pCtx->pAllObjects = pObj->pNextAll;
+    }
+
+    if (pObj->pNextAll) {
+        pObj->pNextAll->pPrevAll = pObj->pPrevAll;
+    }
+
+    pCtx->nFreeDepth++;
+
+    jsprops_free(pCtx, &pObj->props);
+    jsobj_unref(pCtx, pObj->pProto);
+    jsobj_unref(pCtx, pObj->pBoundTarget);
+    jsscope_unref(pCtx, pObj->pScope);
+    js_release(pCtx, pObj->primitive);
+    js_release(pCtx, pObj->boundThis);
+
+    for (i = 0; i < pObj->nBoundArgs; i++) {
+        js_release(pCtx, pObj->pBoundArgs[i]);
+    }
+
+    pCtx->nFreeDepth--;
+
+    cd_free(pObj->pBoundArgs);
+    cd_free(pObj->pFnName);
+
+    if (pObj->pRegExp) {
+        jsregexp_free(pObj->pRegExp);
+    }
+
+    cd_free(pObj);
 }
 
 JSScope *jsscope_new(JSCtx *pCtx, JSScope *pParent)
@@ -281,7 +392,13 @@ JSScope *jsscope_new(JSCtx *pCtx, JSScope *pParent)
     pScope->pVars = jsobj_new(pCtx, JCLASS_SCOPE, NULL);
     pScope->pParent = pParent ? jsscope_ref(pParent) : NULL;
 
+    pScope->pPrevAll = NULL;
     pScope->pNextAll = pCtx->pAllScopes;
+
+    if (pCtx->pAllScopes) {
+        pCtx->pAllScopes->pPrevAll = pScope;
+    }
+
     pCtx->pAllScopes = pScope;
 
     return pScope;
@@ -298,11 +415,36 @@ JSScope *jsscope_ref(JSScope *pScope)
 
 void jsscope_unref(JSCtx *pCtx, JSScope *pScope)
 {
-    (void)pCtx;
-
-    if (pScope) {
-        pScope->nRef--;
+    if (pScope == NULL) {
+        return;
     }
+
+    pScope->nRef--;
+
+    if (pScope->nRef > 0) {
+        return;
+    }
+
+    if (pCtx->nFreeDepth >= JS_MAX_FREE_DEPTH) {
+        return;
+    }
+
+    if (pScope->pPrevAll) {
+        pScope->pPrevAll->pNextAll = pScope->pNextAll;
+    } else {
+        pCtx->pAllScopes = pScope->pNextAll;
+    }
+
+    if (pScope->pNextAll) {
+        pScope->pNextAll->pPrevAll = pScope->pPrevAll;
+    }
+
+    pCtx->nFreeDepth++;
+    jsobj_unref(pCtx, pScope->pVars);
+    jsscope_unref(pCtx, pScope->pParent);
+    pCtx->nFreeDepth--;
+
+    cd_free(pScope);
 }
 
 /* ---------------------------------------------------------------- values  */
@@ -484,7 +626,7 @@ double js_string_to_number(const char *pData, size_t nSize)
     size_t nStart = 0;
     size_t nEnd = nSize;
     char *pCopy = NULL;
-    char *pEndPtr = NULL;
+    const char *pEndPtr = NULL;
     double nResult = 0;
 
     while ((nStart < nEnd) && ((unsigned char)pData[nStart] <= ' ')) {
@@ -582,6 +724,8 @@ double js_to_number(JSCtx *pCtx, JSVal value)
 
             return nResult;
         }
+
+        default: break;
     }
 
     return x_nan();
@@ -598,9 +742,57 @@ int js_to_bool(JSCtx *pCtx, JSVal value)
         case JT_NUM: return ((value.u.n != 0) && (!(value.u.n != value.u.n))) ? 1 : 0;
         case JT_STR: return (value.u.s->nSize > 0) ? 1 : 0;
         case JT_OBJ: return 1;
+        default: break;
     }
 
     return 0;
+}
+
+/* ECMAScript Number::toString steps 5 onwards collapse to the plain decimal
+ * digits when the value is an exact integer of at most 32 bits: the digit
+ * count stays far below the exponent thresholds and the shortest round-trip
+ * digits are the exact ones, so no dtoa is needed. Writes the terminated
+ * text into pBuf (12 bytes are enough) and returns its length, or 0 when
+ * the general path has to run.                                             */
+int js_int_to_buf(char *pBuf, double nValue)
+{
+    char sTmp[12];
+    cd_i64 nInt = 0;
+    cd_u32 nAbs = 0;
+    int nTmp = 0;
+    int nOut = 0;
+
+    /* Written so that NaN, which compares false either way, falls through. */
+    if (!((nValue >= -2147483648.0) && (nValue <= 2147483648.0))) {
+        return 0;
+    }
+
+    nInt = (cd_i64)nValue;
+
+    if ((double)nInt != nValue) {
+        return 0;
+    }
+
+    /* -0 takes this path too: it compares equal to 0 and String(-0) is "0". */
+    if (nInt < 0) {
+        pBuf[nOut++] = '-';
+        nAbs = (cd_u32)(-nInt);
+    } else {
+        nAbs = (cd_u32)nInt;
+    }
+
+    do {
+        sTmp[nTmp++] = (char)('0' + (int)(nAbs % 10));
+        nAbs /= 10;
+    } while (nAbs != 0);
+
+    while (nTmp > 0) {
+        pBuf[nOut++] = sTmp[--nTmp];
+    }
+
+    pBuf[nOut] = 0;
+
+    return nOut;
 }
 
 /* ECMAScript Number::toString. x_dtoa_shortest implements the specification
@@ -608,6 +800,10 @@ int js_to_bool(JSCtx *pCtx, JSVal value)
  * printf-style float formatting is involved anywhere in the engine.        */
 static void js_double_to_buf(char *pBuf, size_t nBufSize, double nValue)
 {
+    if ((nBufSize >= 12) && (js_int_to_buf(pBuf, nValue) > 0)) {
+        return;
+    }
+
     x_dtoa_shortest(nValue, pBuf, nBufSize);
 }
 
@@ -625,26 +821,34 @@ JSVal js_number_to_string(JSCtx *pCtx, double nValue, int nRadix)
         return js_str(pCtx, "NaN");
     }
 
+    if (nValue == x_inf()) {
+        return js_str(pCtx, "Infinity");
+    }
+
+    if (nValue == (-x_inf())) {
+        return js_str(pCtx, "-Infinity");
+    }
+
+    /* Everything below stays in double arithmetic: a value of 2^64 or more
+     * cannot be converted to an integer type, and the digit sequence has to
+     * match the reference engine, which divides and multiplies doubles.   */
     {
         static const char *pDigits = "0123456789abcdefghijklmnopqrstuvwxyz";
-        char sTmp[80];
+        /* A double needs at most 1075 binary digits on either side of the
+         * point, plus the sign and the terminator.                        */
+        char sTmp[1088];
         int nPos = (int)sizeof(sTmp);
         int bNegative = (nValue < 0) ? 1 : 0;
-        cd_u64 nInteger = 0;
         double nAbs = bNegative ? -nValue : nValue;
         double nFrac = nAbs - x_floor(nAbs);
+        double nInteger = x_floor(nAbs);
 
-        nInteger = (cd_u64)x_floor(nAbs);
         sTmp[--nPos] = 0;
 
-        if (nInteger == 0) {
-            sTmp[--nPos] = '0';
-        }
-
-        while ((nInteger > 0) && (nPos > 1)) {
-            sTmp[--nPos] = pDigits[nInteger % (cd_u32)nRadix];
-            nInteger /= (cd_u32)nRadix;
-        }
+        do {
+            sTmp[--nPos] = pDigits[(int)x_fmod(nInteger, (double)nRadix)];
+            nInteger = x_floor(nInteger / nRadix);
+        } while ((nInteger != 0) && (nPos > 1));
 
         if (bNegative) {
             sTmp[--nPos] = '-';
@@ -700,6 +904,8 @@ JSVal js_to_string(JSCtx *pCtx, JSVal value)
 
             return result;
         }
+
+        default: break;
     }
 
     return js_str(pCtx, "");
@@ -776,7 +982,7 @@ JSVal js_concat_str(JSCtx *pCtx, JSVal left, JSVal right)
 
 /* ---------------------------------------------------------- object model  */
 
-JSVal jsobj_get_own(JSCtx *pCtx, JSObj *pObj, const char *pKey, size_t nKeySize, int *pbFound)
+static JSVal jsobj_get_own_hashed(JSCtx *pCtx, JSObj *pObj, const char *pKey, size_t nKeySize, cd_u32 nHash, int *pbFound)
 {
     JSProp *pProp = NULL;
 
@@ -824,7 +1030,7 @@ JSVal jsobj_get_own(JSCtx *pCtx, JSObj *pObj, const char *pKey, size_t nKeySize,
         }
     }
 
-    pProp = jsprops_find(&pObj->props, pKey, nKeySize);
+    pProp = jsprops_find_hashed(&pObj->props, pKey, nKeySize, nHash);
 
     if (pProp) {
         if (pbFound) {
@@ -837,13 +1043,34 @@ JSVal jsobj_get_own(JSCtx *pCtx, JSObj *pObj, const char *pKey, size_t nKeySize,
     return js_undefined();
 }
 
+JSVal jsobj_get_own(JSCtx *pCtx, JSObj *pObj, const char *pKey, size_t nKeySize, int *pbFound)
+{
+    if (pObj == NULL) {
+        if (pbFound) {
+            *pbFound = 0;
+        }
+
+        return js_undefined();
+    }
+
+    return jsobj_get_own_hashed(pCtx, pObj, pKey, nKeySize, cd_hash_str(pKey, nKeySize), pbFound);
+}
+
+/* The key hash is computed once and reused for the whole prototype walk. */
 JSVal jsobj_get(JSCtx *pCtx, JSObj *pObj, const char *pKey, size_t nKeySize)
 {
     JSObj *pCurrent = pObj;
+    cd_u32 nHash = 0;
+
+    if (pCurrent == NULL) {
+        return js_undefined();
+    }
+
+    nHash = cd_hash_str(pKey, nKeySize);
 
     while (pCurrent) {
         int bFound = 0;
-        JSVal value = jsobj_get_own(pCtx, pCurrent, pKey, nKeySize, &bFound);
+        JSVal value = jsobj_get_own_hashed(pCtx, pCurrent, pKey, nKeySize, nHash, &bFound);
 
         if (bFound) {
             return value;
@@ -859,10 +1086,17 @@ JSVal jsobj_get(JSCtx *pCtx, JSObj *pObj, const char *pKey, size_t nKeySize)
 int jsobj_has(JSCtx *pCtx, JSObj *pObj, const char *pKey, size_t nKeySize)
 {
     JSObj *pCurrent = pObj;
+    cd_u32 nHash = 0;
+
+    if (pCurrent == NULL) {
+        return 0;
+    }
+
+    nHash = cd_hash_str(pKey, nKeySize);
 
     while (pCurrent) {
         int bFound = 0;
-        JSVal value = jsobj_get_own(pCtx, pCurrent, pKey, nKeySize, &bFound);
+        JSVal value = jsobj_get_own_hashed(pCtx, pCurrent, pKey, nKeySize, nHash, &bFound);
 
         js_release(pCtx, value);
 
@@ -889,14 +1123,41 @@ void jsobj_put(JSCtx *pCtx, JSObj *pObj, const char *pKey, size_t nKeySize, JSVa
         cd_i64 nNewLen = js_to_int64(pCtx, value);
         cd_i64 i = 0;
 
-        for (i = nNewLen; i < pObj->nArrayLen; i++) {
-            char sKey[32];
-
-            x_snprintf(sKey, sizeof(sKey), "%lld", (long long)i);
-            jsprops_del(pCtx, &pObj->props, sKey);
+        if (nNewLen < 0) {
+            nNewLen = 0;
         }
 
-        pObj->nArrayLen = (nNewLen < 0) ? 0 : nNewLen;
+        /* An array index never exceeds a uint32, so neither may the length. */
+        if (nNewLen > 0xFFFFFFFFll) {
+            nNewLen = 0xFFFFFFFFll;
+        }
+
+        if ((pObj->nArrayLen - nNewLen) > (cd_i64)pObj->props.nSize) {
+            /* Far more nominal slots than stored properties: walking the
+             * map is bounded by what actually exists.                     */
+            size_t j = 0;
+
+            for (j = 0; j < pObj->props.nSize; j++) {
+                cd_i64 nIndex = 0;
+
+                if (pObj->props.pEntries[j].bDeleted) {
+                    continue;
+                }
+
+                if (js_is_array_index(pObj->props.pEntries[j].pKey, x_strlen(pObj->props.pEntries[j].pKey), &nIndex) && (nIndex >= nNewLen)) {
+                    jsprops_del(pCtx, &pObj->props, pObj->props.pEntries[j].pKey);
+                }
+            }
+        } else {
+            for (i = nNewLen; i < pObj->nArrayLen; i++) {
+                char sKey[32];
+
+                x_snprintf(sKey, sizeof(sKey), "%lld", (long long)i);
+                jsprops_del(pCtx, &pObj->props, sKey);
+            }
+        }
+
+        pObj->nArrayLen = nNewLen;
         js_release(pCtx, value);
 
         return;
@@ -913,16 +1174,14 @@ void jsobj_put(JSCtx *pCtx, JSObj *pObj, const char *pKey, size_t nKeySize, JSVa
     }
 
     pProp = jsprops_put(pCtx, &pObj->props, pKey, nKeySize);
-    js_release(pCtx, pProp->value);
-    pProp->value = value;
+    jsprop_store(pCtx, pProp, value);
 }
 
 void jsobj_put_hidden(JSCtx *pCtx, JSObj *pObj, const char *pKey, JSVal value)
 {
     JSProp *pProp = jsprops_put(pCtx, &pObj->props, pKey, x_strlen(pKey));
 
-    js_release(pCtx, pProp->value);
-    pProp->value = value;
+    jsprop_store(pCtx, pProp, value);
     pProp->bDontEnum = 1;
 }
 
@@ -1062,6 +1321,7 @@ int js_strict_equals(JSCtx *pCtx, JSVal left, JSVal right)
 
             return ((left.u.s->nSize == right.u.s->nSize) && (x_memcmp(left.u.s->pData, right.u.s->pData, left.u.s->nSize) == 0)) ? 1 : 0;
         case JT_OBJ: return (left.u.o == right.u.o) ? 1 : 0;
+        default: break;
     }
 
     return 0;
@@ -1132,16 +1392,25 @@ int js_has_exception(JSCtx *pCtx)
 JSVal js_throw_value(JSCtx *pCtx, JSVal value)
 {
     if (!pCtx->bException) {
+        /* The text has to be produced before the flag is raised: with the
+         * flag set js_to_primitive refuses to call the value's toString and
+         * every object would report "undefined".                          */
+        JSVal text = js_to_string(pCtx, value);
+
+        if (pCtx->bException) {
+            /* Stringifying threw; that exception wins. */
+            js_release(pCtx, text);
+            js_release(pCtx, value);
+
+            return js_undefined();
+        }
+
         pCtx->bException = 1;
         pCtx->exception = value;
 
-        {
-            JSVal text = js_to_string(pCtx, value);
-
-            cd_free(pCtx->pErrorText);
-            pCtx->pErrorText = cd_strndup(js_str_data(text), js_str_len(text));
-            js_release(pCtx, text);
-        }
+        cd_free(pCtx->pErrorText);
+        pCtx->pErrorText = cd_strndup(js_str_data(text), js_str_len(text));
+        js_release(pCtx, text);
     } else {
         js_release(pCtx, value);
     }
@@ -1149,7 +1418,7 @@ JSVal js_throw_value(JSCtx *pCtx, JSVal value)
     return js_undefined();
 }
 
-JSVal js_throw(JSCtx *pCtx, const char *pFormat, ...)
+X_PRINTF_LIKE(2, 3) JSVal js_throw(JSCtx *pCtx, const char *pFormat, ...)
 {
     char sBuf[1024];
     X_VA_LIST args;

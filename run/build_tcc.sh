@@ -26,8 +26,12 @@ mkdir -p "$OUT" "$OUT/obj_static"
 
 # Console: every .c under src. Library: the same minus the two entry points
 # (utils_entry.c, main_console.c), plus lib/die.c.
-EXE_SOURCES=$(find "$SRC" -name '*.c')
-LIB_SOURCES="$(find "$SRC" -name '*.c' ! -name 'utils_entry.c' ! -name 'main_console.c') $ROOT/lib/die.c"
+#
+# src/gui is the Windows GUI front end (its own entry point, and it includes
+# windows.h unconditionally on a hosted build), so it is skipped by path here
+# exactly as run/build_tcc.cmd and run/build_msvc.cmd already do.
+EXE_SOURCES=$(find "$SRC" -name '*.c' -not -path '*/gui/*')
+LIB_SOURCES="$(find "$SRC" -name '*.c' -not -path '*/gui/*' ! -name 'utils_entry.c' ! -name 'main_console.c') $ROOT/lib/die.c"
 
 DEF="-DNDEBUG"
 

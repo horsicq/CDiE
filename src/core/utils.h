@@ -52,6 +52,17 @@
 #define X_VA_END(ap) va_end(ap)
 #define X_VA_COPY(dst, src) va_copy(dst, src)
 
+/* C99 spells neither "never returns" nor "checks like printf", so both are
+ * expressed through the GNU attributes where the compiler understands them
+ * and expand to nothing everywhere else. Nothing depends on them.         */
+#if defined(__GNUC__)
+#define X_NORETURN __attribute__((noreturn))
+#define X_PRINTF_LIKE(nFormat, nFirst) __attribute__((format(printf, nFormat, nFirst)))
+#else
+#define X_NORETURN
+#define X_PRINTF_LIKE(nFormat, nFirst)
+#endif
+
 #define X_OFFSETOF(type, member) offsetof(type, member)
 
 /* setjmp/longjmp are deliberately absent: they live in the C runtime, and a
@@ -86,15 +97,17 @@ void x_free(void *pPtr);
 
 /* ------------------------------------------------------------ process --- */
 
-void x_exit(int nCode);
+X_NORETURN void x_exit(int nCode);
 char *x_getenv(const char *pName);
 void x_qsort(void *pBase, size_t nCount, size_t nSize, int (*fnCompare)(const void *, const void *));
 
 /* ---------------------------------------------------------- conversion --- */
 
-double x_strtod(const char *pString, char **ppEnd);
-long x_strtol(const char *pString, char **ppEnd, int nBase);
-unsigned long long x_strtoull(const char *pString, char **ppEnd, int nBase);
+/* The end pointer stays const: unlike the C library these never hand back a
+ * writable view of the input, so the qualifier is carried through.        */
+double x_strtod(const char *pString, const char **ppEnd);
+long x_strtol(const char *pString, const char **ppEnd, int nBase);
+unsigned long long x_strtoull(const char *pString, const char **ppEnd, int nBase);
 
 int x_rand(void);
 #define X_RAND_MAX 32767
@@ -105,10 +118,10 @@ int x_rand(void);
 void *x_stdout(void);
 void *x_stderr(void);
 
-int x_printf(const char *pFormat, ...);
-int x_fprintf(void *pStream, const char *pFormat, ...);
-int x_snprintf(char *pBuffer, size_t nSize, const char *pFormat, ...);
-int x_vsnprintf(char *pBuffer, size_t nSize, const char *pFormat, X_VA_LIST args);
+X_PRINTF_LIKE(1, 2) int x_printf(const char *pFormat, ...);
+X_PRINTF_LIKE(2, 3) int x_fprintf(void *pStream, const char *pFormat, ...);
+X_PRINTF_LIKE(3, 4) int x_snprintf(char *pBuffer, size_t nSize, const char *pFormat, ...);
+X_PRINTF_LIKE(3, 0) int x_vsnprintf(char *pBuffer, size_t nSize, const char *pFormat, X_VA_LIST args);
 int x_fflush(void *pStream);
 
 void *x_fopen(const char *pFileName, const char *pMode);
@@ -124,8 +137,10 @@ void *x_utf8_to_utf16(const char *pUtf8);
 char *x_utf16_to_utf8(const void *pUtf16);
 #endif
 size_t x_fread(void *pBuffer, size_t nSize, size_t nCount, void *pFile);
-int x_fseek(void *pFile, long nOffset, int nOrigin);
-long x_ftell(void *pFile);
+/* File offsets are 64 bit on every target: `long` is 32 bit on 64-bit
+ * Windows, which truncates the size of any file at or above 2 GiB. */
+int x_fseek(void *pFile, long long nOffset, int nOrigin);
+long long x_ftell(void *pFile);
 void x_rewind(void *pFile);
 
 /* ----------------------------------------------------------------- math -- */
@@ -148,6 +163,9 @@ double x_nan(void);
 double x_inf(void);
 int x_isnan(double nValue);
 int x_isinf(double nValue);
+/* The sign bit, which is not the same question as nValue < 0: -0.0 prints
+ * with its sign and compares equal to zero.                                */
+int x_signbit(double nValue);
 
 /* ------------------------------------------- double <-> decimal string --- */
 
@@ -161,6 +179,22 @@ int x_dtoa_fixed(double nValue, int nDigits, char *pBuffer, size_t nBufferSize);
 
 /* Number.prototype.toPrecision: nDigits significant digits. */
 int x_dtoa_precision(double nValue, int nDigits, char *pBuffer, size_t nBufferSize);
+
+/* printf's %e, %f and %g of the magnitude of nValue - never a sign, the
+ * caller owns that - under the C99 rules rather than the ECMAScript ones the
+ * three entry points above follow. nConversion is one of 'e', 'E', 'f', 'F',
+ * 'g' or 'G', nPrecision is the conversion precision or -1 for the default,
+ * and bAlt is the # flag. Exists for the hand-written formatter in utils.c,
+ * whose platform has no printf to fall back on. Returns the number of
+ * characters the conversion produces, snprintf-style.                       */
+int x_dtoa_cformat(double nValue, char nConversion, int nPrecision, int bAlt, char *pBuffer, size_t nBufferSize);
+
+/* ---------------------------------------------------------------- clock --- */
+
+/* Milliseconds counted from an unspecified fixed point, non-decreasing for
+ * the lifetime of the process. Only differences of two readings mean
+ * anything; the profiling trace and the archive-scan budget are the callers.  */
+long long x_clock_ms(void);
 
 /* ---------------------------------------------------------- entry point --- */
 

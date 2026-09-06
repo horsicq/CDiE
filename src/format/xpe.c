@@ -47,17 +47,19 @@ int xpe_section_number_by_rva(XPE *pPE, cd_u32 nRVA)
 {
     int i = 0;
 
+    /* The arithmetic is done in cd_i64, the way build_memory_map does it: a
+     * VirtualAddress or VirtualSize near 4 GB wraps in 32 bits.             */
     for (i = 0; i < pPE->nSectionCount; i++) {
-        cd_u32 nStart = pPE->pSections[i].nVirtualAddress;
-        cd_u32 nSize = pPE->pSections[i].nVirtualSize;
+        cd_i64 nStart = pPE->pSections[i].nVirtualAddress;
+        cd_i64 nSize = pPE->pSections[i].nVirtualSize;
 
         if (nSize == 0) {
             nSize = pPE->pSections[i].nSizeOfRawData;
         }
 
-        nSize = (cd_u32)ALIGN_UP(nSize, pPE->nSectionAlignment);
+        nSize = ALIGN_UP(nSize, (cd_i64)pPE->nSectionAlignment);
 
-        if ((nRVA >= nStart) && (nRVA < nStart + nSize)) {
+        if (((cd_i64)nRVA >= nStart) && ((cd_i64)nRVA < nStart + nSize)) {
             return i;
         }
     }
@@ -134,7 +136,12 @@ static void build_memory_map(XPE *pPE)
         nHeadersSize = pPE->pFile->nSize;
     }
 
-    xbmap_add(&pPE->map, 0, nHeadersSize, pPE->nImageBase, nHeadersSize, XPART_HEADER, "Header");
+    /* nHeadersSize cannot be negative here: nLfanew is validated positive when
+     * the header is parsed, the other terms are unsigned header fields with
+     * nSectionCount capped at 4096, and the clamp above only lowers the value
+     * to the file size. The widening to the cd_u64 virtual size is therefore
+     * value-preserving, and made explicit so it is not read as an oversight. */
+    xbmap_add(&pPE->map, 0, nHeadersSize, pPE->nImageBase, (cd_u64)nHeadersSize, XPART_HEADER, "Header");
 
     for (i = 0; i < pPE->nSectionCount; i++) {
         XPESection *pSection = &pPE->pSections[i];
@@ -173,6 +180,7 @@ static void parse_imports(XPE *pPE)
     cd_i64 nOffset = xpe_rva_to_offset(pPE, pPE->pDirRVA[XPE_DIR_IMPORT]);
     int nCount = 0;
     int i = 0;
+    int nTotalPositions = 0;
     CDBuf hashBuf;
 
     if (nOffset == -1) {
@@ -215,7 +223,15 @@ static void parse_imports(XPE *pPE)
         cd_i64 nThunkOffset = xpe_rva_to_offset(pPE, nThunkRVA);
         CDVec vecFunctions;
         int j = 0;
+        int nRemaining = XPE_MAX_IMPORT_POSITIONS - nTotalPositions;
         CDBuf posBuf;
+
+        /* XPE::getImports budgets the positions per library and over the whole
+         * import table, so a descriptor list that shares one thunk array
+         * cannot multiply out.                                              */
+        if (nRemaining > XPE_MAX_POSITIONS_PER_LIBRARY) {
+            nRemaining = XPE_MAX_POSITIONS_PER_LIBRARY;
+        }
 
         cdvec_init(&vecFunctions);
         cdbuf_init(&posBuf);
@@ -223,7 +239,7 @@ static void parse_imports(XPE *pPE)
         pPE->pImports[i].pName = (nNameOffset != -1) ? xb_ansi_string(pPE->pFile, nNameOffset, 256) : cd_strdup("");
 
         if (nThunkOffset != -1) {
-            for (j = 0; j < 65536; j++) {
+            for (j = 0; j < nRemaining; j++) {
                 cd_u64 nThunk = 0;
                 char *pFunctionName = NULL;
 
@@ -267,9 +283,16 @@ static void parse_imports(XPE *pPE)
         }
 
         pPE->pImports[i].nPositionHash = xb_string_custom_crc32(posBuf.pData ? posBuf.pData : "");
+        nTotalPositions += pPE->pImports[i].nFunctionCount;
 
         cdbuf_free(&posBuf);
         cdvec_free(&vecFunctions);
+
+        if (nTotalPositions >= XPE_MAX_IMPORT_POSITIONS) {
+            pPE->nImportCount = i + 1;
+
+            break;
+        }
     }
 
     pPE->nImportHash32 = xb_string_custom_crc32(hashBuf.pData ? hashBuf.pData : "");
@@ -560,6 +583,7 @@ static cd_u32 parse_version_block(XPE *pPE, cd_i64 nOffset, cd_i64 nSize, const 
     cd_u16 nValueLength = 0;
     cd_u16 nType = 0;
     char *pTitle = NULL;
+    cd_i64 nTitleUnits = 0;
     cd_i64 nDelta = 0;
     CDBuf prefix;
     cd_u32 nResult = 0;
@@ -582,10 +606,14 @@ static cd_u32 parse_version_block(XPE *pPE, cd_i64 nOffset, cd_i64 nSize, const 
         return 0;
     }
 
-    pTitle = xb_unicode_string(pPE->pFile, nOffset + 6, 1024, 0);
+    /* szKey occupies (units + 1) UTF-16 code units on disk; the UTF-8 length
+     * of the converted title is not the same thing for non-ASCII keys.
+     * XPE::__getResourcesVersion reads at most 256 units (read_unicodeString's
+     * default) and advances by (sTitle.length() + 1) * sizeof(quint16).      */
+    pTitle = xb_unicode_string_n(pPE->pFile, nOffset + 6, 256, 0, &nTitleUnits);
 
     nDelta = 6;
-    nDelta += ((cd_i64)x_strlen(pTitle) + 1) * 2;
+    nDelta += (nTitleUnits + 1) * 2;
     nDelta = ALIGN_UP(nDelta, 4);
 
     cdbuf_init(&prefix);
@@ -597,7 +625,9 @@ static cd_u32 parse_version_block(XPE *pPE, cd_i64 nOffset, cd_i64 nSize, const 
 
     cdbuf_append_str(&prefix, pTitle);
 
-    if (x_strcmp(prefix.pData, "VS_VERSION_INFO") == 0) {
+    /* A block whose prefix and title are both empty never allocates, so pData
+     * is still NULL here -- a malformed resource reaches this with no key.  */
+    if (x_strcmp(prefix.pData ? prefix.pData : "", "VS_VERSION_INFO") == 0) {
         if (nValueLength >= 52) {
             pPE->nFileVersionMS = xb_u32(pPE->pFile, nOffset + nDelta + 8, 0);
             pPE->nFileVersionLS = xb_u32(pPE->pFile, nOffset + nDelta + 12, 0);
@@ -605,7 +635,26 @@ static cd_u32 parse_version_block(XPE *pPE, cd_i64 nOffset, cd_i64 nSize, const 
     }
 
     if (nLevel == 3) {
-        char *pValue = xb_unicode_string(pPE->pFile, nOffset + nDelta, 4096, 0);
+        /* The value is bounded by both wValueLength and what is left of this
+         * record - min(wValueLength, (wLength - nDelta) / 2) UTF-16 units,
+         * exactly as XPE::__getResourcesVersion computes nValueCharacters.
+         * Without that bound a record carrying a short or zero-length value
+         * reads on into the bytes of the record that follows it.            */
+        cd_i64 nAvailUnits = ((cd_i64)nLength - nDelta) / 2;
+        cd_i64 nValueUnits = (cd_i64)nValueLength;
+        char *pValue = NULL;
+
+        if (nAvailUnits < 0) {
+            nAvailUnits = 0;
+        }
+
+        if (nValueUnits > nAvailUnits) {
+            nValueUnits = nAvailUnits;
+        }
+
+        /* xb_unicode_string reads 0x10000 units when given a non-positive
+         * limit, while read_unicodeString returns an empty string. */
+        pValue = (nValueUnits > 0) ? xb_unicode_string(pPE->pFile, nOffset + nDelta, nValueUnits, 0) : cd_strdup("");
 
         version_add(pPE, pTitle, pValue);
         cd_free(pValue);
@@ -943,7 +992,8 @@ static void parse_net_tables(XPE *pPE)
         pCli->pElementSize[MDT_NestedClass] = pCli->pIndexSize[MDT_TypeDef] * 2;
         pCli->pElementSize[MDT_GenericParam] = 2 + 2 + pCli->nTypeDefOrRefSize + nStr;
         pCli->pElementSize[MDT_MethodSpec] = pCli->nMethodDefOrRefSize + nBlob;
-        pCli->pElementSize[MDT_GenericParamConstraint] = (int)pCli->pRows[MDT_GenericParam] + pCli->nTypeDefOrRefSize;
+        /* Owner is an index into GenericParam, not the GenericParam row count. */
+        pCli->pElementSize[MDT_GenericParamConstraint] = pCli->pIndexSize[MDT_GenericParam] + pCli->nTypeDefOrRefSize;
     }
 
     if (nHeapOffsetSizes & 0x40) {
@@ -1058,13 +1108,25 @@ static cd_u32 md_field_name(XPE *pPE, cd_u32 nRow)
     return md_index(pPE, nOffset + 2, pCli->nStringIndexSize);
 }
 
+/* XCLIAssembly keeps every row count in a signed qint32, so a count above
+ * INT_MAX turns negative there and the walk it drives never runs. Reproduce
+ * that narrowing instead of walking 4.29e9 attacker-supplied rows.          */
+static cd_i64 md_row_count(cd_u32 nRows)
+{
+    if (nRows > 0x7FFFFFFFu) {
+        return (cd_i64)nRows - 0x100000000ll;
+    }
+
+    return (cd_i64)nRows;
+}
+
 /* Locates a TypeDef row by namespace and name; returns -1 when absent.
  * An empty argument means "do not compare this component", matching the
  * reference implementation.                                                */
 static cd_i64 md_find_typedef(XPE *pPE, const char *pNamespace, const char *pTypeName, MDTypeDef *pOut)
 {
-    cd_u32 nCount = pPE->cli.pRows[MDT_TypeDef];
-    cd_u32 i = 0;
+    cd_i64 nCount = md_row_count(pPE->cli.pRows[MDT_TypeDef]);
+    cd_i64 i = 0;
 
     for (i = 0; i < nCount; i++) {
         MDTypeDef record;
@@ -1072,7 +1134,7 @@ static cd_i64 md_find_typedef(XPE *pPE, const char *pNamespace, const char *pTyp
         char *pNs = NULL;
         int bMatch = 0;
 
-        if (!md_typedef(pPE, i, &record)) {
+        if (!md_typedef(pPE, (cd_u32)i, &record)) {
             break;
         }
 
@@ -1087,7 +1149,7 @@ static cd_i64 md_find_typedef(XPE *pPE, const char *pNamespace, const char *pTyp
         if (bMatch) {
             *pOut = record;
 
-            return (cd_i64)i;
+            return i;
         }
     }
 
@@ -1136,11 +1198,9 @@ int xpe_net_method_present(XPE *pPE, const char *pNamespace, const char *pTypeNa
             nMethodCount = (cd_i64)next.nMethodList - (cd_i64)record.nMethodList;
         }
     } else {
-        nMethodCount = (cd_i64)pPE->cli.pRows[MDT_MethodPtr] - (cd_i64)record.nMethodList;
-
-        if (pPE->cli.pRows[MDT_MethodPtr] == 0) {
-            nMethodCount = (cd_i64)pPE->cli.pRows[MDT_MethodDef] - (cd_i64)record.nMethodList + 1;
-        }
+        /* XCLIAssembly::isNetMethodPresent derives the last type's method
+         * count from the MethodPtr table alone.                           */
+        nMethodCount = md_row_count(pPE->cli.pRows[MDT_MethodPtr]) - (cd_i64)record.nMethodList;
     }
 
     for (j = 0; j < nMethodCount; j++) {
@@ -1202,7 +1262,7 @@ int xpe_net_field_present(XPE *pPE, const char *pNamespace, const char *pTypeNam
             nFieldCount = (cd_i64)next.nFieldList - (cd_i64)record.nFieldList;
         }
     } else {
-        nFieldCount = (cd_i64)pPE->cli.pRows[MDT_Field] - (cd_i64)record.nFieldList + 1;
+        nFieldCount = md_row_count(pPE->cli.pRows[MDT_Field]) - (cd_i64)record.nFieldList;
     }
 
     for (j = 0; j < nFieldCount; j++) {
@@ -1280,9 +1340,9 @@ static void parse_net(XPE *pPE)
     cd_i64 nStreamOffset = 0;
     cd_u16 i = 0;
     cd_i64 nStringsOffset = -1;
-    cd_u32 nStringsSize = 0;
+    cd_i64 nStringsSize = 0;
     cd_i64 nUSOffset = -1;
-    cd_u32 nUSSize = 0;
+    cd_i64 nUSSize = 0;
 
     if ((nCliOffset == -1) || (pPE->pDirSize[XPE_DIR_COMHEADER] < 72)) {
         return;
@@ -1326,30 +1386,42 @@ static void parse_net(XPE *pPE)
         cd_u32 nSize = xb_u32(pPE->pFile, nStreamOffset + 4, 0);
         char *pName = xb_ansi_string(pPE->pFile, nStreamOffset + 8, 64);
         size_t nNameSize = x_strlen(pName);
+        cd_i64 nStreamStart = nMetaOffset + (cd_i64)nOffset;
+        cd_i64 nStreamSize = (cd_i64)nSize;
+
+        /* A malformed file can point a stream outside the image; clamp it the
+         * way XCLIAssembly::getCliInfo does, so the heap walks below stay
+         * inside the file.                                                   */
+        if ((nStreamStart < 0) || (nStreamStart > pPE->pFile->nSize)) {
+            nStreamStart = 0;
+            nStreamSize = 0;
+        } else if (nStreamStart + nStreamSize > pPE->pFile->nSize) {
+            nStreamSize = pPE->pFile->nSize - nStreamStart;
+        }
 
         if ((x_strcmp(pName, "#~") == 0) || (x_strcmp(pName, "#-") == 0)) {
-            pPE->cli.nTablesOffset = nMetaOffset + nOffset;
-            pPE->cli.nTablesSize = nSize;
+            pPE->cli.nTablesOffset = nStreamStart;
+            pPE->cli.nTablesSize = nStreamSize;
         } else if (x_strcmp(pName, "#Strings") == 0) {
             if (nStringsOffset == -1) {
-                nStringsOffset = nMetaOffset + nOffset;
-                nStringsSize = nSize;
+                nStringsOffset = nStreamStart;
+                nStringsSize = nStreamSize;
                 pPE->cli.nStringsOffset = nStringsOffset;
-                pPE->cli.nStringsSize = (cd_i64)nSize;
+                pPE->cli.nStringsSize = nStreamSize;
             }
         } else if (x_strcmp(pName, "#US") == 0) {
             if (nUSOffset == -1) {
-                nUSOffset = nMetaOffset + nOffset;
-                nUSSize = nSize;
+                nUSOffset = nStreamStart;
+                nUSSize = nStreamSize;
                 pPE->cli.nUSOffset = nUSOffset;
-                pPE->cli.nUSSize = (cd_i64)nSize;
+                pPE->cli.nUSSize = nStreamSize;
             }
         } else if (x_strcmp(pName, "#Blob") == 0) {
-            pPE->cli.nBlobOffset = nMetaOffset + nOffset;
-            pPE->cli.nBlobSize = (cd_i64)nSize;
+            pPE->cli.nBlobOffset = nStreamStart;
+            pPE->cli.nBlobSize = nStreamSize;
         } else if (x_strcmp(pName, "#GUID") == 0) {
-            pPE->cli.nGuidOffset = nMetaOffset + nOffset;
-            pPE->cli.nGuidSize = (cd_i64)nSize;
+            pPE->cli.nGuidOffset = nStreamStart;
+            pPE->cli.nGuidSize = nStreamSize;
         }
 
         cd_free(pName);
@@ -1364,8 +1436,8 @@ static void parse_net(XPE *pPE)
 
         cdvec_init(&vec);
 
-        while ((nPos < (cd_i64)nStringsSize) && (vec.nSize < 100000)) {
-            char *pString = xb_ansi_string(pPE->pFile, nStringsOffset + nPos, (cd_i64)nStringsSize - nPos);
+        while ((nPos < nStringsSize) && (vec.nSize < 100000)) {
+            char *pString = xb_ansi_string(pPE->pFile, nStringsOffset + nPos, nStringsSize - nPos);
             size_t nSize = x_strlen(pString);
 
             if (nSize) {
@@ -1379,7 +1451,11 @@ static void parse_net(XPE *pPE)
 
         pPE->nNetAnsiCount = (int)vec.nSize;
         pPE->ppNetAnsiStrings = (char **)cd_malloc((vec.nSize ? vec.nSize : 1) * sizeof(char *));
-        x_memcpy(pPE->ppNetAnsiStrings, vec.ppData, vec.nSize * sizeof(char *));
+
+        if (vec.nSize) {
+            x_memcpy(pPE->ppNetAnsiStrings, vec.ppData, vec.nSize * sizeof(char *));
+        }
+
         cdvec_free(&vec);
     }
 
@@ -1389,7 +1465,7 @@ static void parse_net(XPE *pPE)
 
         cdvec_init(&vec);
 
-        while ((nPos < (cd_i64)nUSSize) && (vec.nSize < 100000)) {
+        while ((nPos < nUSSize) && (vec.nSize < 100000)) {
             int nBytes = 0;
             cd_u32 nLength = read_compressed_uint(pPE->pFile, nUSOffset + nPos, &nBytes);
 
@@ -1432,7 +1508,11 @@ static void parse_net(XPE *pPE)
 
         pPE->nNetUnicodeCount = (int)vec.nSize;
         pPE->ppNetUnicodeStrings = (char **)cd_malloc((vec.nSize ? vec.nSize : 1) * sizeof(char *));
-        x_memcpy(pPE->ppNetUnicodeStrings, vec.ppData, vec.nSize * sizeof(char *));
+
+        if (vec.nSize) {
+            x_memcpy(pPE->ppNetUnicodeStrings, vec.ppData, vec.nSize * sizeof(char *));
+        }
+
         cdvec_free(&vec);
     }
 }

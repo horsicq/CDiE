@@ -174,6 +174,18 @@ static char *elf_interp(XBFile *pFile, XELF *pElf)
     return cd_strdup("");
 }
 
+/* Clamps a raw offset/size pair taken from a header to the end of the file.
+ * The test is done in cd_u64 because adding the two 64-bit fields as cd_i64
+ * overflows on a malformed header. */
+static cd_i64 elf_clamp_end(XBFile *pFile, cd_u64 nOffset, cd_u64 nSize)
+{
+    if ((nOffset > (cd_u64)pFile->nSize) || (nSize > (cd_u64)pFile->nSize - nOffset)) {
+        return pFile->nSize;
+    }
+
+    return (cd_i64)(nOffset + nSize);
+}
+
 /* Finds an ELF note by (type, name); nWantType < 0 matches any type. Notes are
  * taken from the PT_NOTE segments, or the SHT_NOTE sections when there is no
  * PT_NOTE. On a match returns 1 and the descriptor offset/size. */
@@ -228,13 +240,9 @@ static int elf_find_note(XBFile *pFile, XELF *pElf, int nWantType, const char *p
     for (i = 0; i < pElf->nProgramCount; i++) {
         if (pElf->pPrograms[i].nType == ELF_PT_NOTE) {
             cd_i64 nStart = (cd_i64)pElf->pPrograms[i].nOffset;
-            cd_i64 nEnd = nStart + (cd_i64)pElf->pPrograms[i].nFileSize;
+            cd_i64 nEnd = elf_clamp_end(pFile, pElf->pPrograms[i].nOffset, pElf->pPrograms[i].nFileSize);
 
             bHavePtNote = 1;
-
-            if (nEnd > pFile->nSize) {
-                nEnd = pFile->nSize;
-            }
 
             if (elf_scan_range_note(pFile, nStart, nEnd, pElf->bBigEndian, nWantType, pWantName, pnDescOff, pnDescSize)) {
                 return 1;
@@ -249,11 +257,7 @@ static int elf_find_note(XBFile *pFile, XELF *pElf, int nWantType, const char *p
     for (i = 0; i < pElf->nSectionCount; i++) {
         if (pElf->pSections[i].nType == ELF_SHT_NOTE) {
             cd_i64 nStart = (cd_i64)pElf->pSections[i].nOffset;
-            cd_i64 nEnd = nStart + (cd_i64)pElf->pSections[i].nSize;
-
-            if (nEnd > pFile->nSize) {
-                nEnd = pFile->nSize;
-            }
+            cd_i64 nEnd = elf_clamp_end(pFile, pElf->pSections[i].nOffset, pElf->pSections[i].nSize);
 
             if (elf_scan_range_note(pFile, nStart, nEnd, pElf->bBigEndian, nWantType, pWantName, pnDescOff, pnDescSize)) {
                 return 1;
@@ -307,11 +311,7 @@ static int elf_comment_distro(XBFile *pFile, XELF *pElf, const char **ppOsName, 
     }
 
     nStart = (cd_i64)pElf->pSections[nSec].nOffset;
-    nEnd = nStart + (cd_i64)pElf->pSections[nSec].nSize;
-
-    if (nEnd > pFile->nSize) {
-        nEnd = pFile->nSize;
-    }
+    nEnd = elf_clamp_end(pFile, pElf->pSections[nSec].nOffset, pElf->pSections[nSec].nSize);
 
     if (nStart < 0) {
         return 0; /* a bit-63 offset in a malformed 64-bit ELF */
@@ -492,7 +492,6 @@ static void elf_compute_os(XBFile *pFile, XELF *pElf)
 }
 
 /* ELF constants used here. */
-#define ELF_ET_NONE 0
 #define ELF_SHT_NOBITS 8
 #define ELF_PT_LOAD 1
 #define ELF_PT_DYNAMIC 2
@@ -770,8 +769,9 @@ int xelf_parse(XBFile *pFile, XELF *pElf)
         pElf->nShstrndx = xb_u16(pFile, 50, bBE);
     }
 
-    /* Program headers. */
-    if ((pElf->nPhnum > 0) && (pElf->nPhnum <= 0x1000)) {
+    /* Program headers (nPhnum is a u16, so it is already <= 0xFFFF, and every
+     * entry is bounds-checked before it is read). */
+    if (pElf->nPhnum > 0) {
         pElf->pPrograms = (XElfProgram *)cd_calloc((size_t)pElf->nPhnum, sizeof(XElfProgram));
 
         for (i = 0; i < pElf->nPhnum; i++) {
@@ -957,12 +957,16 @@ int xelf_string_in_table_present(XBFile *pFile, XELF *pElf, const char *pSection
     }
 
     nOffset = (cd_i64)pElf->pSections[nSection].nOffset;
-    nEnd = nOffset + (cd_i64)pElf->pSections[nSection].nSize;
     nQueryLen = x_strlen(pString);
 
-    if ((nOffset < 0) || (nEnd > pFile->nSize)) {
+    /* Range-checked in cd_u64: adding the two raw header fields as cd_i64
+     * overflows on a malformed section header. */
+    if ((pElf->pSections[nSection].nOffset > (cd_u64)pFile->nSize) ||
+        (pElf->pSections[nSection].nSize > (cd_u64)pFile->nSize - pElf->pSections[nSection].nOffset)) {
         return 0;
     }
+
+    nEnd = nOffset + (cd_i64)pElf->pSections[nSection].nSize;
 
     /* Walk the NUL-delimited entries; the match must be a whole entry. */
     while (nOffset < nEnd) {

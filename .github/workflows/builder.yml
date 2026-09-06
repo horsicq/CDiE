@@ -11,7 +11,22 @@ on:
 permissions:
   contents: write
 
+# All three publishing jobs push to the same 'Beta' tag. Without a concurrency
+# group a nightly cron firing while a push run is still building leaves that
+# one prerelease holding binaries from two different commits, with nothing
+# recording the mismatch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  # --------------------------------------------------------------- release --
+  #
+  # The three jobs that produce the published binaries. Each one now also
+  # builds and runs the test suite and smoke-runs the artefact it uploads:
+  # before this the workflow compiled and published without ever executing the
+  # binary, so only link-time breakage was caught.
+
   build-linux:
     runs-on: ubuntu-latest
 
@@ -28,8 +43,23 @@ jobs:
         run: |
           mkdir build
           cd build
-          cmake -DCMAKE_BUILD_TYPE=Release ..
+          cmake -DCMAKE_BUILD_TYPE=Release -DCDIE_BUILD_TESTS=ON ..
           make -j$(nproc)
+
+      - name: Run tests
+        working-directory: build
+        run: ctest --output-on-failure
+
+      - name: Smoke test the binary
+        working-directory: build
+        shell: bash
+        run: |
+          ./src/console/cdie --version
+          ./src/console/cdie --help
+          # No signature database is checked out here, so the scan still
+          # prints the file type but exits CR_CANNOTFINDDATABASE (3). That
+          # status is expected; any other one is a regression in the binary.
+          ./src/console/cdie src/console/cdie || [ $? -eq 3 ]
           mv src/console/cdie src/console/cdie_linux
 
       - name: Upload Linux Release
@@ -42,7 +72,7 @@ jobs:
           files: build/src/console/cdie_linux
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          
+
   build-windows:
     runs-on: windows-latest
 
@@ -54,8 +84,21 @@ jobs:
         run: |
           mkdir build
           cd build
-          cmake -DCMAKE_BUILD_TYPE=Release ..
+          cmake -DCMAKE_BUILD_TYPE=Release -DCDIE_BUILD_TESTS=ON ..
           cmake --build . --config Release
+
+      - name: Run tests
+        working-directory: build
+        run: ctest -C Release --output-on-failure
+
+      - name: Smoke test the binary
+        working-directory: build
+        shell: bash
+        run: |
+          ./src/console/Release/cdie.exe --version
+          ./src/console/Release/cdie.exe --help
+          # Exit status 3 is CR_CANNOTFINDDATABASE -- see the Linux job.
+          ./src/console/Release/cdie.exe ./src/console/Release/cdie.exe || [ $? -eq 3 ]
 
       - name: Upload Windows Release
         if: github.event_name != 'pull_request'
@@ -83,9 +126,21 @@ jobs:
         run: |
           mkdir build
           cd build
-          cmake -DCMAKE_BUILD_TYPE=Release ..
+          cmake -DCMAKE_BUILD_TYPE=Release -DCDIE_BUILD_TESTS=ON ..
           make -j$(sysctl -n hw.logicalcpu)
-          # Benennt die Datei direkt nach dem Kompilieren um
+
+      - name: Run tests
+        working-directory: build
+        run: ctest --output-on-failure
+
+      - name: Smoke test the binary
+        working-directory: build
+        shell: bash
+        run: |
+          ./src/console/cdie --version
+          ./src/console/cdie --help
+          # Exit status 3 is CR_CANNOTFINDDATABASE -- see the Linux job.
+          ./src/console/cdie src/console/cdie || [ $? -eq 3 ]
           mv src/console/cdie src/console/cdie_macos
 
       - name: Upload macOS Release
@@ -98,3 +153,85 @@ jobs:
           files: build/src/console/cdie_macos
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ---------------------------------------------------------------- checks --
+  #
+  # Configurations that are never published but are the ones that catch what a
+  # single default Release build cannot:
+  #
+  #   clang        a second front end over the same C99
+  #   Debug        no NDEBUG, and -O0, where the library's missing libm showed
+  #   sanitizers   ASan + UBSan over the test suite
+  #   MSVC Win32   the only configuration where CDIE_NO_CRT defaults to OFF
+  #   MSVC no-CRT off   the hosted MSVC path on x64
+  #
+  # None of these upload anything, so a failure here blocks nothing that is
+  # already green -- it just reports.
+
+  checks:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # CDIE_WERROR is on for the two GCC/clang jobs only. An option no
+          # configuration ever sets is an option nobody notices breaking, and
+          # these jobs publish nothing, so a warning introduced anywhere in
+          # the tree reports here instead of accumulating unseen. It is left
+          # off for AppleClang and MSVC, whose warning sets differ enough that
+          # turning them fatal would be a separate exercise.
+          - name: linux-clang
+            os: ubuntu-latest
+            configure: -DCMAKE_BUILD_TYPE=Release -DCDIE_BUILD_TESTS=ON -DCMAKE_C_COMPILER=clang -DCDIE_WERROR=ON
+          - name: linux-debug
+            os: ubuntu-latest
+            configure: -DCMAKE_BUILD_TYPE=Debug -DCDIE_BUILD_TESTS=ON -DCDIE_WERROR=ON
+          - name: linux-asan-ubsan
+            os: ubuntu-latest
+            # The flag values contain spaces, so they are quoted here: the
+            # expansion goes straight into the shell command below.
+            configure: '-DCMAKE_BUILD_TYPE=Debug -DCDIE_BUILD_TESTS=ON "-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer -g" "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined"'
+          - name: macos-debug
+            os: macos-latest
+            configure: -DCMAKE_BUILD_TYPE=Debug -DCDIE_BUILD_TESTS=ON
+          - name: windows-x86
+            os: windows-latest
+            # -A Win32 is the only configuration in which CDIE_NO_CRT defaults
+            # to OFF, i.e. the only one that builds the hosted MSVC path.
+            configure: -A Win32 -DCDIE_BUILD_TESTS=ON
+            config: Release
+          - name: windows-x64-hosted-crt
+            os: windows-latest
+            configure: -A x64 -DCDIE_BUILD_TESTS=ON -DCDIE_NO_CRT=OFF
+            config: Release
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build ${{ matrix.configure }}
+
+      - name: Build
+        run: cmake --build build --config ${{ matrix.config || 'Release' }} --parallel
+
+      - name: Run tests
+        working-directory: build
+        env:
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: ctest -C ${{ matrix.config || 'Release' }} --output-on-failure
+
+      - name: Smoke test the binary
+        shell: bash
+        run: |
+          if [ -x build/src/console/cdie ]; then
+              CDIE=build/src/console/cdie
+          else
+              CDIE=build/src/console/${{ matrix.config || 'Release' }}/cdie.exe
+          fi
+          "$CDIE" --version
+          "$CDIE" --help
+          # Exit status 3 is CR_CANNOTFINDDATABASE -- see the Linux job.
+          "$CDIE" "$CDIE" || [ $? -eq 3 ]

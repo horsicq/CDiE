@@ -22,16 +22,20 @@
 #include "xft.h"
 #include "xpyc.h"
 
+/* One unsigned comparison covers both ends of the bTypes[] index: XFileType has
+ * no negative enumerator, so a compiler that gives it an unsigned
+ * representation makes "type >= 0" vacuous, and a negative value on a compiler
+ * that keeps it signed wraps to a value above XFT_COUNT here.               */
 static void add(XFTSet *pSet, XFileType type)
 {
-    if ((type >= 0) && (type < XFT_COUNT)) {
+    if ((cd_u32)type < (cd_u32)XFT_COUNT) {
         pSet->bTypes[type] = 1;
     }
 }
 
 int xft_contains(XFTSet *pSet, XFileType type)
 {
-    if ((type >= 0) && (type < XFT_COUNT)) {
+    if ((cd_u32)type < (cd_u32)XFT_COUNT) {
         return pSet->bTypes[type];
     }
 
@@ -45,6 +49,59 @@ static int match(XBFile *pFile, cd_i64 nOffset, const char *pBytes, size_t nSize
     }
 
     return (x_memcmp(pFile->pData + nOffset, pBytes, nSize) == 0) ? 1 : 0;
+}
+
+/* XBinary::getFileTypes' fat validation: a CAFEBABE header only counts as a
+ * Mach-O fat binary when the whole fat_header/fat_arch table describes slices
+ * that actually fit in the file. Only the 32-bit big-endian layout can reach
+ * here, which is the one that collides with the Java class magic. */
+static int is_macho_fat(XBFile *pFile)
+{
+    cd_u32 nFatRecords = 0;
+    cd_u64 nFatTableEnd = 0;
+    cd_u64 nFileSize = 0;
+    cd_u32 i = 0;
+
+    if (pFile->nSize < 8) {
+        return 0;
+    }
+
+    nFileSize = (cd_u64)pFile->nSize;
+    nFatRecords = xb_u32(pFile, 4, 1);
+
+    if ((nFatRecords == 0) || (nFatRecords > 1000000)) {
+        return 0;
+    }
+
+    if ((cd_u64)nFatRecords > (cd_u64)((pFile->nSize - 8) / 20)) {
+        return 0;
+    }
+
+    nFatTableEnd = 8 + (cd_u64)nFatRecords * 20;
+
+    for (i = 0; i < nFatRecords; i++) {
+        cd_i64 nRecord = 8 + (cd_i64)i * 20;
+        cd_u32 nCpuType = xb_u32(pFile, nRecord, 1);
+        cd_u64 nArchOffset = xb_u32(pFile, nRecord + 8, 1);
+        cd_u64 nArchSize = xb_u32(pFile, nRecord + 12, 1);
+        cd_u32 nAlign = xb_u32(pFile, nRecord + 16, 1);
+        cd_u64 nAlignMask = 0;
+
+        if (nAlign > 63) {
+            return 0;
+        }
+
+        if (nAlign != 0) {
+            nAlignMask = ((cd_u64)1 << nAlign) - 1;
+        }
+
+        if ((nCpuType == 0) || (nArchSize == 0) || (nArchOffset < nFatTableEnd) || ((nArchOffset & nAlignMask) != 0) || (nArchOffset > nFileSize) ||
+            (nArchSize > (nFileSize - nArchOffset))) {
+            return 0;
+        }
+    }
+
+    return 1;
 }
 
 static void detect_zip_family(XBFile *pFile, XFTSet *pSet)
@@ -144,16 +201,21 @@ void xft_detect(XBFile *pFile, XFTSet *pSet)
     }
 
     if (match(pFile, 0, "\xCA\xFE\xBA\xBE", 4)) {
-        /* Java class files and Mach-O fat binaries share this magic. */
-        cd_u32 nCount = xb_u32(pFile, 4, 1);
-
-        if (nCount < 64) {
+        /* Java class files and Mach-O fat binaries share this magic. The
+         * reference validates the fat table first and only then reads a word at
+         * offset 4 above 10 (the class file's minor/major version) as a Java
+         * class; anything else stays plain Binary. */
+        if (is_macho_fat(pFile)) {
             add(pSet, XFT_MACHOFAT);
-        } else {
-            add(pSet, XFT_JAVACLASS);
+
+            return;
         }
 
-        return;
+        if ((pFile->nSize >= 24) && (xb_u32(pFile, 4, 1) > 10)) {
+            add(pSet, XFT_JAVACLASS);
+
+            return;
+        }
     }
 
     if (match(pFile, 0, "\xFE\xED\xFA\xCE", 4) || match(pFile, 0, "\xCE\xFA\xED\xFE", 4)) {

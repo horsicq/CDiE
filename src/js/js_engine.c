@@ -31,6 +31,12 @@ JSCtx *js_new(void)
     /* Deep enough for any database rule, shallow enough that the native
      * stack cannot be exhausted by a runaway recursive script.            */
     pCtx->nMaxCallDepth = 200;
+    /* The evaluator recurses once per AST node, and a left-leaning operator
+     * chain nests as deeply as it is long without the parser ever recursing,
+     * so the evaluator needs a ceiling of its own. Measured overflow of an
+     * 8 MB stack sits above 18000 levels; this leaves better than a factor
+     * of two in hand.                                                      */
+    pCtx->nMaxEvalDepth = 8000;
     pCtx->exception = js_undefined();
     cdvec_init(&pCtx->vecPrograms);
 
@@ -68,7 +74,8 @@ void js_free(JSCtx *pCtx)
 
     cdvec_free(&pCtx->vecPrograms);
 
-    /* Sweep every object; reference cycles make eager freeing impossible. */
+    /* Whatever is left is caught in a reference cycle; sweep it flat, without
+     * releasing the values, so that nothing can be freed twice.           */
     {
         JSObj *pObj = pCtx->pAllObjects;
 
@@ -82,6 +89,7 @@ void js_free(JSCtx *pCtx)
 
             cd_free(pObj->props.pEntries);
             cd_free(pObj->props.pIndex);
+            cd_free(pObj->pBoundArgs);
             cd_free(pObj->pFnName);
 
             if (pObj->pRegExp) {

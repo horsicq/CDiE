@@ -399,10 +399,10 @@ static void collect_consts(XBFile *pFile, XPyc *pPyc)
     if ((nOffset + 1) <= nSize) {
         cd_u8 nCodeType = (cd_u8)(xb_u8(pFile, nOffset) & 0x7F);
 
+        nOffset += 1;
+
         if ((nCodeType == PYC_T_STRING) || (nCodeType == PYC_T_SHORT_ASCII) || (nCodeType == PYC_T_ASCII)) {
             cd_i32 nCodeLength = 0;
-
-            nOffset += 1;
 
             if (nCodeType == PYC_T_SHORT_ASCII) {
                 nCodeLength = (cd_i32)xb_u8(pFile, nOffset);

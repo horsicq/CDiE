@@ -35,23 +35,58 @@ if(DIE_BUILD_SHARED)
     add_library(die_shared SHARED ${DIE_LIB_SOURCES})
     target_include_directories(die_shared PUBLIC ${CMAKE_CURRENT_LIST_DIR})
     target_compile_definitions(die_shared PRIVATE DIE_BUILD_SHARED)
-    set_target_properties(die_shared PROPERTIES OUTPUT_NAME die)
+
+    # Hidden by default so only the DIE_* entry points (which die.h marks
+    # visibility("default") when DIE_BUILD_SHARED is set) reach the dynamic
+    # symbol table. Without it the engine's internals -- cd_malloc, db_load,
+    # inflate_raw and ~300 more -- take part in ELF symbol interposition and a
+    # host that happens to define one of those names silently replaces it.
+    #
+    # VERSION/SOVERSION give the library a real soname so a distribution can
+    # carry two ABI revisions; they are ignored on Windows.
+    set_target_properties(die_shared PROPERTIES
+        OUTPUT_NAME die
+        C_VISIBILITY_PRESET hidden
+        VERSION ${PROJECT_VERSION}
+        SOVERSION ${PROJECT_VERSION_MAJOR})
+endif()
+
+# ------------------------------------------------------------------- libm --
+#
+# core/utils_math.c lowers to a real sqrt() call at -O0 and -Os, so both
+# targets need libm. It is PUBLIC/INTERFACE so a consumer of the static
+# archive inherits it too; without it "gcc simple.c -l:libdie.so" fails with
+# an undefined reference to sqrt on any non-Release build.
+
+if(UNIX)
+    find_library(M_LIB m)
+
+    if(M_LIB)
+        if(DIE_BUILD_STATIC)
+            target_link_libraries(die_static PUBLIC ${M_LIB})
+        endif()
+
+        if(DIE_BUILD_SHARED)
+            target_link_libraries(die_shared PUBLIC ${M_LIB})
+        endif()
+    endif()
 endif()
 
 # ---------------------------------------------------------------- MSVC CRT‑free flags (STATIC ONLY)
+#
+# /Zl is what actually makes the archive CRT-free: it keeps cl from emitting
+# the /DEFAULTLIB records, so a consumer picks its own runtime. Do not remove
+# it. /NODEFAULTLIB belongs on the *consumer's* link line -- a STATIC library
+# is produced by lib.exe, which never sees LINK_OPTIONS, so putting it here
+# would be silently discarded. /GR-, /EH* and /kernel are C++-only or
+# deprecated (D9035 on VS2019+) and have no place on a C-only target.
 
 if (MSVC)
     if(DIE_BUILD_STATIC)
         target_compile_options(die_static PRIVATE
-            /GS-        
-            /Zl        
-            /kernel     
-            /GR-        
-            /EHsc-      
-            /DNDEBUG    
-        )
-        target_link_options(die_static PRIVATE
-            /NODEFAULTLIB   
+            /GS-
+            /Zl
+            /DNDEBUG
         )
     endif()
 endif()

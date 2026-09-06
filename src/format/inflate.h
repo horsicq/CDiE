@@ -34,11 +34,14 @@ extern "C" {
  *
  * Inflates pSource[0..nSourceSize) into pOut. nExpectedSize is the known
  * uncompressed size (from the ZIP header) and is used to bound the output so
- * a corrupt stream cannot grow without limit; pass 0 if unknown. Returns 1 on
+ * a corrupt stream cannot grow without limit; pass 0 if unknown. nMaxSize is
+ * an absolute ceiling on the output, mirroring the nDecompressedLimit of
+ * XArchive::decompress: decoding stops once that many bytes are produced and
+ * the truncated result is a success; pass 0 for no ceiling. Returns 1 on
  * success, 0 on any malformed input. On success pOut holds the bytes and its
  * NUL terminator is in place.
  */
-int inflate_raw(const unsigned char *pSource, size_t nSourceSize, size_t nExpectedSize, CDBuf *pOut);
+int inflate_raw(const unsigned char *pSource, size_t nSourceSize, size_t nExpectedSize, size_t nMaxSize, CDBuf *pOut);
 
 #ifdef __cplusplus
 }

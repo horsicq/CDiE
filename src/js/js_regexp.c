@@ -87,6 +87,8 @@ typedef struct {
     JSRegExp *pRegExp;
     char *pError;
     int bIgnoreCase;
+    int nGroupCount; /* capturing groups counted before the parse */
+    int nDepth;
 } REParser;
 
 /* ------------------------------------------------------------------ util  */
@@ -156,7 +158,95 @@ static void class_invert(unsigned char *pClass)
 
 /* ---------------------------------------------------------------- parser  */
 
+/* The reference engine caps a {n,m} bound at 0xFFFFFFFF and turns a larger
+ * one into an atom that can never match. RE_QUANT_MAX is above the length of
+ * any subject we can be handed, so clamping a smaller bound to it is not
+ * observable.                                                              */
+#define RE_QUANT_LIMIT 0xFFFFFFFFu
+#define RE_QUANT_MAX 0x40000000
+
+/* Groups nest through parse_atom -> parse_alternatives -> parse_sequence, so
+ * a pattern built from untrusted data needs a ceiling of its own.          */
+#define RE_MAX_PARSE_DEPTH 1000
+
 static REAlt *parse_alternatives(REParser *pParser, int *pnCount);
+
+static void parse_error(REParser *pParser, const char *pMessage)
+{
+    if (pParser->pError == NULL) {
+        pParser->pError = cd_strdup(pMessage);
+    }
+}
+
+/* Counts the capturing groups up front: '\1' is only a back reference when
+ * its number does not exceed the group count, and that count is not known
+ * yet at the point where the escape is parsed.                             */
+static int count_groups(const char *p, const char *pEnd)
+{
+    int nCount = 0;
+    int bInClass = 0;
+
+    while (p < pEnd) {
+        if (*p == '\\') {
+            p += 2;
+
+            continue;
+        }
+
+        if (bInClass) {
+            if (*p == ']') {
+                bInClass = 0;
+            }
+        } else if (*p == '[') {
+            bInClass = 1;
+        } else if ((*p == '(') && (((p + 1) >= pEnd) || (p[1] != '?'))) {
+            nCount++;
+        }
+
+        p++;
+    }
+
+    return nCount;
+}
+
+/* True when the parser sits on a quantifier. '{' only counts when the whole
+ * '{n}', '{n,}' or '{n,m}' is there; anything else is a literal brace.     */
+static int is_quantifier(REParser *pParser)
+{
+    const char *p = pParser->p;
+
+    if (p >= pParser->pEnd) {
+        return 0;
+    }
+
+    if ((*p == '*') || (*p == '+') || (*p == '?')) {
+        return 1;
+    }
+
+    if (*p != '{') {
+        return 0;
+    }
+
+    p++;
+
+    if ((p >= pParser->pEnd) || (*p < '0') || (*p > '9')) {
+        return 0;
+    }
+
+    while ((p < pParser->pEnd) && (*p >= '0') && (*p <= '9')) {
+        p++;
+    }
+
+    if ((p < pParser->pEnd) && (*p == ',')) {
+        p++;
+
+        while ((p < pParser->pEnd) && (*p >= '0') && (*p <= '9')) {
+            p++;
+        }
+    }
+
+    return ((p < pParser->pEnd) && (*p == '}')) ? 1 : 0;
+}
 
 static RENode *node_alloc(RENodeType type)
 {
@@ -319,6 +409,8 @@ static RENode *parse_class(REParser *pParser)
             pParser->p++;
 
             if (pParser->p >= pParser->pEnd) {
+                parse_error(pParser, "\\ at end of pattern");
+
                 break;
             }
 
@@ -354,6 +446,12 @@ static RENode *parse_class(REParser *pParser)
                 pParser->p++;
             }
 
+            if (nFrom > nTo) {
+                parse_error(pParser, "range out of order in character class");
+
+                break;
+            }
+
             for (i = nFrom; i <= (int)nTo; i++) {
                 class_set_ci(pParser, pNode, (unsigned char)i);
             }
@@ -364,6 +462,8 @@ static RENode *parse_class(REParser *pParser)
 
     if ((pParser->p < pParser->pEnd) && (*pParser->p == ']')) {
         pParser->p++;
+    } else {
+        parse_error(pParser, "missing terminating ] for character class");
     }
 
     if (pNode->bNegateClass) {
@@ -391,29 +491,27 @@ static RENode *parse_atom(REParser *pParser)
 
         pParser->p++;
 
-        if (((pParser->p + 1) < pParser->pEnd) && (pParser->p[0] == '?')) {
-            if (pParser->p[1] == ':') {
+        if ((pParser->p < pParser->pEnd) && (pParser->p[0] == '?')) {
+            char nKind = ((pParser->p + 1) < pParser->pEnd) ? pParser->p[1] : 0;
+
+            if (nKind == ':') {
                 bCapture = 0;
                 pParser->p += 2;
-            } else if (pParser->p[1] == '=') {
+            } else if (nKind == '=') {
                 bCapture = 0;
                 bLookahead = 1;
                 pParser->p += 2;
-            } else if (pParser->p[1] == '!') {
+            } else if (nKind == '!') {
                 bCapture = 0;
                 bLookahead = 1;
                 bNegate = 1;
                 pParser->p += 2;
-            } else if (pParser->p[1] == '<') {
-                pParser->p += 2;
+            } else {
+                /* The reference engine knows no named groups and no
+                 * look-behind, so '(?<' is a syntax error there too.       */
+                parse_error(pParser, "unrecognized character after (?");
 
-                while ((pParser->p < pParser->pEnd) && (*pParser->p != '>')) {
-                    pParser->p++;
-                }
-
-                if (pParser->p < pParser->pEnd) {
-                    pParser->p++;
-                }
+                return NULL;
             }
         }
 
@@ -425,10 +523,20 @@ static RENode *parse_atom(REParser *pParser)
             pNode->nGroupIndex = pParser->pRegExp->nGroups;
         }
 
+        if (pParser->nDepth >= RE_MAX_PARSE_DEPTH) {
+            parse_error(pParser, "regular expression is too deeply nested");
+
+            return pNode;
+        }
+
+        pParser->nDepth++;
         pNode->pAlts = parse_alternatives(pParser, &pNode->nAltCount);
+        pParser->nDepth--;
 
         if ((pParser->p < pParser->pEnd) && (*pParser->p == ')')) {
             pParser->p++;
+        } else {
+            parse_error(pParser, "missing )");
         }
 
         return pNode;
@@ -463,6 +571,8 @@ static RENode *parse_atom(REParser *pParser)
         pParser->p++;
 
         if (pParser->p >= pParser->pEnd) {
+            parse_error(pParser, "\\ at end of pattern");
+
             return NULL;
         }
 
@@ -479,12 +589,51 @@ static RENode *parse_atom(REParser *pParser)
         }
 
         if ((*pParser->p >= '1') && (*pParser->p <= '9')) {
-            RENode *pNode = node_alloc(RE_BACKREF);
+            const char *pSave = pParser->p;
+            cd_u64 nValue = 0;
 
-            pNode->nBackref = *pParser->p - '0';
-            pParser->p++;
+            while ((pParser->p < pParser->pEnd) && (*pParser->p >= '0') && (*pParser->p <= '9')) {
+                if (nValue <= RE_QUANT_LIMIT) {
+                    nValue = nValue * 10 + (cd_u64)(*pParser->p - '0');
+                }
 
-            return pNode;
+                pParser->p++;
+            }
+
+            if (nValue <= (cd_u64)pParser->nGroupCount) {
+                RENode *pNode = node_alloc(RE_BACKREF);
+
+                pNode->nBackref = (int)nValue;
+
+                return pNode;
+            }
+
+            /* Past the last group this is not a back reference: the reference
+             * engine re-reads it as a legacy octal escape, and leaves '\8'
+             * and '\9' as an atom that can never match.                     */
+            pParser->p = pSave;
+
+            if ((*pParser->p == '8') || (*pParser->p == '9')) {
+                pParser->p++;
+
+                return node_alloc(RE_CLASS); /* an empty class matches nothing */
+            }
+
+            {
+                RENode *pNode = node_alloc(RE_CHAR);
+                int nCode = 0;
+                int nDigits = 0;
+
+                while ((nDigits < 3) && (pParser->p < pParser->pEnd) && (*pParser->p >= '0') && (*pParser->p <= '7') && (((nCode * 8) + (*pParser->p - '0')) <= 255)) {
+                    nCode = (nCode * 8) + (*pParser->p - '0');
+                    pParser->p++;
+                    nDigits++;
+                }
+
+                pNode->nChar = (unsigned char)nCode;
+
+                return pNode;
+            }
         }
 
         x_memset(sTmp, 0, sizeof(sTmp));
@@ -537,14 +686,22 @@ static void parse_quantifier(REParser *pParser, RENode *pNode)
         pParser->p++;
     } else if (*pParser->p == '{') {
         const char *pSave = pParser->p;
-        int nMin = 0;
-        int nMax = -1;
+        cd_u64 nMin = 0;
+        cd_u64 nMax = 0;
+        int bBounded = 0;
         int bHasDigits = 0;
+        int bTooBig = 0;
 
         pParser->p++;
 
         while ((pParser->p < pParser->pEnd) && (*pParser->p >= '0') && (*pParser->p <= '9')) {
-            nMin = nMin * 10 + (*pParser->p - '0');
+            nMin = nMin * 10 + (cd_u64)(*pParser->p - '0');
+
+            if (nMin > RE_QUANT_LIMIT) {
+                nMin = RE_QUANT_LIMIT;
+                bTooBig = 1;
+            }
+
             bHasDigits = 1;
             pParser->p++;
         }
@@ -559,21 +716,40 @@ static void parse_quantifier(REParser *pParser, RENode *pNode)
             pParser->p++;
 
             if ((pParser->p < pParser->pEnd) && (*pParser->p >= '0') && (*pParser->p <= '9')) {
-                nMax = 0;
+                bBounded = 1;
 
                 while ((pParser->p < pParser->pEnd) && (*pParser->p >= '0') && (*pParser->p <= '9')) {
-                    nMax = nMax * 10 + (*pParser->p - '0');
+                    nMax = nMax * 10 + (cd_u64)(*pParser->p - '0');
+
+                    if (nMax > RE_QUANT_LIMIT) {
+                        nMax = RE_QUANT_LIMIT;
+                        bTooBig = 1;
+                    }
+
                     pParser->p++;
                 }
             }
         } else {
+            bBounded = 1;
             nMax = nMin;
         }
 
         if ((pParser->p < pParser->pEnd) && (*pParser->p == '}')) {
             pParser->p++;
-            pNode->nMin = nMin;
-            pNode->nMax = nMax;
+
+            if (bBounded && (nMin > nMax)) {
+                parse_error(pParser, "numbers out of order in {} quantifier");
+
+                return;
+            }
+
+            if (bTooBig) {
+                pNode->nMin = RE_QUANT_MAX;
+                pNode->nMax = RE_QUANT_MAX;
+            } else {
+                pNode->nMin = (nMin > RE_QUANT_MAX) ? RE_QUANT_MAX : (int)nMin;
+                pNode->nMax = bBounded ? ((nMax > RE_QUANT_MAX) ? RE_QUANT_MAX : (int)nMax) : -1;
+            }
         } else {
             pParser->p = pSave;
 
@@ -597,7 +773,17 @@ static RENode *parse_sequence(REParser *pParser)
     while (pParser->p < pParser->pEnd) {
         RENode *pNode = NULL;
 
+        if (pParser->pError) {
+            break;
+        }
+
         if ((*pParser->p == '|') || (*pParser->p == ')')) {
+            break;
+        }
+
+        if (is_quantifier(pParser)) {
+            parse_error(pParser, "nothing to repeat");
+
             break;
         }
 
@@ -607,8 +793,6 @@ static RENode *parse_sequence(REParser *pParser)
             break;
         }
 
-        parse_quantifier(pParser, pNode);
-
         if (pLast) {
             pLast->pNext = pNode;
         } else {
@@ -616,6 +800,22 @@ static RENode *parse_sequence(REParser *pParser)
         }
 
         pLast = pNode;
+
+        if (is_quantifier(pParser)) {
+            if ((pNode->type == RE_BOL) || (pNode->type == RE_EOL) || (pNode->type == RE_WORDB) || (pNode->type == RE_NWORDB)) {
+                parse_error(pParser, "nothing to repeat");
+
+                break;
+            }
+
+            parse_quantifier(pParser, pNode);
+
+            if (is_quantifier(pParser)) {
+                parse_error(pParser, "nothing to repeat");
+
+                break;
+            }
+        }
     }
 
     return pFirst;
@@ -632,6 +832,10 @@ static REAlt *parse_alternatives(REParser *pParser, int *pnCount)
         pAlts = (REAlt *)cd_realloc(pAlts, (size_t)(nCount + 1) * sizeof(REAlt));
         pAlts[nCount].pFirst = pSequence;
         nCount++;
+
+        if (pParser->pError) {
+            break;
+        }
 
         if ((pParser->p < pParser->pEnd) && (*pParser->p == '|')) {
             pParser->p++;
@@ -665,8 +869,14 @@ JSRegExp *jsregexp_compile(const char *pPattern, const char *pFlags, char **ppEr
     parser.pEnd = pRegExp->pSource + x_strlen(pRegExp->pSource);
     parser.pRegExp = pRegExp;
     parser.bIgnoreCase = pRegExp->bIgnoreCase;
+    parser.nGroupCount = count_groups(parser.p, parser.pEnd);
 
     pRegExp->pAlts = parse_alternatives(&parser, &pRegExp->nAltCount);
+
+    if (parser.p < parser.pEnd) {
+        /* parse_sequence stops at a ')' that closes nothing. */
+        parse_error(&parser, "unmatched parentheses");
+    }
 
     if (parser.pError) {
         if (ppError) {
@@ -727,7 +937,17 @@ const char *jsregexp_flags(JSRegExp *pRegExp)
 
 /* --------------------------------------------------------------- matcher  */
 
+/* The step budget covers one whole jsregexp_exec call, not one start offset,
+ * so that a pattern cannot cost nTextSize x the budget. Scanning n bytes for
+ * a first match is legitimately O(n) steps, though, so the budget has to
+ * grow with the subject or a plain literal search over a large string would
+ * be cut short and report "no match". RE_STEPS_PER_BYTE leaves two orders of
+ * magnitude of headroom over the few steps a start offset really costs,
+ * while still turning the old unbounded nTextSize x RE_MAX_STEPS worst case
+ * into a fixed ceiling.                                                     */
 #define RE_MAX_STEPS 2000000
+#define RE_STEPS_PER_BYTE 256
+#define RE_MAX_STEPS_TOTAL 1500000000
 /* Recursion guard: a quantified group recurses once per iteration, so a
  * pathological pattern over a long subject could otherwise exhaust the C
  * stack before the step counter fires.                                     */
@@ -750,7 +970,9 @@ typedef struct {
     JSRegExp *pRegExp;
     cd_i32 *pCaps;
     long nSteps;
+    long nStepLimit; /* RE_MAX_STEPS scaled by the subject size, see above */
     int nDepth;
+    int bAborted; /* a budget fired: the result is 'do not know', not 'no match' */
 } REMatcher;
 
 static int m_cont(REMatcher *pMatcher, RECont *pCont, size_t nPos, size_t *pnEnd);
@@ -809,6 +1031,29 @@ static int single_match(REMatcher *pMatcher, RENode *pNode, size_t nPos)
 
         default: return 0;
     }
+}
+
+/* Compares nLength bytes of the subject at nPos with the captured text at
+ * nStart. Both offsets are inside the subject by construction.             */
+static int backref_at(REMatcher *pMatcher, size_t nStart, size_t nLength, size_t nPos)
+{
+    if ((nPos + nLength) > pMatcher->nSize) {
+        return 0;
+    }
+
+    if (pMatcher->pRegExp->bIgnoreCase) {
+        size_t i = 0;
+
+        for (i = 0; i < nLength; i++) {
+            if (re_lower(pMatcher->pText[nPos + i]) != re_lower(pMatcher->pText[nStart + i])) {
+                return 0;
+            }
+        }
+
+        return 1;
+    }
+
+    return (x_memcmp(pMatcher->pText + nPos, pMatcher->pText + nStart, nLength) == 0) ? 1 : 0;
 }
 
 static int is_word_at(REMatcher *pMatcher, size_t nPos)
@@ -878,7 +1123,9 @@ static int m_group(REMatcher *pMatcher, RENode *pGroup, int nDone, RECont *pExit
     size_t nMax = (pGroup->nMax < 0) ? (size_t)-1 : (size_t)pGroup->nMax;
     int i = 0;
 
-    if (pMatcher->nSteps++ > RE_MAX_STEPS) {
+    if (pMatcher->nSteps++ > pMatcher->nStepLimit) {
+        pMatcher->bAborted = 1;
+
         return 0;
     }
 
@@ -944,7 +1191,9 @@ static int m_cont(REMatcher *pMatcher, RECont *pCont, size_t nPos, size_t *pnEnd
 {
     int bResult = 0;
 
-    if ((pMatcher->nSteps++ > RE_MAX_STEPS) || (pMatcher->nDepth >= RE_MAX_DEPTH)) {
+    if ((pMatcher->nSteps++ > pMatcher->nStepLimit) || (pMatcher->nDepth >= RE_MAX_DEPTH)) {
+        pMatcher->bAborted = 1;
+
         return 0;
     }
 
@@ -985,7 +1234,9 @@ static int m_cont(REMatcher *pMatcher, RECont *pCont, size_t nPos, size_t *pnEnd
 
 static int m_node(REMatcher *pMatcher, RENode *pNode, RECont *pCont, size_t nPos, size_t *pnEnd)
 {
-    if (pMatcher->nSteps++ > RE_MAX_STEPS) {
+    if (pMatcher->nSteps++ > pMatcher->nStepLimit) {
+        pMatcher->bAborted = 1;
+
         return 0;
     }
 
@@ -1027,39 +1278,92 @@ static int m_node(REMatcher *pMatcher, RENode *pNode, RECont *pCont, size_t nPos
         }
 
         case RE_BACKREF: {
-            cd_i32 nStart = pMatcher->pCaps[pNode->nBackref * 2];
-            cd_i32 nEnd = pMatcher->pCaps[pNode->nBackref * 2 + 1];
-            size_t nLength = 0;
+            cd_i32 nStart = 0;
+            cd_i32 nEnd = 0;
+            size_t nStride = 0;
+            size_t nMax = 0;
+            size_t nMin = 0;
+            size_t nCount = 0;
 
-            if ((nStart < 0) || (nEnd < 0)) {
+            if ((pNode->nBackref < 1) || (pNode->nBackref > pMatcher->pRegExp->nGroups)) {
+                return 0;
+            }
+
+            nStart = pMatcher->pCaps[pNode->nBackref * 2];
+            nEnd = pMatcher->pCaps[pNode->nBackref * 2 + 1];
+
+            if ((nStart < 0) || (nEnd < nStart)) {
+                /* A group that did not take part in the match stands for the
+                 * empty string, however often it is repeated.               */
                 return m_after(pMatcher, pNode, pCont, nPos, pnEnd);
             }
 
-            nLength = (size_t)(nEnd - nStart);
+            nStride = (size_t)(nEnd - nStart);
 
-            if (nPos + nLength > pMatcher->nSize) {
-                return 0;
+            if (nStride == 0) {
+                return m_after(pMatcher, pNode, pCont, nPos, pnEnd);
             }
 
-            if (pMatcher->pRegExp->bIgnoreCase) {
-                size_t i = 0;
+            nMax = (pNode->nMax < 0) ? (size_t)-1 : (size_t)pNode->nMax;
+            nMin = (size_t)pNode->nMin;
 
-                for (i = 0; i < nLength; i++) {
-                    if (re_lower(pMatcher->pText[nPos + i]) != re_lower(pMatcher->pText[(size_t)nStart + i])) {
+            if (pNode->bLazy) {
+                for (nCount = 0; nCount < nMin; nCount++) {
+                    if (!backref_at(pMatcher, (size_t)nStart, nStride, nPos + nCount * nStride)) {
                         return 0;
                     }
                 }
-            } else if (nLength && (x_memcmp(pMatcher->pText + nPos, pMatcher->pText + nStart, nLength) != 0)) {
+
+                for (;;) {
+                    if (m_after(pMatcher, pNode, pCont, nPos + nCount * nStride, pnEnd)) {
+                        return 1;
+                    }
+
+                    if (nCount >= nMax) {
+                        return 0;
+                    }
+
+                    if (!backref_at(pMatcher, (size_t)nStart, nStride, nPos + nCount * nStride)) {
+                        return 0;
+                    }
+
+                    nCount++;
+                }
+            }
+
+            while ((nCount < nMax) && backref_at(pMatcher, (size_t)nStart, nStride, nPos + nCount * nStride)) {
+                nCount++;
+            }
+
+            if (nCount < nMin) {
                 return 0;
             }
 
-            return m_after(pMatcher, pNode, pCont, nPos + nLength, pnEnd);
+            for (;;) {
+                if (m_after(pMatcher, pNode, pCont, nPos + nCount * nStride, pnEnd)) {
+                    return 1;
+                }
+
+                if (nCount == nMin) {
+                    break;
+                }
+
+                nCount--;
+            }
+
+            return 0;
         }
 
         case RE_LOOKAHEAD: {
             size_t nDummy = 0;
             int bMatched = 0;
             int i = 0;
+
+            if (pNode->nMin == 0) {
+                /* A quantifier that allows zero iterations makes a zero-width
+                 * assertion irrelevant.                                     */
+                return m_after(pMatcher, pNode, pCont, nPos, pnEnd);
+            }
 
             for (i = 0; i < pNode->nAltCount; i++) {
                 RECont body;
@@ -1123,12 +1427,22 @@ int jsregexp_exec(JSRegExp *pRegExp, const char *pText, size_t nTextSize, size_t
     matcher.nSize = nTextSize;
     matcher.pRegExp = pRegExp;
     matcher.pCaps = pnCaps;
+    matcher.nSteps = 0;
+    matcher.nDepth = 0;
+    matcher.bAborted = 0;
+
+    {
+        cd_u64 nLimit = (cd_u64)RE_MAX_STEPS + (cd_u64)nTextSize * (cd_u64)RE_STEPS_PER_BYTE;
+
+        if (nLimit > (cd_u64)RE_MAX_STEPS_TOTAL) {
+            nLimit = (cd_u64)RE_MAX_STEPS_TOTAL;
+        }
+
+        matcher.nStepLimit = (long)nLimit;
+    }
 
     for (nPos = nStart; nPos <= nTextSize; nPos++) {
         int i = 0;
-
-        matcher.nSteps = 0;
-        matcher.nDepth = 0;
 
         for (i = 0; i <= pRegExp->nGroups; i++) {
             pnCaps[i * 2] = -1;
@@ -1159,6 +1473,12 @@ int jsregexp_exec(JSRegExp *pRegExp, const char *pText, size_t nTextSize, size_t
 
                 return 1;
             }
+        }
+
+        if (matcher.bAborted) {
+            /* The budget covers the whole search: an attempt that was cut
+             * short must not let a later offset pose as the first match.   */
+            break;
         }
     }
 
@@ -1317,7 +1637,7 @@ JSVal js_new_regexp_val(JSCtx *pCtx, const char *pPattern, const char *pFlags)
     pObj->pRegExp = jsregexp_compile(pPattern, pFlags, &pError);
 
     if (pObj->pRegExp == NULL) {
-        JSVal result = js_throw(pCtx, "SyntaxError: invalid regular expression /%s/: %s", pPattern, pError ? pError : "");
+        JSVal result = js_throw(pCtx, "SyntaxError: Invalid regular expression: %s", pError ? pError : "");
 
         cd_free(pError);
         jsobj_unref(pCtx, pObj);

@@ -138,6 +138,21 @@
       Toggle with -DCDIE_BUILD_LIBRARY (default ON). See docs/LIBRARY.md.
     * cdie_scan_file refactored to share its body with a new cdie_scan_memory
       (backs DIE_ScanMemory); the console output is unchanged (348/348).
+    * Windows GUI (src/gui/, Windows-only): a native pure-WinAPI front end
+      laid out after the Detect It Easy main window - a file-name field with a
+      browse button, a detected-type box, checkable Flags and Databases
+      dropdowns, a scan time and a Scan button, a read-only result pane, and
+      Options / About / Exit. It reuses the engine (cdie_scan_file +
+      cdie_format_text) so its output is byte-identical to the console for the
+      same flags, converts UTF-8 to UTF-16 at the control boundary, and accepts
+      dropped files. Options edits the main / extra / custom database folders and
+      reloads live. Built CRT-free like the console (its own x_gui_entry_point,
+      subsystem WINDOWS, importing KERNEL32 plus USER32/GDI32/COMDLG32/COMCTL32/
+      SHELL32/OLE32; a WinMain + CRT fallback on 32-bit), with a common-controls
+      v6 + DPI manifest so the standard controls render themed. Built by CMake
+      (add_subdirectory(gui) under if(WIN32)) or run/build_msvc_gui.cmd; the
+      console/library build scripts skip src/gui by path so its WinMain never
+      leaks into cdie.exe or the libraries.
     * Windows portable packaging: packaging/windows/build_portable_windows.cmd
       builds, installs and zips via CPack. The package bundles the signature
       database and the library artifacts, so the extracted folder runs with no

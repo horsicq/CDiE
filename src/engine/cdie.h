@@ -125,6 +125,13 @@ typedef struct {
     char *pName;
 } BLRecord;
 
+/* One outstanding startTiming() handle: the reference keeps the same map of
+ * handle to running timer. */
+typedef struct {
+    cd_i64 nHandle;
+    cd_i64 nStart;
+} TimingRecord;
+
 typedef struct {
     DBase *pDb;
     ScanOptions *pOptions;
@@ -163,6 +170,12 @@ typedef struct {
     int bStop;
     char *pCurrentScript;
 
+    /* Outstanding startTiming() handles, for the -l trace. */
+    TimingRecord *pTimings;
+    int nTimingCount;
+    int nTimingCapacity;
+    cd_i64 nNextTimingHandle;
+
     /* Cached header / entry point / overlay signature strings. */
     char *pHeaderSignature;
     char *pEntryPointSignature;
@@ -176,6 +189,20 @@ int cdie_scan_memory(const void *pData, cd_i64 nSize, DBase *pDb, ScanOptions *p
 
 /* Installs the DIE script API on a JavaScript context. */
 void cdie_install_api(DieEngine *pEngine);
+
+/* --------------------------------------------------------- profiling (-l)  */
+
+/* The reference emits its profiling trace through warningMessage, which the
+ * console prints to stdout as "[WARNING] <text>"; a measured step adds
+ * " [<n> ms]". These three reproduce that shape (api.c).
+ *
+ * cdie_profile_start returns the stamp cdie_profile_end needs, or -1 when
+ * profiling is off - which is also the signal to skip building the text. */
+cd_i64 cdie_profile_start(DieEngine *pEngine);
+void cdie_profile_text(DieEngine *pEngine, const char *pText);
+X_PRINTF_LIKE(3, 4) void cdie_profile_end(DieEngine *pEngine, cd_i64 nStart, const char *pFormat, ...);
+/* Releases the outstanding startTiming() handles. */
+void cdie_profile_free(DieEngine *pEngine);
 
 /* Output helpers (result.c). */
 char *cdie_format_text(ScanResult *pResult, ScanOptions *pOptions);
