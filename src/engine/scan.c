@@ -361,68 +361,72 @@ static void run_script(DieEngine *pEngine, DBSignature *pRecord, int bCallDetect
 static int scan_run_pass(XBFile *pOpenedFile, XFileType fileType, int bIsCliAssembly, DBase *pDb, ScanOptions *pOptions, ScanResult *pResult,
                          int bAddUnknown)
 {
-    DieEngine engine;
+    /* Heap, not stack: DieEngine embeds every parser state by value and is
+     * over 3 KB on its own. A frame that size walks past the guard page, and
+     * the probe helper MSVC emits to prevent that (__chkstk) is a CRT symbol
+     * the CDIE_NO_CRT link has no source for. cd_calloc never returns NULL
+     * and zeroes, so it replaces the memset too. */
+    DieEngine *pEngine = (DieEngine *)cd_calloc(1, sizeof(DieEngine));
     XBMemoryMap binaryMap;
     int i = 0;
     int nGlobalInit = -1;
     int nTypeInit = -1;
 
-    x_memset(&engine, 0, sizeof(engine));
-    engine.file = *pOpenedFile;
+    pEngine->file = *pOpenedFile;
 
-    engine.fileType = fileType;
+    pEngine->fileType = fileType;
     /* A .NET PE is typed both as PE and CLI assembly; the primary type stays
      * PE, but the CLI-assembly flag drives the DOTNET object and the
      * PE/DOTNET scripts. */
-    engine.bIsCliAssembly = bIsCliAssembly;
-    engine.pDb = pDb;
-    engine.pOptions = pOptions;
-    engine.pResult = pResult;
+    pEngine->bIsCliAssembly = bIsCliAssembly;
+    pEngine->pDb = pDb;
+    pEngine->pOptions = pOptions;
+    pEngine->pResult = pResult;
 
-    if ((engine.fileType == XFT_PE32) || (engine.fileType == XFT_PE64)) {
-        engine.bHasPE = xpe_parse(&engine.pe, &engine.file);
-    } else if (engine.fileType == XFT_JPEG) {
-        engine.bHasJpeg = xjpeg_parse(&engine.jpeg, &engine.file);
-    } else if (engine.fileType == XFT_PNG) {
-        engine.bHasPng = xpng_parse(&engine.file, &engine.png);
-    } else if (engine.fileType == XFT_APK) {
-        engine.bHasApk = xapk_parse(&engine.file, &engine.apk);
-    } else if (engine.fileType == XFT_PDF) {
-        engine.bHasPdf = xpdf_parse(&engine.file, &engine.pdf);
-    } else if ((engine.fileType == XFT_ELF) || (engine.fileType == XFT_ELF32) || (engine.fileType == XFT_ELF64)) {
-        engine.bHasElf = xelf_parse(&engine.file, &engine.elf);
-    } else if (engine.fileType == XFT_DEX) {
-        engine.bHasDex = xdex_parse(&engine.file, &engine.dex);
-    } else if ((engine.fileType == XFT_MACHO) || (engine.fileType == XFT_MACHO32) || (engine.fileType == XFT_MACHO64)) {
-        engine.bHasMach = xmach_parse(&engine.file, &engine.mach);
-    } else if (engine.fileType == XFT_PYC) {
-        engine.bHasPyc = xpyc_parse(&engine.file, &engine.pyc);
+    if ((pEngine->fileType == XFT_PE32) || (pEngine->fileType == XFT_PE64)) {
+        pEngine->bHasPE = xpe_parse(&pEngine->pe, &pEngine->file);
+    } else if (pEngine->fileType == XFT_JPEG) {
+        pEngine->bHasJpeg = xjpeg_parse(&pEngine->jpeg, &pEngine->file);
+    } else if (pEngine->fileType == XFT_PNG) {
+        pEngine->bHasPng = xpng_parse(&pEngine->file, &pEngine->png);
+    } else if (pEngine->fileType == XFT_APK) {
+        pEngine->bHasApk = xapk_parse(&pEngine->file, &pEngine->apk);
+    } else if (pEngine->fileType == XFT_PDF) {
+        pEngine->bHasPdf = xpdf_parse(&pEngine->file, &pEngine->pdf);
+    } else if ((pEngine->fileType == XFT_ELF) || (pEngine->fileType == XFT_ELF32) || (pEngine->fileType == XFT_ELF64)) {
+        pEngine->bHasElf = xelf_parse(&pEngine->file, &pEngine->elf);
+    } else if (pEngine->fileType == XFT_DEX) {
+        pEngine->bHasDex = xdex_parse(&pEngine->file, &pEngine->dex);
+    } else if ((pEngine->fileType == XFT_MACHO) || (pEngine->fileType == XFT_MACHO32) || (pEngine->fileType == XFT_MACHO64)) {
+        pEngine->bHasMach = xmach_parse(&pEngine->file, &pEngine->mach);
+    } else if (pEngine->fileType == XFT_PYC) {
+        pEngine->bHasPyc = xpyc_parse(&pEngine->file, &pEngine->pyc);
     }
 
     /* Every ZIP-family container (also an APK, which additionally parses its
      * AndroidManifest above) gets its central-directory record list and
      * MANIFEST.MF read for the archive-record and manifest predicates. */
-    if ((engine.fileType == XFT_APK) || (engine.fileType == XFT_JAR) || (engine.fileType == XFT_ZIP) ||
-        (engine.fileType == XFT_NPM) || (engine.fileType == XFT_IPA)) {
-        engine.bHasZip = xzip_parse(&engine.file, &engine.zip);
+    if ((pEngine->fileType == XFT_APK) || (pEngine->fileType == XFT_JAR) || (pEngine->fileType == XFT_ZIP) ||
+        (pEngine->fileType == XFT_NPM) || (pEngine->fileType == XFT_IPA)) {
+        pEngine->bHasZip = xzip_parse(&pEngine->file, &pEngine->zip);
     }
 
-    if (engine.bHasPE) {
-        engine.pMap = &engine.pe.map;
+    if (pEngine->bHasPE) {
+        pEngine->pMap = &pEngine->pe.map;
     } else {
         xbmap_init(&binaryMap);
-        binaryMap.nBinarySize = engine.file.nSize;
-        binaryMap.fileType = engine.fileType;
+        binaryMap.nBinarySize = pEngine->file.nSize;
+        binaryMap.fileType = pEngine->fileType;
         binaryMap.nBits = 32;
-        xbmap_add(&binaryMap, 0, engine.file.nSize, 0, (cd_u64)engine.file.nSize, XPART_DATA, "Data");
-        engine.pMap = &binaryMap;
+        xbmap_add(&binaryMap, 0, pEngine->file.nSize, 0, (cd_u64)pEngine->file.nSize, XPART_DATA, "Data");
+        pEngine->pMap = &binaryMap;
     }
 
-    pResult->fileType = engine.fileType;
+    pResult->fileType = pEngine->fileType;
 
-    engine.pJs = js_new();
-    js_set_user(engine.pJs, &engine);
-    cdie_install_api(&engine);
+    pEngine->pJs = js_new();
+    js_set_user(pEngine->pJs, pEngine);
+    cdie_install_api(pEngine);
 
     /* Locate the global, per-format and (for a .NET PE) DOTNET _init scripts. */
     {
@@ -439,31 +443,31 @@ static int scan_run_pass(XBFile *pOpenedFile, XFileType fileType, int bIsCliAsse
 
             if (pDb->pRecords[i].fileType == XFT_CLI_ASSEMBLY) {
                 nCliInit = i;
-            } else if (xft_check(pDb->pRecords[i].fileType, engine.fileType)) {
+            } else if (xft_check(pDb->pRecords[i].fileType, pEngine->fileType)) {
                 nTypeInit = i;
             }
         }
 
         if (nGlobalInit >= 0) {
-            run_script(&engine, &pDb->pRecords[nGlobalInit], 0);
+            run_script(pEngine, &pDb->pRecords[nGlobalInit], 0);
         }
 
         if (nTypeInit >= 0) {
-            run_script(&engine, &pDb->pRecords[nTypeInit], 0);
+            run_script(pEngine, &pDb->pRecords[nTypeInit], 0);
         }
 
         /* The DOTNET _init runs after the PE one, so it can build on it. */
-        if (engine.bIsCliAssembly && (nCliInit >= 0)) {
-            run_script(&engine, &pDb->pRecords[nCliInit], 0);
+        if (pEngine->bIsCliAssembly && (nCliInit >= 0)) {
+            run_script(pEngine, &pDb->pRecords[nCliInit], 0);
         }
     }
 
     /* cd_alloc_oom() is always false unless the soft out-of-memory policy is
      * armed, which only the shared library does; there it ends the scan at
      * the next script boundary instead of ending the process. */
-    for (i = 0; (i < pDb->nCount) && (!engine.bStop) && (!cd_alloc_oom()); i++) {
-        if (should_execute(&pDb->pRecords[i], engine.fileType, engine.bIsCliAssembly, pOptions)) {
-            run_script(&engine, &pDb->pRecords[i], 1);
+    for (i = 0; (i < pDb->nCount) && (!pEngine->bStop) && (!cd_alloc_oom()); i++) {
+        if (should_execute(&pDb->pRecords[i], pEngine->fileType, pEngine->bIsCliAssembly, pOptions)) {
+            run_script(pEngine, &pDb->pRecords[i], 1);
         }
     }
 
@@ -482,55 +486,57 @@ static int scan_run_pass(XBFile *pOpenedFile, XFileType fileType, int bIsCliAsse
         pResult->nCount = 1;
     }
 
-    add_msdos_zip_overlay(&engine);
+    add_msdos_zip_overlay(pEngine);
 
-    js_free(engine.pJs);
+    js_free(pEngine->pJs);
 
-    for (i = 0; i < engine.nBlackListCount; i++) {
-        cd_free(engine.pBlackList[i].pType);
-        cd_free(engine.pBlackList[i].pName);
+    for (i = 0; i < pEngine->nBlackListCount; i++) {
+        cd_free(pEngine->pBlackList[i].pType);
+        cd_free(pEngine->pBlackList[i].pName);
     }
 
-    cd_free(engine.pBlackList);
-    cdie_profile_free(&engine);
+    cd_free(pEngine->pBlackList);
+    cdie_profile_free(pEngine);
 
-    if (engine.bHasPE) {
-        xpe_free(&engine.pe);
+    if (pEngine->bHasPE) {
+        xpe_free(&pEngine->pe);
     } else {
         xbmap_free(&binaryMap);
     }
 
-    if (engine.bHasJpeg) {
-        xjpeg_free(&engine.jpeg);
+    if (pEngine->bHasJpeg) {
+        xjpeg_free(&pEngine->jpeg);
     }
 
-    if (engine.bHasApk) {
-        xapk_free(&engine.apk);
+    if (pEngine->bHasApk) {
+        xapk_free(&pEngine->apk);
     }
 
-    if (engine.bHasPdf) {
-        xpdf_free(&engine.pdf);
+    if (pEngine->bHasPdf) {
+        xpdf_free(&pEngine->pdf);
     }
 
-    if (engine.bHasElf) {
-        xelf_free(&engine.elf);
+    if (pEngine->bHasElf) {
+        xelf_free(&pEngine->elf);
     }
 
-    if (engine.bHasDex) {
-        xdex_free(&engine.dex);
+    if (pEngine->bHasDex) {
+        xdex_free(&pEngine->dex);
     }
 
-    if (engine.bHasMach) {
-        xmach_free(&engine.mach);
+    if (pEngine->bHasMach) {
+        xmach_free(&pEngine->mach);
     }
 
-    if (engine.bHasPyc) {
-        xpyc_free(&engine.pyc);
+    if (pEngine->bHasPyc) {
+        xpyc_free(&pEngine->pyc);
     }
 
-    if (engine.bHasZip) {
-        xzip_free(&engine.zip);
+    if (pEngine->bHasZip) {
+        xzip_free(&pEngine->zip);
     }
+
+    cd_free(pEngine);
 
     return 1;
 }
