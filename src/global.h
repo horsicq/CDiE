@@ -35,4 +35,9 @@
 #define CR_CANNOTFINDDATABASE 3
 #define CR_INVALIDPARAMETER   4
 
+/* The program entry point. src/core/utils_entry.c calls this from either
+ * main() or the CRT-free x_entry_point; src/console/main_console.c defines it.
+ * Declared here so neither side has to assume a signature. */
+int x_main(int nArgc, char *ppArgv[]);
+
 #endif /* GLOBAL_H */

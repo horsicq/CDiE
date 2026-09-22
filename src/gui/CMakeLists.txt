@@ -20,6 +20,8 @@ add_executable(cdie_gui
 
 target_include_directories(cdie_gui PRIVATE ${CMAKE_CURRENT_LIST_DIR}/..)
 
+target_link_libraries(cdie_gui PRIVATE xxfclib::xxfclib)
+
 # The manifest (common-controls v6 + DPI) is embedded from cdie_gui.rc. Stop the
 # MSVC toolchain from also generating and embedding its own manifest, which would
 # collide as a duplicate RT_MANIFEST resource (CVT1100).

@@ -33,7 +33,9 @@
  * builds against a hosted runtime.
  */
 
-#include "utils.h"
+#include "../global.h"
+
+#include <xxfclib/rt/xx_rt.h>
 
 #if defined(CDIE_NO_CRT) && defined(_WIN32)
 
@@ -254,23 +256,23 @@ static void x_startup(void)
      * UTF-16 and each argument is converted to UTF-8, which is the encoding
      * the rest of the program (and the file APIs) expect.                   */
     nLen = x_wcslen(pCommandLine);
-    pCopy = (WCHAR *)x_malloc((nLen + 2) * sizeof(WCHAR));
-    ppWideArgv = (WCHAR **)x_malloc(X_MAX_ARGS * sizeof(WCHAR *));
-    ppArgv = (char **)x_malloc(X_MAX_ARGS * sizeof(char *));
+    pCopy = (WCHAR *)xx_rt_malloc((nLen + 2) * sizeof(WCHAR));
+    ppWideArgv = (WCHAR **)xx_rt_malloc(X_MAX_ARGS * sizeof(WCHAR *));
+    ppArgv = (char **)xx_rt_malloc(X_MAX_ARGS * sizeof(char *));
 
     if ((pCopy == NULL) || (ppWideArgv == NULL) || (ppArgv == NULL)) {
         ExitProcess(3);
     }
 
-    x_memcpy(pCopy, pCommandLine, (nLen + 1) * sizeof(WCHAR));
+    xx_rt_memcpy(pCopy, pCommandLine, (nLen + 1) * sizeof(WCHAR));
 
     nArgc = x_build_argv_w(pCopy, ppWideArgv, X_MAX_ARGS);
 
     for (i = 0; i < nArgc; i++) {
-        ppArgv[i] = x_utf16_to_utf8(ppWideArgv[i]);
+        ppArgv[i] = xx_rt_utf16_to_utf8(ppWideArgv[i]);
 
         if (ppArgv[i] == NULL) {
-            ppArgv[i] = (char *)x_malloc(1);
+            ppArgv[i] = (char *)xx_rt_malloc(1);
 
             if (ppArgv[i] != NULL) {
                 ppArgv[i][0] = 0;
@@ -283,12 +285,12 @@ static void x_startup(void)
     nResult = x_main(nArgc, ppArgv);
 
     for (i = 0; i < nArgc; i++) {
-        x_free(ppArgv[i]);
+        xx_rt_free(ppArgv[i]);
     }
 
-    x_free(ppArgv);
-    x_free(ppWideArgv);
-    x_free(pCopy);
+    xx_rt_free(ppArgv);
+    xx_rt_free(ppWideArgv);
+    xx_rt_free(pCopy);
 
     ExitProcess((UINT)nResult);
 }

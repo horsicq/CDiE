@@ -7,6 +7,8 @@ add_executable(cdie
 
 target_include_directories(cdie PRIVATE ${CMAKE_CURRENT_LIST_DIR}/..)
 
+target_link_libraries(cdie PRIVATE xxfclib::xxfclib)
+
 # ---------------------------------------------------------------- no CRT ---
 #
 # With CDIE_NO_CRT the binary links against KERNEL32 alone: no msvcrt, no
@@ -18,13 +20,8 @@ target_include_directories(cdie PRIVATE ${CMAKE_CURRENT_LIST_DIR}/..)
 # _allshr and friends) which live in libcmt, so the option defaults to ON
 # only for 64 bit MSVC builds.
 
-if(MSVC AND (CMAKE_SIZEOF_VOID_P EQUAL 8))
-    set(CDIE_NO_CRT_DEFAULT ON)
-else()
-    set(CDIE_NO_CRT_DEFAULT OFF)
-endif()
-
-option(CDIE_NO_CRT "Link without the C runtime (KERNEL32 import only)" ${CDIE_NO_CRT_DEFAULT})
+# CDIE_NO_CRT is declared at the top level, where it also decides how the
+# xxfclib archive is compiled. Here it is only consumed.
 
 if(CDIE_NO_CRT AND MSVC)
     target_compile_definitions(cdie PRIVATE CDIE_NO_CRT)

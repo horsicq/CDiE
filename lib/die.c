@@ -31,8 +31,11 @@
 
 #include "die.h"
 
-#include "../src/engine/cdie.h"
-#include "../src/core/cd_fs.h"
+#include <xxfclib/die_engine/die_engine.h>
+#include <xxfclib/buf/xx_buf.h>
+#include <xxfclib/rt/xx_rt.h>
+
+#include "../src/app/cdie_app.h"
 
 /* die_library's flag bits (a superset of the documented ones). */
 #define SF_DEEPSCAN 0x00000001
@@ -87,22 +90,22 @@ static void die_options_from_flags(ScanOptions *pOptions, unsigned int nFlags)
 static char *die_format(ScanResult *pResult, ScanOptions *pOptions)
 {
     if (pOptions->bResultAsJSON) {
-        return cdie_format_json(pResult, pOptions);
+        return die_engine_format_json(pResult, pOptions);
     }
 
     if (pOptions->bResultAsXML) {
-        return cdie_format_xml(pResult, pOptions);
+        return die_engine_format_xml(pResult, pOptions);
     }
 
     if (pOptions->bResultAsCSV) {
-        return cdie_format_csv(pResult, pOptions, ';');
+        return die_engine_format_csv(pResult, pOptions, ';');
     }
 
     if (pOptions->bResultAsTSV) {
-        return cdie_format_csv(pResult, pOptions, '\t');
+        return die_engine_format_csv(pResult, pOptions, '\t');
     }
 
-    return cdie_format_text(pResult, pOptions);
+    return die_engine_format_text(pResult, pOptions);
 }
 
 /* Resolves a database path, replacing a leading "$data" token with the
@@ -113,37 +116,37 @@ static char *die_resolve_database(const char *pDatabase)
     const char *pMarker = NULL;
 
     if (pDatabase == NULL) {
-        return cd_strdup("");
+        return cdie_strdup("");
     }
 
     pMarker = pDatabase;
 
     /* Only the "$data" prefix is handled (the form the samples use). */
-    if ((pMarker[0] == '$') && (x_strncmp(pMarker, "$data", 5) == 0)) {
-        char *pAppDir = cd_app_dir();
+    if ((pMarker[0] == '$') && (xx_rt_strncmp(pMarker, "$data", 5) == 0)) {
+        char *pAppDir = cdie_app_dir();
         char *pResult = NULL;
 
         if (pAppDir != NULL) {
-            CDBuf buf;
+            xx_buf_t buf;
 
-            cdbuf_init(&buf);
-            cdbuf_append_str(&buf, pAppDir);
-            cdbuf_append_str(&buf, pDatabase + 5); /* the part after "$data" */
-            pResult = cdbuf_detach(&buf, NULL);
-            cd_free(pAppDir);
+            xx_buf_init(&buf);
+            xx_buf_append_str(&buf, pAppDir);
+            xx_buf_append_str(&buf, pDatabase + 5); /* the part after "$data" */
+            pResult = xx_buf_detach(&buf, NULL);
+            xx_rt_free(pAppDir);
 
             return pResult;
         }
     }
 
-    return cd_strdup(pDatabase);
+    return cdie_strdup(pDatabase);
 }
 
 /* Copies a UTF-8 string into a fresh buffer the caller frees with
  * DIE_FreeMemory. */
 static char *die_dup_result(const char *pString)
 {
-    return cd_strdup(pString ? pString : "");
+    return cdie_strdup(pString ? pString : "");
 }
 
 /* --- wide <-> UTF-8 ----------------------------------------------------- */
@@ -152,9 +155,9 @@ static char *die_dup_result(const char *pString)
 /* wchar_t is UTF-16 on Windows; reuse the runtime's converters. */
 static char *die_wide_to_utf8(const wchar_t *pWide)
 {
-    char *pResult = x_utf16_to_utf8((const void *)pWide);
+    char *pResult = xx_rt_utf16_to_utf8((const void *)pWide);
 
-    return pResult ? pResult : cd_strdup("");
+    return pResult ? pResult : cdie_strdup("");
 }
 
 static wchar_t *die_utf8_to_wide(const char *pUtf8)
@@ -163,45 +166,45 @@ static wchar_t *die_utf8_to_wide(const char *pUtf8)
         pUtf8 = "";
     }
 
-    return (wchar_t *)x_utf8_to_utf16(pUtf8);
+    return (wchar_t *)xx_rt_utf8_to_utf16(pUtf8);
 }
 #else
 /* wchar_t is UTF-32 on the platforms this build targets otherwise. */
 static char *die_wide_to_utf8(const wchar_t *pWide)
 {
-    CDBuf buf;
+    xx_buf_t buf;
     size_t i = 0;
 
     /* NULL is a supported argument (it is how the A side asks for the default
      * database), so it must map to the empty string rather than fault, the
      * way XBinary::_fromWCharArray guards its own pointer. */
     if (pWide == NULL) {
-        return cd_strdup("");
+        return cdie_strdup("");
     }
 
-    cdbuf_init(&buf);
+    xx_buf_init(&buf);
 
     for (i = 0; pWide[i] != 0; i++) {
         unsigned long nCp = (unsigned long)pWide[i];
 
         if (nCp < 0x80) {
-            cdbuf_append_ch(&buf, (char)nCp);
+            xx_buf_append_char(&buf, (char)nCp);
         } else if (nCp < 0x800) {
-            cdbuf_append_ch(&buf, (char)(0xC0 | (nCp >> 6)));
-            cdbuf_append_ch(&buf, (char)(0x80 | (nCp & 0x3F)));
+            xx_buf_append_char(&buf, (char)(0xC0 | (nCp >> 6)));
+            xx_buf_append_char(&buf, (char)(0x80 | (nCp & 0x3F)));
         } else if (nCp < 0x10000) {
-            cdbuf_append_ch(&buf, (char)(0xE0 | (nCp >> 12)));
-            cdbuf_append_ch(&buf, (char)(0x80 | ((nCp >> 6) & 0x3F)));
-            cdbuf_append_ch(&buf, (char)(0x80 | (nCp & 0x3F)));
+            xx_buf_append_char(&buf, (char)(0xE0 | (nCp >> 12)));
+            xx_buf_append_char(&buf, (char)(0x80 | ((nCp >> 6) & 0x3F)));
+            xx_buf_append_char(&buf, (char)(0x80 | (nCp & 0x3F)));
         } else {
-            cdbuf_append_ch(&buf, (char)(0xF0 | (nCp >> 18)));
-            cdbuf_append_ch(&buf, (char)(0x80 | ((nCp >> 12) & 0x3F)));
-            cdbuf_append_ch(&buf, (char)(0x80 | ((nCp >> 6) & 0x3F)));
-            cdbuf_append_ch(&buf, (char)(0x80 | (nCp & 0x3F)));
+            xx_buf_append_char(&buf, (char)(0xF0 | (nCp >> 18)));
+            xx_buf_append_char(&buf, (char)(0x80 | ((nCp >> 12) & 0x3F)));
+            xx_buf_append_char(&buf, (char)(0x80 | ((nCp >> 6) & 0x3F)));
+            xx_buf_append_char(&buf, (char)(0x80 | (nCp & 0x3F)));
         }
     }
 
-    return cdbuf_detach(&buf, NULL);
+    return xx_buf_detach(&buf, NULL);
 }
 
 /* Decodes UTF-8 with the same replacement behaviour QString::fromUtf8 applies:
@@ -220,8 +223,8 @@ static wchar_t *die_utf8_to_wide(const char *pUtf8)
         pUtf8 = "";
     }
 
-    nLen = x_strlen(pUtf8);
-    pResult = (wchar_t *)cd_malloc((nLen + 1) * sizeof(wchar_t));
+    nLen = xx_rt_strlen(pUtf8);
+    pResult = (wchar_t *)xx_rt_malloc((nLen + 1) * sizeof(wchar_t));
 
     if (pResult == NULL) {
         return NULL;
@@ -314,7 +317,7 @@ static char *die_scan_common(int bFileMode, const char *pFileName, const void *p
     int bOk = 0;
 
     if (bFileMode && (pFileName == NULL)) {
-        return cd_strdup("");
+        return cdie_strdup("");
     }
 
     die_options_from_flags(&options, nFlags);
@@ -322,26 +325,26 @@ static char *die_scan_common(int bFileMode, const char *pFileName, const void *p
     if (pDb == NULL) {
         char *pResolved = die_resolve_database(pDatabasePath);
 
-        x_memset(&localDb, 0, sizeof(localDb));
+        xx_rt_memset(&localDb, 0, sizeof(localDb));
         db_load(&localDb, pResolved, DB_MAIN);
         db_sort(&localDb);
-        cd_free(pResolved);
+        xx_rt_free(pResolved);
         pDb = &localDb;
     }
 
     if (bFileMode) {
-        bOk = cdie_scan_file(pFileName, pDb, &options, &result);
+        bOk = die_engine_scan_file(pFileName, pDb, &options, &result);
     } else {
-        bOk = cdie_scan_memory(pMemory, (cd_i64)nMemorySize, pDb, &options, &result);
+        bOk = die_engine_scan_memory(pMemory, (int64_t)nMemorySize, pDb, &options, &result);
     }
 
     if (bOk) {
         pFormatted = die_format(&result, &options);
         pResultString = die_dup_result(pFormatted);
-        cd_free(pFormatted);
+        xx_rt_free(pFormatted);
         scan_result_free(&result);
     } else {
-        pResultString = cd_strdup("");
+        pResultString = cdie_strdup("");
     }
 
     if (pDb == &localDb) {
@@ -367,9 +370,9 @@ DIE_API wchar_t *DIE_ScanFileW(wchar_t *pwszFileName, unsigned int nFlags, wchar
     char *pResult = die_scan_common(1, pFileName, NULL, 0, nFlags, pDatabase, NULL);
     wchar_t *pWide = die_dup_result_w(pResult);
 
-    cd_free(pFileName);
-    cd_free(pDatabase);
-    cd_free(pResult);
+    xx_rt_free(pFileName);
+    xx_rt_free(pDatabase);
+    xx_rt_free(pResult);
 
     return pWide;
 }
@@ -385,8 +388,8 @@ DIE_API wchar_t *DIE_ScanMemoryW(char *pMemory, int nMemorySize, unsigned int nF
     char *pResult = die_scan_common(0, NULL, pMemory, nMemorySize, nFlags, pDatabase, NULL);
     wchar_t *pWide = die_dup_result_w(pResult);
 
-    cd_free(pDatabase);
-    cd_free(pResult);
+    xx_rt_free(pDatabase);
+    xx_rt_free(pResult);
 
     return pWide;
 }
@@ -401,11 +404,11 @@ DIE_API int DIE_LoadDatabaseA(char *pszDatabase)
         g_bDbLoaded = 0;
     }
 
-    x_memset(&g_db, 0, sizeof(g_db));
+    xx_rt_memset(&g_db, 0, sizeof(g_db));
     nResult = db_load(&g_db, pResolved, DB_MAIN);
     db_sort(&g_db);
     g_bDbLoaded = 1;
-    cd_free(pResolved);
+    xx_rt_free(pResolved);
 
     return nResult;
 }
@@ -415,7 +418,7 @@ DIE_API int DIE_LoadDatabaseW(wchar_t *pwszDatabase)
     char *pDatabase = die_wide_to_utf8(pwszDatabase);
     int nResult = DIE_LoadDatabaseA(pDatabase);
 
-    cd_free(pDatabase);
+    xx_rt_free(pDatabase);
 
     return nResult;
 }
@@ -431,8 +434,8 @@ DIE_API wchar_t *DIE_ScanFileExW(wchar_t *pwszFileName, unsigned int nFlags)
     char *pResult = die_scan_common(1, pFileName, NULL, 0, nFlags, NULL, g_bDbLoaded ? &g_db : NULL);
     wchar_t *pWide = die_dup_result_w(pResult);
 
-    cd_free(pFileName);
-    cd_free(pResult);
+    xx_rt_free(pFileName);
+    xx_rt_free(pResult);
 
     return pWide;
 }
@@ -447,19 +450,19 @@ DIE_API wchar_t *DIE_ScanMemoryExW(char *pMemory, int nMemorySize, unsigned int 
     char *pResult = die_scan_common(0, NULL, pMemory, nMemorySize, nFlags, NULL, g_bDbLoaded ? &g_db : NULL);
     wchar_t *pWide = die_dup_result_w(pResult);
 
-    cd_free(pResult);
+    xx_rt_free(pResult);
 
     return pWide;
 }
 
 DIE_API void DIE_FreeMemoryA(char *pszString)
 {
-    cd_free(pszString);
+    xx_rt_free(pszString);
 }
 
 DIE_API void DIE_FreeMemoryW(wchar_t *pwszString)
 {
-    cd_free(pwszString);
+    xx_rt_free(pwszString);
 }
 
 #if defined(_WIN32)
@@ -487,10 +490,10 @@ DIE_API int __stdcall DIE_VB_ScanFile(wchar_t *pwszFileName, unsigned int nFlags
         nOut = nLen;
     }
 
-    cd_free(pFileName);
-    cd_free(pDatabase);
-    cd_free(pResult);
-    cd_free(pWide);
+    xx_rt_free(pFileName);
+    xx_rt_free(pDatabase);
+    xx_rt_free(pResult);
+    xx_rt_free(pWide);
 
     return nOut;
 }

@@ -19,6 +19,11 @@ set(DIE_LIB_SOURCES
 
 if(DIE_BUILD_STATIC)
     add_library(die_static STATIC ${DIE_LIB_SOURCES})
+    # PUBLIC: an archive cannot resolve its own dependencies, so whoever links
+    # die_static must also link xxfclib. This does change the documented
+    # one-liner in docs/LIBRARY.md -- consumers now need xxfclib on the link
+    # line too, or CMake's die_static target which carries it for them.
+    target_link_libraries(die_static PUBLIC xxfclib::xxfclib)
     target_include_directories(die_static PUBLIC ${CMAKE_CURRENT_LIST_DIR})
     target_compile_definitions(die_static PUBLIC DIE_STATIC)
 
@@ -33,6 +38,16 @@ endif()
 
 if(DIE_BUILD_SHARED)
     add_library(die_shared SHARED ${DIE_LIB_SOURCES})
+    target_link_libraries(die_shared PRIVATE xxfclib::xxfclib)
+    # C_VISIBILITY_PRESET below governs only the objects CMake compiles for
+    # this target; the archive's objects were compiled separately and carry
+    # default visibility. Without this every xxfclib global -- db_load,
+    # xx_rt_malloc, js_new, several hundred more -- would land in libdie.so's
+    # dynamic symbol table and be interposable, which is exactly what the
+    # hidden preset exists to prevent.
+    if(NOT WIN32 AND NOT APPLE)
+        target_link_options(die_shared PRIVATE "LINKER:--exclude-libs,ALL")
+    endif()
     target_include_directories(die_shared PUBLIC ${CMAKE_CURRENT_LIST_DIR})
     target_compile_definitions(die_shared PRIVATE DIE_BUILD_SHARED)
 

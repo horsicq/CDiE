@@ -21,7 +21,7 @@
 
 /* gui_backend.c - drives the scan engine for the WinAPI GUI. It is the mirror
  * of main_console.c's scan path: same option defaults, same db resolution, same
- * cdie_scan_file + cdie_format_text, so the GUI prints exactly what `cdie` does.
+ * die_engine_scan_file + die_engine_format_text, so the GUI prints exactly what `cdie` does.
  *
  * This translation unit deliberately does NOT include <windows.h>: it speaks to
  * the engine only. main_gui.c is the half that speaks Win32. */
@@ -29,10 +29,12 @@
 #include "gui_backend.h"
 
 #include "../global.h"
-#include "../engine/cdie.h"
-#include "../core/cd_fs.h"
-#include "../core/cd_common.h"
-#include "../format/xb.h"
+#include <xxfclib/die_engine/die_engine.h>
+#include <xxfclib/fs/xx_fs.h>
+#include <xxfclib/rt/xx_rt.h>
+
+#include "../app/cdie_app.h"
+
 
 static ScanOptions g_options;
 static DBase g_db;
@@ -43,18 +45,18 @@ static int g_bMainLoaded = 0;
  * "<exe-dir>/<name>" when it exists, else the bare relative name. */
 static char *gui_resolve_db(const char *pDefaultName)
 {
-    char *pAppDir = cd_app_dir();
-    char *pCandidate = cd_path_join(pAppDir, pDefaultName);
+    char *pAppDir = cdie_app_dir();
+    char *pCandidate = xx_fs_path_join(pAppDir, pDefaultName);
 
-    cd_free(pAppDir);
+    xx_rt_free(pAppDir);
 
-    if (cd_path_is_dir(pCandidate)) {
+    if (xx_fs_is_dir(pCandidate)) {
         return pCandidate;
     }
 
-    cd_free(pCandidate);
+    xx_rt_free(pCandidate);
 
-    return cd_strdup(pDefaultName);
+    return cdie_strdup(pDefaultName);
 }
 
 int gui_backend_init(void)
@@ -64,7 +66,7 @@ int gui_backend_init(void)
     }
 
     scan_options_init(&g_options);
-    x_memset(&g_db, 0, sizeof(g_db));
+    xx_rt_memset(&g_db, 0, sizeof(g_db));
 
     /* GUI defaults follow the Detect It Easy GUI: deep + heuristic + verbose on.
      * scan_options_init has already set show type/version/info, use extra/custom
@@ -111,16 +113,16 @@ int gui_backend_set_db_paths(const char *pMain, const char *pExtra, const char *
         return 0;
     }
 
-    cd_free(g_options.pMainDatabasePath);
-    cd_free(g_options.pExtraDatabasePath);
-    cd_free(g_options.pCustomDatabasePath);
+    xx_rt_free(g_options.pMainDatabasePath);
+    xx_rt_free(g_options.pExtraDatabasePath);
+    xx_rt_free(g_options.pCustomDatabasePath);
 
-    g_options.pMainDatabasePath = ((pMain != NULL) && (pMain[0] != 0)) ? cd_strdup(pMain) : gui_resolve_db("db");
-    g_options.pExtraDatabasePath = ((pExtra != NULL) && (pExtra[0] != 0)) ? cd_strdup(pExtra) : gui_resolve_db("db_extra");
-    g_options.pCustomDatabasePath = ((pCustom != NULL) && (pCustom[0] != 0)) ? cd_strdup(pCustom) : gui_resolve_db("db_custom");
+    g_options.pMainDatabasePath = ((pMain != NULL) && (pMain[0] != 0)) ? cdie_strdup(pMain) : gui_resolve_db("db");
+    g_options.pExtraDatabasePath = ((pExtra != NULL) && (pExtra[0] != 0)) ? cdie_strdup(pExtra) : gui_resolve_db("db_extra");
+    g_options.pCustomDatabasePath = ((pCustom != NULL) && (pCustom[0] != 0)) ? cdie_strdup(pCustom) : gui_resolve_db("db_custom");
 
     db_free(&g_db);
-    x_memset(&g_db, 0, sizeof(g_db));
+    xx_rt_memset(&g_db, 0, sizeof(g_db));
 
     g_bMainLoaded = db_load(&g_db, g_options.pMainDatabasePath, DB_MAIN);
     db_load(&g_db, g_options.pExtraDatabasePath, DB_EXTRA);
@@ -172,16 +174,16 @@ int gui_backend_scan(const char *pUtf8Path, char **ppResultText, char **ppTypeNa
         return 0;
     }
 
-    if (!cdie_scan_file(pUtf8Path, &g_db, &g_options, &result)) {
+    if (!die_engine_scan_file(pUtf8Path, &g_db, &g_options, &result)) {
         return 0;
     }
 
     if (ppResultText != NULL) {
-        *ppResultText = cdie_format_text(&result, &g_options); /* text mode, as the console default */
+        *ppResultText = die_engine_format_text(&result, &g_options); /* text mode, as the console default */
     }
 
     if (ppTypeName != NULL) {
-        *ppTypeName = cd_strdup(xft_to_string(result.fileType));
+        *ppTypeName = cdie_strdup(xft_to_string(result.fileType));
     }
 
     scan_result_free(&result);
@@ -191,7 +193,7 @@ int gui_backend_scan(const char *pUtf8Path, char **ppResultText, char **ppTypeNa
 
 void gui_backend_free(void *pPtr)
 {
-    cd_free(pPtr);
+    xx_rt_free(pPtr);
 }
 
 void gui_backend_shutdown(void)
@@ -199,7 +201,7 @@ void gui_backend_shutdown(void)
     if (g_bInited) {
         db_free(&g_db);
         scan_options_free(&g_options);
-        x_memset(&g_db, 0, sizeof(g_db));
+        xx_rt_memset(&g_db, 0, sizeof(g_db));
         g_bInited = 0;
         g_bMainLoaded = 0;
     }

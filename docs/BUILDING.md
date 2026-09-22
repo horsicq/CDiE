@@ -111,7 +111,7 @@ packaging\windows\build_portable_windows.cmd ARM64 winarm64_msvc2022
 ```
 
 Unlike the Qt projects in this repository the script takes **no Qt root** —
-`cdie` has no external dependencies, so the platform and the package suffix
+`cdie` depends only on xxfclib, which is built from source alongside it, so the platform and the package suffix
 are the only arguments.
 
 Following the repo convention, build trees and CPack staging live under

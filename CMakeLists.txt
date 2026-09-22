@@ -15,20 +15,86 @@ set(X_DESCRIPTION "Detect It Easy console engine (C port)")
 set(X_HOMEPAGE    "http://ntinfo.biz")
 set(X_MAINTAINER  "horsicq@gmail.com")
 
-# ------------------------------------------------------- language + warnings
+# ---------------------------------------------------------- language + options
 #
-# These live here rather than in src/ because lib/ and tests/ are siblings of
-# src/, so a directory-scoped setting there would leave the library and test
-# targets compiling the same engine sources as GNU C17/C23 with no warning
-# flags at all -- meaning a -Wall/-Wextra defect in an engine TU would be
-# diagnosed only on the cdie target, and a C23-only construct would build
-# clean in die_static while failing in cdie.
+# The C standard and the warning policy live here rather than in src/ because
+# lib/ and tests/ are siblings of src/, so a directory-scoped setting there
+# would leave the library and test targets compiling cdie's remaining sources
+# as GNU C17/C23 with no warning flags at all.
+#
+# The warning flags themselves are applied further down, after xxfclib has been
+# added -- see the note there.
 
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
 option(CDIE_WERROR "Treat compiler warnings as errors" OFF)
+
+# ------------------------------------------------------------------ xxfclib --
+#
+# Added HERE, above the warning block, on purpose. add_compile_options() and
+# add_compile_definitions() are directory properties: a subdirectory inherits a
+# snapshot taken at the add_subdirectory() call, so anything set after this
+# point cannot reach xxfclib. Added below the block instead, every xxfclib TU
+# compiles as "/W3 /W4" (211 D9025 warnings) and, with CDIE_WERROR=ON, as
+# "/W3 /WX /W4" -- cdie's warning policy would then govern a library cdie does
+# not own, and on GCC the trailing -Wextra would undo cdie's
+# -Wno-unused-parameter as well. xxfclib sets its own /W4 (or -Wall -Wextra
+# -Wpedantic), its own C11, and its own _CRT_SECURE_NO_WARNINGS, so it loses
+# nothing by being configured first.
+#
+# Whether the console links without the CRT also has to be settled BEFORE
+# xxfclib is configured, because it decides how the archive itself must be
+# compiled: a /NODEFAULTLIB program cannot link objects that reference
+# __GSHandlerCheck or carry /DEFAULTLIB records. x86 additionally needs the
+# compiler's 64-bit arithmetic helpers (_alldiv, _allshr and friends) from
+# libcmt, so this defaults to ON only for 64-bit MSVC.
+if(MSVC AND (CMAKE_SIZEOF_VOID_P EQUAL 8))
+    set(CDIE_NO_CRT_DEFAULT ON)
+else()
+    set(CDIE_NO_CRT_DEFAULT OFF)
+endif()
+option(CDIE_NO_CRT "Link without the C runtime (KERNEL32 import only)" ${CDIE_NO_CRT_DEFAULT})
+
+if(CDIE_NO_CRT AND MSVC)
+    # xxfclib's matching switch: it compiles the static archive /GS- /GL- /Zl
+    # and puts the clean-room __chkstk in it. It deliberately does NOT define
+    # XXFC_NO_CRT -- that would make xxfclib's own entry object emit
+    # memset/memcpy/memmove/_fltused, which src/core/utils_entry.c already
+    # owns here.
+    set(XXFC_STATIC_NO_CRT ON CACHE BOOL "" FORCE)
+else()
+    # Forced both ways: without this, flipping CDIE_NO_CRT to OFF in an
+    # existing build directory leaves XXFC_STATIC_NO_CRT=ON in the cache, and
+    # the archive keeps building /GS- /Zl for a build that asked to be hosted.
+    set(XXFC_STATIC_NO_CRT OFF CACHE BOOL "" FORCE)
+endif()
+
+# cdie's engine lives in xxfclib. The static archive is used so the console
+# keeps shipping as a single self-contained executable, which is also what the
+# CRT-free configuration needs.
+#
+# EXCLUDE_FROM_ALL suppresses the subdirectory's install() rules. Without it
+# cdie's install tree -- and therefore the CPack portable archive -- gains 207
+# extra entries: the whole include/xxfclib/ header tree, lib/xxfclib.lib, and
+# xxfclib's own README.md/LICENSE/FIND_TEST_RESULTS.md at the package root,
+# where the first two collide with cdie's.
+if(NOT TARGET xxfclib AND NOT TARGET xxfclib_static)
+    set(XXFCLIB_DIR "${CMAKE_CURRENT_LIST_DIR}/../_mylibs/xxfclib"
+        CACHE PATH "Location of the xxfclib source tree")
+    if(NOT EXISTS "${XXFCLIB_DIR}/CMakeLists.txt")
+        message(FATAL_ERROR
+            "cdie needs xxfclib, which supplies the scan engine. Looked in "
+            "'${XXFCLIB_DIR}'. Set -DXXFCLIB_DIR=<path> to point at it.")
+    endif()
+    add_subdirectory("${XXFCLIB_DIR}" "${CMAKE_BINARY_DIR}/xxfclib" EXCLUDE_FROM_ALL)
+endif()
+
+# ------------------------------------------------------- language + warnings
+#
+# cdie's own targets only. See the xxfclib note above for why this block has to
+# stay below the add_subdirectory() call.
 
 if(MSVC)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
