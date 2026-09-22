@@ -1,3 +1,6 @@
 [submodule "Detect-It-Easy"]
 	path = Detect-It-Easy
 	url = https://github.com/horsicq/Detect-It-Easy.git
+[submodule "dep/xxfclib"]
+	path = dep/xxfclib
+	url = https://github.com/horsicq/xxfclib.git
