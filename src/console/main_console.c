@@ -59,6 +59,8 @@ static void print_help(void)
     xx_rt_printf("  -E, --extradatabase <p>   Extra database path.\n");
     xx_rt_printf("  -C, --customdatabase <p>  Custom database path.\n");
     xx_rt_printf("  -s, --showdatabase        Show the database information.\n");
+    xx_rt_printf("      --createtar <path>    Create TAR archive from database.\n");
+    xx_rt_printf("      --createprecompiledtar <p> Create precompiled bytecode TAR archive.\n");
     xx_rt_printf("\n");
     xx_rt_printf("Target:\n");
     xx_rt_printf("  target                    The file or directory to open.\n");
@@ -98,11 +100,32 @@ static char *resolve_database_path(const char *pPath, const char *pDefaultName)
 
         xx_rt_free(pAppDir);
 
-        if (xx_fs_is_dir(pCandidate)) {
+        if (xx_fs_is_dir(pCandidate) || xx_fs_is_file(pCandidate)) {
             return pCandidate;
         }
 
+        {
+            char sTar[512];
+            xx_rt_snprintf(sTar, sizeof(sTar), "%s.tar", pCandidate);
+            if (xx_fs_is_file(sTar)) {
+                xx_rt_free(pCandidate);
+                return cdie_strdup(sTar);
+            }
+        }
+
         xx_rt_free(pCandidate);
+    }
+
+    if (xx_fs_is_dir(pDefaultName) || xx_fs_is_file(pDefaultName)) {
+        return cdie_strdup(pDefaultName);
+    }
+
+    {
+        char sTar[512];
+        xx_rt_snprintf(sTar, sizeof(sTar), "%s.tar", pDefaultName);
+        if (xx_fs_is_file(sTar)) {
+            return cdie_strdup(sTar);
+        }
     }
 
     return cdie_strdup(pDefaultName);
@@ -142,6 +165,9 @@ int x_main(int argc, char *argv[])
     int i = 0;
     int bShowDatabase = 0;
     int bDatabaseLoaded = 0;
+    int bEndOfOptions = 0;
+    const char *pCreateTarPath = NULL;
+    const char *pCreateBcTarPath = NULL;
 
     scan_options_init(&options);
     /* diec formats the result strings by default, and printing exactly what
@@ -156,76 +182,190 @@ int x_main(int argc, char *argv[])
     for (i = 1; i < argc; i++) {
         const char *pArg = argv[i];
 
-        if ((xx_rt_strcmp(pArg, "-h") == 0) || (xx_rt_strcmp(pArg, "--help") == 0) || (xx_rt_strcmp(pArg, "-?") == 0)) {
-            print_help();
-            scan_options_free(&options);
-            free_string_vector(&vecTargets);
-            free_string_vector(&vecFiles);
+        if (!bEndOfOptions && (xx_rt_strcmp(pArg, "--") == 0)) {
+            bEndOfOptions = 1;
+            continue;
+        }
 
-            return CR_SUCCESS;
-        } else if ((xx_rt_strcmp(pArg, "-v") == 0) || (xx_rt_strcmp(pArg, "--version") == 0)) {
-            xx_rt_printf("%s %s\n", X_APPLICATIONDISPLAYNAME, X_APPLICATIONVERSION);
-            scan_options_free(&options);
-            free_string_vector(&vecTargets);
-            free_string_vector(&vecFiles);
+        if (!bEndOfOptions && pArg[0] == '-' && pArg[1] == '-') {
+            /* Long options starting with -- */
+            if (xx_rt_strcmp(pArg, "--help") == 0) {
+                print_help();
+                scan_options_free(&options);
+                free_string_vector(&vecTargets);
+                free_string_vector(&vecFiles);
+                return CR_SUCCESS;
+            } else if (xx_rt_strcmp(pArg, "--version") == 0) {
+                xx_rt_printf("%s %s\n", X_APPLICATIONDISPLAYNAME, X_APPLICATIONVERSION);
+                scan_options_free(&options);
+                free_string_vector(&vecTargets);
+                free_string_vector(&vecFiles);
+                return CR_SUCCESS;
+            } else if (xx_rt_strcmp(pArg, "--recursivescan") == 0) {
+                options.bRecursiveScan = 1;
+            } else if (xx_rt_strcmp(pArg, "--deepscan") == 0) {
+                options.bDeepScan = 1;
+            } else if (xx_rt_strcmp(pArg, "--heuristicscan") == 0) {
+                options.bHeuristicScan = 1;
+            } else if ((xx_rt_strcmp(pArg, "--aggressivecscan") == 0) || (xx_rt_strcmp(pArg, "--aggressivescan") == 0)) {
+                options.bAggressiveScan = 1;
+            } else if (xx_rt_strcmp(pArg, "--verbose") == 0) {
+                options.bVerbose = 1;
+            } else if (xx_rt_strcmp(pArg, "--format") == 0) {
+                options.bFormatResult = 1;
+            } else if (xx_rt_strcmp(pArg, "--noformat") == 0) {
+                options.bFormatResult = 0;
+            } else if (xx_rt_strcmp(pArg, "--nocolor") == 0) {
+                /* nothing to do */
+            } else if (xx_rt_strcmp(pArg, "--hideunknown") == 0) {
+                options.bHideUnknown = 1;
+            } else if (xx_rt_strcmp(pArg, "--messages") == 0) {
+                options.bShowMessages = 1;
+            } else if (xx_rt_strcmp(pArg, "--profiling") == 0) {
+                options.bProfiling = 1;
+            } else if (xx_rt_strcmp(pArg, "--json") == 0) {
+                options.bResultAsJSON = 1;
+            } else if (xx_rt_strcmp(pArg, "--xml") == 0) {
+                options.bResultAsXML = 1;
+            } else if (xx_rt_strcmp(pArg, "--csv") == 0) {
+                options.bResultAsCSV = 1;
+            } else if (xx_rt_strcmp(pArg, "--tsv") == 0) {
+                options.bResultAsTSV = 1;
+            } else if ((xx_rt_strcmp(pArg, "--plaintext") == 0)) {
+                options.bResultAsPlainText = 1;
+            } else if (xx_rt_strcmp(pArg, "--showdatabase") == 0) {
+                bShowDatabase = 1;
+            } else if ((xx_rt_strcmp(pArg, "--database") == 0) && (i + 1 < argc)) {
+                xx_rt_free(options.pMainDatabasePath);
+                options.pMainDatabasePath = cdie_strdup(argv[++i]);
+            } else if ((xx_rt_strcmp(pArg, "--extradatabase") == 0) && (i + 1 < argc)) {
+                xx_rt_free(options.pExtraDatabasePath);
+                options.pExtraDatabasePath = cdie_strdup(argv[++i]);
+            } else if ((xx_rt_strcmp(pArg, "--customdatabase") == 0) && (i + 1 < argc)) {
+                xx_rt_free(options.pCustomDatabasePath);
+                options.pCustomDatabasePath = cdie_strdup(argv[++i]);
+            } else if ((xx_rt_strcmp(pArg, "--createtar") == 0) && (i + 1 < argc)) {
+                pCreateTarPath = argv[++i];
+            } else if ((xx_rt_strcmp(pArg, "--createprecompiledtar") == 0) && (i + 1 < argc)) {
+                pCreateBcTarPath = argv[++i];
+            } else {
+                xx_rt_fprintf(xx_rt_stderr(), "Unknown option: %s\n", pArg);
+                nResult = CR_INVALIDPARAMETER;
+            }
+        } else if (!bEndOfOptions && pArg[0] == '-' && pArg[1] != '\0') {
+            /* Short options (supports clustering like -rdu, -rd, etc.) */
+            if (xx_rt_strcmp(pArg, "-he") == 0) {
+                options.bHeuristicScan = 1;
+            } else if (xx_rt_strcmp(pArg, "-hu") == 0) {
+                options.bHideUnknown = 1;
+            } else {
+                size_t k = 0;
+                for (k = 1; pArg[k] != '\0'; k++) {
+                    char c = pArg[k];
+                    switch (c) {
+                        case 'h':
+                        case '?':
+                            print_help();
+                            scan_options_free(&options);
+                            free_string_vector(&vecTargets);
+                            free_string_vector(&vecFiles);
+                            return CR_SUCCESS;
 
-            return CR_SUCCESS;
-        } else if ((xx_rt_strcmp(pArg, "-r") == 0) || (xx_rt_strcmp(pArg, "--recursivescan") == 0)) {
-            options.bRecursiveScan = 1;
-        } else if ((xx_rt_strcmp(pArg, "-d") == 0) || (xx_rt_strcmp(pArg, "--deepscan") == 0)) {
-            options.bDeepScan = 1;
-        } else if ((xx_rt_strcmp(pArg, "-u") == 0) || (xx_rt_strcmp(pArg, "-he") == 0) || (xx_rt_strcmp(pArg, "--heuristicscan") == 0)) {
-            options.bHeuristicScan = 1;
-            /* diec spells the long form "aggressivecscan"; both are taken. */
-        } else if ((xx_rt_strcmp(pArg, "-g") == 0) || (xx_rt_strcmp(pArg, "--aggressivecscan") == 0) || (xx_rt_strcmp(pArg, "--aggressivescan") == 0)) {
-            options.bAggressiveScan = 1;
-        } else if ((xx_rt_strcmp(pArg, "-b") == 0) || (xx_rt_strcmp(pArg, "-V") == 0) || (xx_rt_strcmp(pArg, "--verbose") == 0)) {
-            options.bVerbose = 1;
-        } else if ((xx_rt_strcmp(pArg, "-f") == 0) || (xx_rt_strcmp(pArg, "--format") == 0)) {
-            options.bFormatResult = 1;
-        } else if (xx_rt_strcmp(pArg, "--noformat") == 0) {
-            options.bFormatResult = 0;
-            /* cdie never emits color, so diec's --nocolor is already the
-             * behaviour; it is taken to keep diec command lines working. */
-        } else if (xx_rt_strcmp(pArg, "--nocolor") == 0) {
-            /* nothing to do */
-        } else if ((xx_rt_strcmp(pArg, "-U") == 0) || (xx_rt_strcmp(pArg, "-hu") == 0) || (xx_rt_strcmp(pArg, "--hideunknown") == 0)) {
-            options.bHideUnknown = 1;
-        } else if ((xx_rt_strcmp(pArg, "-M") == 0) || (xx_rt_strcmp(pArg, "-m") == 0) || (xx_rt_strcmp(pArg, "--messages") == 0)) {
-            options.bShowMessages = 1;
-        } else if ((xx_rt_strcmp(pArg, "-l") == 0) || (xx_rt_strcmp(pArg, "--profiling") == 0)) {
-            options.bProfiling = 1;
-        } else if ((xx_rt_strcmp(pArg, "-j") == 0) || (xx_rt_strcmp(pArg, "--json") == 0)) {
-            options.bResultAsJSON = 1;
-        } else if ((xx_rt_strcmp(pArg, "-x") == 0) || (xx_rt_strcmp(pArg, "--xml") == 0)) {
-            options.bResultAsXML = 1;
-        } else if ((xx_rt_strcmp(pArg, "-c") == 0) || (xx_rt_strcmp(pArg, "--csv") == 0)) {
-            options.bResultAsCSV = 1;
-        } else if ((xx_rt_strcmp(pArg, "-t") == 0) || (xx_rt_strcmp(pArg, "--tsv") == 0)) {
-            options.bResultAsTSV = 1;
-        } else if ((xx_rt_strcmp(pArg, "-p") == 0) || (xx_rt_strcmp(pArg, "-P") == 0) || (xx_rt_strcmp(pArg, "--plaintext") == 0)) {
-            options.bResultAsPlainText = 1;
-        } else if ((xx_rt_strcmp(pArg, "-s") == 0) || (xx_rt_strcmp(pArg, "--showdatabase") == 0)) {
-            bShowDatabase = 1;
-        } else if (((xx_rt_strcmp(pArg, "-D") == 0) || (xx_rt_strcmp(pArg, "--database") == 0)) && (i + 1 < argc)) {
-            xx_rt_free(options.pMainDatabasePath);
-            options.pMainDatabasePath = cdie_strdup(argv[++i]);
-        } else if (((xx_rt_strcmp(pArg, "-E") == 0) || (xx_rt_strcmp(pArg, "--extradatabase") == 0)) && (i + 1 < argc)) {
-            xx_rt_free(options.pExtraDatabasePath);
-            options.pExtraDatabasePath = cdie_strdup(argv[++i]);
-        } else if (((xx_rt_strcmp(pArg, "-C") == 0) || (xx_rt_strcmp(pArg, "--customdatabase") == 0)) && (i + 1 < argc)) {
-            xx_rt_free(options.pCustomDatabasePath);
-            options.pCustomDatabasePath = cdie_strdup(argv[++i]);
-        } else if (pArg[0] == '-') {
-            xx_rt_fprintf(xx_rt_stderr(), "Unknown option: %s\n", pArg);
-            nResult = CR_INVALIDPARAMETER;
-        } else {
-            {
-                char *pCopy = cdie_strdup(pArg);
+                        case 'v':
+                            xx_rt_printf("%s %s\n", X_APPLICATIONDISPLAYNAME, X_APPLICATIONVERSION);
+                            scan_options_free(&options);
+                            free_string_vector(&vecTargets);
+                            free_string_vector(&vecFiles);
+                            return CR_SUCCESS;
 
-                if (pCopy) {
-                    xx_list_append(&vecTargets, &pCopy);
+                        case 'r': options.bRecursiveScan = 1; break;
+                        case 'd': options.bDeepScan = 1; break;
+                        case 'u': options.bHeuristicScan = 1; break;
+                        case 'g': options.bAggressiveScan = 1; break;
+                        case 'b':
+                        case 'V': options.bVerbose = 1; break;
+                        case 'f': options.bFormatResult = 1; break;
+                        case 'U': options.bHideUnknown = 1; break;
+                        case 'M':
+                        case 'm': options.bShowMessages = 1; break;
+                        case 'l': options.bProfiling = 1; break;
+                        case 'j': options.bResultAsJSON = 1; break;
+                        case 'x': options.bResultAsXML = 1; break;
+                        case 'c': options.bResultAsCSV = 1; break;
+                        case 't': options.bResultAsTSV = 1; break;
+                        case 'p':
+                        case 'P': options.bResultAsPlainText = 1; break;
+                        case 's': bShowDatabase = 1; break;
+
+                        case 'D': {
+                            const char *pVal = NULL;
+                            if (pArg[k + 1] != '\0') {
+                                pVal = &pArg[k + 1];
+                                k = xx_rt_strlen(pArg) - 1;
+                            } else if (i + 1 < argc) {
+                                pVal = argv[++i];
+                            }
+                            if (pVal) {
+                                xx_rt_free(options.pMainDatabasePath);
+                                options.pMainDatabasePath = cdie_strdup(pVal);
+                            } else {
+                                xx_rt_fprintf(xx_rt_stderr(), "Option -D requires an argument\n");
+                                nResult = CR_INVALIDPARAMETER;
+                            }
+                            break;
+                        }
+
+                        case 'E': {
+                            const char *pVal = NULL;
+                            if (pArg[k + 1] != '\0') {
+                                pVal = &pArg[k + 1];
+                                k = xx_rt_strlen(pArg) - 1;
+                            } else if (i + 1 < argc) {
+                                pVal = argv[++i];
+                            }
+                            if (pVal) {
+                                xx_rt_free(options.pExtraDatabasePath);
+                                options.pExtraDatabasePath = cdie_strdup(pVal);
+                            } else {
+                                xx_rt_fprintf(xx_rt_stderr(), "Option -E requires an argument\n");
+                                nResult = CR_INVALIDPARAMETER;
+                            }
+                            break;
+                        }
+
+                        case 'C': {
+                            const char *pVal = NULL;
+                            if (pArg[k + 1] != '\0') {
+                                pVal = &pArg[k + 1];
+                                k = xx_rt_strlen(pArg) - 1;
+                            } else if (i + 1 < argc) {
+                                pVal = argv[++i];
+                            }
+                            if (pVal) {
+                                xx_rt_free(options.pCustomDatabasePath);
+                                options.pCustomDatabasePath = cdie_strdup(pVal);
+                            } else {
+                                xx_rt_fprintf(xx_rt_stderr(), "Option -C requires an argument\n");
+                                nResult = CR_INVALIDPARAMETER;
+                            }
+                            break;
+                        }
+
+                        default:
+                            xx_rt_fprintf(xx_rt_stderr(), "Unknown option: -%c\n", c);
+                            nResult = CR_INVALIDPARAMETER;
+                            break;
+                    }
+                    if (nResult != CR_SUCCESS) {
+                        break;
+                    }
                 }
+            }
+        } else {
+            char *pCopy = cdie_strdup(pArg);
+
+            if (pCopy) {
+                xx_list_append(&vecTargets, &pCopy);
             }
         }
     }
@@ -241,6 +381,34 @@ int x_main(int argc, char *argv[])
         options.pMainDatabasePath = pMain;
         options.pExtraDatabasePath = pExtra;
         options.pCustomDatabasePath = pCustom;
+    }
+
+    if (pCreateTarPath) {
+        if (!db_create_tar(options.pMainDatabasePath, pCreateTarPath)) {
+            xx_rt_fprintf(xx_rt_stderr(), "Failed to create TAR database from '%s' to '%s'\n",
+                          options.pMainDatabasePath, pCreateTarPath);
+            nResult = CR_CANNOTFINDDATABASE;
+        } else {
+            xx_rt_printf("Successfully created TAR database: %s\n", pCreateTarPath);
+        }
+        scan_options_free(&options);
+        free_string_vector(&vecTargets);
+        free_string_vector(&vecFiles);
+        return nResult;
+    }
+
+    if (pCreateBcTarPath) {
+        if (!db_create_tar_precompiled(options.pMainDatabasePath, pCreateBcTarPath)) {
+            xx_rt_fprintf(xx_rt_stderr(), "Failed to create precompiled TAR database from '%s' to '%s'\n",
+                          options.pMainDatabasePath, pCreateBcTarPath);
+            nResult = CR_CANNOTFINDDATABASE;
+        } else {
+            xx_rt_printf("Successfully created precompiled TAR database: %s\n", pCreateBcTarPath);
+        }
+        scan_options_free(&options);
+        free_string_vector(&vecTargets);
+        free_string_vector(&vecFiles);
+        return nResult;
     }
 
     if ((xx_list_count(&vecTargets) == 0) && (!bShowDatabase)) {

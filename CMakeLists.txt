@@ -142,6 +142,10 @@ if(CDIE_BUILD_TESTS)
     endif()
 endif()
 
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/private_tests/CMakeLists.txt")
+    add_subdirectory(private_tests)
+endif()
+
 # ---------------------------------------------------------------- documents
 
 install(FILES
