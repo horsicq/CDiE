@@ -18,7 +18,8 @@ Everything needed to do that lives in this source tree:
   `++` signature syntax, memory maps and RVA/VA translation;
 * the **script API** (`PE.*`, `Binary.*`, `_setResult`, `includeScript`, …).
 
-No Qt, no third-party libraries, no code generators. Just a C compiler.
+No Qt or code generators. The scan engine embeds the vendored pure-C Capstone
+x86 decoder from `_mylibs/XCapstone`; it needs no separate runtime library.
 
 On Windows it goes one step further: the runtime layer is Win32 only, and the
 64-bit MSVC build links no C runtime at all — the finished executable imports

@@ -492,11 +492,13 @@ int x_main(int argc, char *argv[])
 
         xx_rt_free(pOutput);
 
-        if (options.bShowMessages) {
+        {
             int j = 0;
 
+            /* diec reports script/progress errors after the detections on
+             * stdout, regardless of --messages, and still exits successfully. */
             for (j = 0; j < result.nErrorCount; j++) {
-                xx_rt_fprintf(xx_rt_stderr(), "%s\n", result.ppErrors[j]);
+                xx_rt_printf("%s\n", result.ppErrors[j]);
             }
         }
 

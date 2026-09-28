@@ -5,6 +5,76 @@ the same databases, `cdie` must print exactly what `diec` prints.
 
 ## Reference comparison
 
+For a repeatable comparison of the locally built console versions, use the
+developer harness in `private_tests/compare_console.py`:
+
+```powershell
+python private_tests/compare_console.py --cdie F:\ownCloud_build\cdie\build\srct\src\console\cdie.exe --diec F:\ownCloud_build\die\build\srct\src\console\diec.exe --database F:\ownCloud\prepare\qt5\_mylibs\Detect-It-Easy\db --corpus F:\out_iso\out_tmp2\PE32 --sample-per-directory 1 --batch-size 8 --timeout 120 --output private_tests/comparison-results
+```
+
+It uses `-b -d -u` for both tools, selects one file per directory recursively,
+and explicitly isolates extra/custom databases so only the specified main
+database is used. It snapshots both executables and records database hashes,
+file sizes, modification times, raw stdout/stderr, exit codes and diffs. Only
+CRLF is normalized; whitespace and diagnostic messages remain significant.
+Use `--files-from` with a UTF-8 newline-separated manifest for a fixed file
+selection, and `--resume` to continue an interrupted run with unchanged inputs.
+Timeouts are recorded as failures, never as equal empty outputs.
+
+After rebuilding `cdie`, use a new output directory and
+`--reference-results private_tests/comparison-results` to reuse successful
+`diec` records. The harness verifies the reference executable, database,
+auxiliary database isolation, raw output hashes, and input size/mtime before
+reusing a record. Missing reference records are scanned normally. `--resume`
+requires both executables to remain unchanged.
+
+`private_tests/test_signature_errors.c` checks malformed signatures, cached
+comparisons, searches, and the unmatched quote in the database's ZIP marker.
+`private_tests/test_windows_argv.c` compares the Windows UTF-8 argument parser
+with the CRT's wide-character parser. Both are private CMake test targets.
+The standalone `test_disasm_reference.c` and `test_js_trim_reference.cpp`
+compare primitives directly with the reference Capstone and Qt5Script
+libraries; those reference dependencies are not part of the production build.
+
+`private_tests/test_file_reads.c` checks the shared file loader with a 97-byte
+device that returns one or seven bytes per call. It verifies the complete
+payload and terminator, and rejects premature EOF, read errors, invalid sizes,
+and transfers claiming more bytes than requested. Failed loads leave the
+`DieFile` empty; the borrowed source remains open. Build and run it with:
+
+```powershell
+cmake --build F:\ownCloud_build\cdie\build --target cdie_test_file_reads
+& F:\ownCloud_build\cdie\build\srct\private_tests\cdie_test_file_reads.exe
+```
+
+The loader retries short reads in requests of at most 64 MiB and publishes the
+file size only after all declared bytes are present. This matters for files
+above 2 GiB: the Windows device caps a single transfer at `0x7fffffff` bytes.
+Previously one read silently scanned only that prefix. Two RAR SFX inputs
+exposed the problem: `TSData.exe` contains 1351 files and 178 directories, but
+its first 2 GiB contain only 283 files and 142 directories; `Game.exe` contains
+139 files and 36 directories, versus 98 files and 22 directories in the prefix.
+These counts come from seeking between archive headers; compressed payloads
+need not be unpacked to establish the expected result.
+
+`private_tests/test_pe_metadata.c` exercises 32 small PE fixtures through the
+script API: invalid-address sentinels, header entry points, unaligned raw
+sections, Latin-1 section names, partial debug directories and invalid raw
+pointers, ordinal/named export ordering, zero-RVA resource payloads, and the
+reference console's scalar-search endianness. It also verifies reverse
+physical mapping for overlapping sections and import descriptor/thunk
+continuity, including the legacy partial first descriptor used by Upack.
+Build the private
+`cdie_test_pe_metadata` target and run its executable. The expected conditions
+are independently checked against the native console by
+`private_tests/verify_pe_metadata_reference.py`; its `--output` contains a
+private probe database, fixtures, raw outputs and `summary.json`. The installed
+database remains unchanged. For example:
+
+```powershell
+python private_tests/verify_pe_metadata_reference.py --diec F:\ownCloud_build\die\build-release\srct\src\console\diec.exe --cdie F:\ownCloud_build\cdie\build-release\srct\src\console\cdie.exe --output private_tests/pe-metadata-oracle
+```
+
 ```powershell
 param([string[]]$Files)
 

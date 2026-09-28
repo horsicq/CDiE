@@ -155,6 +155,7 @@ install(FILES
     DESTINATION . OPTIONAL)
 
 install(DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/docs" DESTINATION . OPTIONAL)
+install(DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/LICENSES" DESTINATION . OPTIONAL)
 
 # ------------------------------------------------- signature database (opt)
 #

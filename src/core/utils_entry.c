@@ -22,24 +22,27 @@
 /* utils_entry.c - program startup.
  *
  * With CDIE_NO_CRT the executable has no C runtime at all: the linker entry
- * point is x_entry_point below, which builds argv from GetCommandLineA and
+ * point is x_entry_point below, which builds argv from GetCommandLineW and
  * calls x_main. The only import left is KERNEL32.
  *
  * The compiler still emits calls to memset/memcpy for structure
  * initialisation and large copies no matter what the source says, so those
  * two symbols are provided here and forwarded to the x_ implementations.
  *
- * Without CDIE_NO_CRT a normal main() forwards to x_main, so the same source
- * builds against a hosted runtime.
+ * Hosted Windows builds use the same UTF-16 command line conversion: CRT
+ * char argv uses the active ANSI code page, whereas the engine expects UTF-8.
+ * On other platforms the normal main() forwards argv to x_main.
  */
 
 #include "../global.h"
 
 #include <xxfclib/rt/xx_rt.h>
 
-#if defined(CDIE_NO_CRT) && defined(_WIN32)
+#if defined(_WIN32)
 
 #include <windows.h>
+
+#if defined(CDIE_NO_CRT)
 
 /* ------------------------------------------------------------------------ */
 /*  Compiler support routines                                                */
@@ -125,6 +128,8 @@ void *memmove(void *pDestination, const void *pSource, size_t nSize)
 #pragma optimize("", on)
 #endif
 
+#endif /* CDIE_NO_CRT */
+
 /* ------------------------------------------------------------------------ */
 /*  Command line -> argv                                                     */
 /* ------------------------------------------------------------------------ */
@@ -190,6 +195,11 @@ static int x_build_argv_w(WCHAR *pCommandLine, WCHAR **ppArgv, int nMaxArgs)
                 if (nBackslashes % 2) {
                     *pWrite++ = L'"';
                     pRead++;
+                } else if (bInQuotes && pRead[1] == L'"') {
+                    /* Adjacent quotes inside a quoted argument represent a
+                     * literal quote, as in the Microsoft CRT parser. */
+                    *pWrite++ = L'"';
+                    pRead += 2;
                 } else {
                     bInQuotes = !bInQuotes;
                     pRead++;
@@ -207,6 +217,11 @@ static int x_build_argv_w(WCHAR *pCommandLine, WCHAR **ppArgv, int nMaxArgs)
             }
 
             if (*pRead == 0) {
+                break;
+            }
+
+            if ((!bInQuotes) && ((*pRead == L' ') || (*pRead == L'\t'))) {
+                pRead++;
                 break;
             }
 
@@ -236,7 +251,7 @@ static size_t x_wcslen(const WCHAR *pString)
 /*  Entry point                                                              */
 /* ------------------------------------------------------------------------ */
 
-static void x_startup(void)
+static int x_run_command_line(void)
 {
     WCHAR *pCommandLine = GetCommandLineW();
     WCHAR **ppWideArgv = NULL;
@@ -248,7 +263,7 @@ static void x_startup(void)
     int i = 0;
 
     if (pCommandLine == NULL) {
-        ExitProcess(0);
+        return 0;
     }
 
     /* Everything is on the heap: stack probes come from the CRT, so no frame
@@ -261,7 +276,10 @@ static void x_startup(void)
     ppArgv = (char **)xx_rt_malloc(X_MAX_ARGS * sizeof(char *));
 
     if ((pCopy == NULL) || (ppWideArgv == NULL) || (ppArgv == NULL)) {
-        ExitProcess(3);
+        xx_rt_free(ppArgv);
+        xx_rt_free(ppWideArgv);
+        xx_rt_free(pCopy);
+        return 3;
     }
 
     xx_rt_memcpy(pCopy, pCommandLine, (nLen + 1) * sizeof(WCHAR));
@@ -272,11 +290,15 @@ static void x_startup(void)
         ppArgv[i] = xx_rt_utf16_to_utf8(ppWideArgv[i]);
 
         if (ppArgv[i] == NULL) {
-            ppArgv[i] = (char *)xx_rt_malloc(1);
-
-            if (ppArgv[i] != NULL) {
-                ppArgv[i][0] = 0;
+            /* Do not turn a conversion/allocation failure into a different
+             * argument or pass NULL in the middle of argv to x_main. */
+            while (i > 0) {
+                xx_rt_free(ppArgv[--i]);
             }
+            xx_rt_free(ppArgv);
+            xx_rt_free(ppWideArgv);
+            xx_rt_free(pCopy);
+            return 3;
         }
     }
 
@@ -292,7 +314,14 @@ static void x_startup(void)
     xx_rt_free(ppWideArgv);
     xx_rt_free(pCopy);
 
-    ExitProcess((UINT)nResult);
+    return nResult;
+}
+
+#if defined(CDIE_NO_CRT)
+
+static void x_startup(void)
+{
+    ExitProcess((UINT)x_run_command_line());
 }
 
 /* The linker entry point. The loader jumps here with a 16-byte aligned
@@ -304,7 +333,16 @@ void __cdecl x_entry_point(void)
     x_startup();
 }
 
-#else /* hosted build */
+#else /* hosted Windows build */
+
+int main(void)
+{
+    return x_run_command_line();
+}
+
+#endif /* CDIE_NO_CRT */
+
+#else /* hosted non-Windows build */
 
 int main(int nArgc, char *ppArgv[])
 {
