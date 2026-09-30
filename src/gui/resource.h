@@ -32,5 +32,6 @@
 #define IDC_OPT_EXTRA_BROWSE  204
 #define IDC_OPT_CUSTOM        205
 #define IDC_OPT_CUSTOM_BROWSE 206
+#define IDC_OPT_ERROR         207
 
 #endif /* CDIE_GUI_RESOURCE_H */

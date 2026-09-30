@@ -49,7 +49,8 @@ const char *gui_backend_custom_db_path(void);
 
 /* Replaces the three database paths (UTF-8; a NULL or empty entry re-resolves
  * that slot's default next to the executable) and reloads all three. Returns 1
- * when the main database loaded at least one signature, else 0. */
+ * when the main database loaded at least one signature, else 0. Failure leaves
+ * the previous paths and loaded database intact. */
 int gui_backend_set_db_paths(const char *pMain, const char *pExtra, const char *pCustom);
 
 /* Total number of signatures loaded across the three databases. */
@@ -69,6 +70,15 @@ void gui_backend_set_databases(int bUseExtra, int bUseCustom);
  * name; free each with gui_backend_free. On failure returns 0 and sets both
  * out-pointers to NULL. */
 int gui_backend_scan(const char *pUtf8Path, char **ppResultText, char **ppTypeName);
+
+/* Receives visible, sorted detection records without parsing formatted text.
+ * Field strings are borrowed only for the duration of the callback. The type
+ * includes the translated label and a heuristic marker when appropriate.
+ * Output strings follow gui_backend_scan's ownership rules. */
+typedef void (*gui_backend_result_fn)(const char *pType, const char *pName,
+    const char *pVersion, const char *pInfo, void *pUserData);
+int gui_backend_scan_results(const char *pUtf8Path, gui_backend_result_fn pResultFn,
+    void *pUserData, char **ppResultText, char **ppTypeName);
 
 /* Frees a string handed back by gui_backend_scan (uses the engine allocator,
  * which on the CRT-free build is not the Win32 heap the frontend uses). */

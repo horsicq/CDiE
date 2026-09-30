@@ -80,6 +80,26 @@ Two rules apply when adding code that will be compiled into this build:
   an unresolved `__chkstk`, which is a much better failure than a stack
   overflow at run time.
 
+### Windows GUI
+
+The Windows build also produces `src/gui/cdie_gui.exe`. Its native front end
+uses the sibling `xxwidgets` library (override `CDIE_XXWIDGETS_DIR` when it is
+elsewhere). The reusable `xxwidgets_scan_panel` provides a result tree, Flags
+and Databases checkbox combo boxes, and Scan and Report buttons. Each file
+contains detection nodes with Type, Name, Version, and Info details. Report
+opens the full formatted engine output and supports copying it.
+
+Flags and optional database selections take effect on the next scan; the main
+database is always used. Options edits the same values and keeps both combo
+boxes synchronized. The Database paths button edits signature folders;
+failed reloads and Cancel retain the previously loaded database. About uses
+the reusable xxwidgets dialog. Enter or F5 scans, Ctrl+O opens a file, and
+Ctrl+Shift+D opens database paths.
+
+The GUI uses a hosted C runtime. With `CDIE_NO_CRT=ON`, the GUI and xxwidgets
+link the runtime statically, while the console retains its CRT-free entry
+point and import behavior.
+
 ### The libraries
 
 The build also produces a shared and a static library exposing the

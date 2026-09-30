@@ -109,27 +109,41 @@ const char *gui_backend_custom_db_path(void)
 
 int gui_backend_set_db_paths(const char *pMain, const char *pExtra, const char *pCustom)
 {
+    char *pNewMain;
+    char *pNewExtra;
+    char *pNewCustom;
+    DBase newDb;
+
     if (!g_bInited) {
         return 0;
     }
 
+    pNewMain = ((pMain != NULL) && (pMain[0] != 0)) ? cdie_strdup(pMain) : gui_resolve_db("db");
+    pNewExtra = ((pExtra != NULL) && (pExtra[0] != 0)) ? cdie_strdup(pExtra) : gui_resolve_db("db_extra");
+    pNewCustom = ((pCustom != NULL) && (pCustom[0] != 0)) ? cdie_strdup(pCustom) : gui_resolve_db("db_custom");
+    xx_rt_memset(&newDb, 0, sizeof(newDb));
+
+    if (!pNewMain || !pNewExtra || !pNewCustom || !db_load(&newDb, pNewMain, DB_MAIN)) {
+        db_free(&newDb);
+        xx_rt_free(pNewMain);
+        xx_rt_free(pNewExtra);
+        xx_rt_free(pNewCustom);
+        return 0;
+    }
+
+    db_load(&newDb, pNewExtra, DB_EXTRA);
+    db_load(&newDb, pNewCustom, DB_CUSTOM);
+    db_sort(&newDb);
+    db_free(&g_db);
     xx_rt_free(g_options.pMainDatabasePath);
     xx_rt_free(g_options.pExtraDatabasePath);
     xx_rt_free(g_options.pCustomDatabasePath);
-
-    g_options.pMainDatabasePath = ((pMain != NULL) && (pMain[0] != 0)) ? cdie_strdup(pMain) : gui_resolve_db("db");
-    g_options.pExtraDatabasePath = ((pExtra != NULL) && (pExtra[0] != 0)) ? cdie_strdup(pExtra) : gui_resolve_db("db_extra");
-    g_options.pCustomDatabasePath = ((pCustom != NULL) && (pCustom[0] != 0)) ? cdie_strdup(pCustom) : gui_resolve_db("db_custom");
-
-    db_free(&g_db);
-    xx_rt_memset(&g_db, 0, sizeof(g_db));
-
-    g_bMainLoaded = db_load(&g_db, g_options.pMainDatabasePath, DB_MAIN);
-    db_load(&g_db, g_options.pExtraDatabasePath, DB_EXTRA);
-    db_load(&g_db, g_options.pCustomDatabasePath, DB_CUSTOM);
-    db_sort(&g_db);
-
-    return g_bMainLoaded;
+    g_db = newDb;
+    g_options.pMainDatabasePath = pNewMain;
+    g_options.pExtraDatabasePath = pNewExtra;
+    g_options.pCustomDatabasePath = pNewCustom;
+    g_bMainLoaded = 1;
+    return 1;
 }
 
 int gui_backend_signature_count(void)
@@ -160,7 +174,16 @@ void gui_backend_set_databases(int bUseExtra, int bUseCustom)
 
 int gui_backend_scan(const char *pUtf8Path, char **ppResultText, char **ppTypeName)
 {
+    return gui_backend_scan_results(pUtf8Path, NULL, NULL, ppResultText, ppTypeName);
+}
+
+int gui_backend_scan_results(const char *pUtf8Path, gui_backend_result_fn pResultFn,
+    void *pUserData, char **ppResultText, char **ppTypeName)
+{
     ScanResult result;
+    char *pText = NULL;
+    char *pTypeName = NULL;
+    int i;
 
     if (ppResultText != NULL) {
         *ppResultText = NULL;
@@ -175,20 +198,57 @@ int gui_backend_scan(const char *pUtf8Path, char **ppResultText, char **ppTypeNa
     }
 
     if (!die_engine_scan_file(pUtf8Path, &g_db, &g_options, &result)) {
+        scan_result_free(&result);
         return 0;
     }
 
     if (ppResultText != NULL) {
-        *ppResultText = die_engine_format_text(&result, &g_options); /* text mode, as the console default */
+        pText = die_engine_format_text(&result, &g_options);
     }
 
     if (ppTypeName != NULL) {
-        *ppTypeName = cdie_strdup(xft_to_string(result.fileType));
+        pTypeName = cdie_strdup(xft_to_string(result.fileType));
+    }
+    if ((ppResultText && !pText) || (ppTypeName && !pTypeName)) {
+        xx_rt_free(pText);
+        xx_rt_free(pTypeName);
+        scan_result_free(&result);
+        return 0;
     }
 
-    scan_result_free(&result);
+    for (i = 0; pResultFn && i < result.nCount; ++i) {
+        ScanRecord *pRecord = &result.pRecords[i];
+        char *pType;
+        char *pDisplayType;
+        const char *pMarker;
+        size_t nMarkerLength;
+        size_t nLength;
+        if (pRecord->bIsUnknown && g_options.bHideUnknown) continue;
+        pType = die_engine_translate_type(pRecord->pType ? pRecord->pType : "");
+        pMarker = pRecord->bIsHeuristic ? "(Heur) " : pRecord->bIsAHeuristic ? "(A-Heur) " : "";
+        if (!pType) goto scan_allocation_failed;
+        nMarkerLength = xx_rt_strlen(pMarker);
+        nLength = nMarkerLength + xx_rt_strlen(pType) + 1;
+        pDisplayType = (char *)xx_rt_malloc(nLength);
+        if (!pDisplayType) { xx_rt_free(pType); goto scan_allocation_failed; }
+        xx_rt_memcpy(pDisplayType, pMarker, nMarkerLength);
+        xx_rt_memcpy(pDisplayType + nMarkerLength, pType, nLength - nMarkerLength);
+        pResultFn(pDisplayType, pRecord->pName ? pRecord->pName : "",
+            pRecord->pVersion ? pRecord->pVersion : "", pRecord->pInfo ? pRecord->pInfo : "", pUserData);
+        xx_rt_free(pDisplayType);
+        xx_rt_free(pType);
+    }
 
+    if (ppResultText) *ppResultText = pText;
+    if (ppTypeName) *ppTypeName = pTypeName;
+    scan_result_free(&result);
     return 1;
+
+scan_allocation_failed:
+    xx_rt_free(pText);
+    xx_rt_free(pTypeName);
+    scan_result_free(&result);
+    return 0;
 }
 
 void gui_backend_free(void *pPtr)
