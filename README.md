@@ -18,8 +18,9 @@ Everything needed to do that lives in this source tree:
   `++` signature syntax, memory maps and RVA/VA translation;
 * the **script API** (`PE.*`, `Binary.*`, `_setResult`, `includeScript`, …).
 
-No Qt or code generators. The scan engine embeds the vendored pure-C Capstone
-x86 decoder from `_mylibs/XCapstone`; it needs no separate runtime library.
+No Qt or code generators. The scan engine uses the C11 `cdisasm` x86 decoder
+through xxfclib. Both libraries build from source with the scanner, and the
+decoder adds no runtime library dependency.
 
 On Windows it goes one step further: the runtime layer is Win32 only, and the
 64-bit MSVC build links no C runtime at all — the finished executable imports
@@ -27,14 +28,12 @@ On Windows it goes one step further: the runtime layer is Win32 only, and the
 correctly-rounded `strtod`/`dtoa` and its own libm. See
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#the-runtime-layer).
 
-Verified against `diec` on a 348-file corpus (Windows system DLLs, Visual
-Studio .NET assemblies, Qt binaries, Python, plus a directory of scripts,
-text, images, an APK and a PDF): **348 identical, 0 different**. A 30-file
-subset is additionally compared across every output mode — `--json`, `--xml`,
-`--csv`, `--tsv`, `--plaintext`, `--verbose` — and matches byte for byte in
-all of them. Builds warning-free as strict ISO C99 under both MSVC and GCC,
-with
-identical output from each. See [docs/TESTING.md](docs/TESTING.md).
+Before the decoder migration, the scanner matched `diec` on a 348-file corpus
+(Windows system DLLs, Visual Studio .NET assemblies, Qt binaries, Python,
+scripts, text, images, an APK and a PDF): **348 identical, 0 different**. A
+30-file subset also matched byte for byte across `--json`, `--xml`, `--csv`,
+`--tsv`, `--plaintext` and `--verbose`. These parity results need to be
+rechecked with the `cdisasm` backend. See [docs/TESTING.md](docs/TESTING.md).
 
 ---
 
