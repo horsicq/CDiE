@@ -28,6 +28,12 @@ preamble.
 
 ## Build
 
+For a Git checkout, initialize the bundled dependencies first:
+
+```bash
+git submodule update --init --recursive
+```
+
 ```bash
 cmake -S cdie_source -B cdie_build -DCMAKE_BUILD_TYPE=Release
 cmake --build cdie_build
@@ -83,8 +89,9 @@ Two rules apply when adding code that will be compiled into this build:
 ### Windows GUI
 
 The Windows build also produces `src/gui/cdie_gui.exe`. Its native front end
-uses the sibling `xxwidgets` library (override `CDIE_XXWIDGETS_DIR` when it is
-elsewhere). The reusable `xxwidgets_scan_panel` provides a result tree, Flags
+uses `dep/xxwidgets` when populated, otherwise the sibling
+`../_mylibs/xxwidgets` (override `CDIE_XXWIDGETS_DIR` when it is elsewhere).
+The reusable `xxwidgets_scan_panel` provides a result tree, Flags
 and Databases checkbox combo boxes, and Scan and Report buttons. Each file
 contains detection nodes with Type, Name, Version, and Info details. Report
 opens the full formatted engine output and supports copying it.
@@ -170,8 +177,8 @@ A scanner without signatures is not useful, so the install rules bundle a
 database when they can find one. The CMake cache variable
 `CDIE_DATABASE_DIR` controls this:
 
-* unset — look for `../_mylibs/Detect-It-Easy` next to the source tree and
-  use it if it has a `db` subdirectory;
+* unset — use `dep/Detect-It-Easy` if it has a `db` subdirectory, otherwise
+  use the sibling `../_mylibs/Detect-It-Easy` if available;
 * a path — use that directory's `db`, `db_extra` and `db_custom`;
 * `NONE` — package the executable only.
 

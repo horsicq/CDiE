@@ -1,7 +1,11 @@
 # Native xxwidgets front end. The scan engine remains in xxfclib; the widget
 # library only needs its public type headers and does not link the engine.
 if(NOT TARGET xxwidgets::xxwidgets)
-    set(CDIE_XXWIDGETS_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../_mylibs/xxwidgets"
+    set(_CDIE_DEFAULT_XXWIDGETS_DIR "${CMAKE_CURRENT_LIST_DIR}/../../dep/xxwidgets")
+    if(NOT EXISTS "${_CDIE_DEFAULT_XXWIDGETS_DIR}/CMakeLists.txt")
+        set(_CDIE_DEFAULT_XXWIDGETS_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../_mylibs/xxwidgets")
+    endif()
+    set(CDIE_XXWIDGETS_DIR "${_CDIE_DEFAULT_XXWIDGETS_DIR}"
         CACHE PATH "Location of the xxwidgets source tree")
     if(NOT EXISTS "${CDIE_XXWIDGETS_DIR}/CMakeLists.txt")
         message(FATAL_ERROR "cdie_gui needs xxwidgets. Set CDIE_XXWIDGETS_DIR to its source tree.")

@@ -1,6 +1,12 @@
-[submodule "Detect-It-Easy"]
-	path = Detect-It-Easy
+[submodule "dep/Detect-It-Easy"]
+	path = dep/Detect-It-Easy
 	url = https://github.com/horsicq/Detect-It-Easy.git
 [submodule "dep/xxfclib"]
 	path = dep/xxfclib
 	url = https://github.com/horsicq/xxfclib.git
+[submodule "dep/xxwidgets"]
+	path = dep/xxwidgets
+	url = https://github.com/horsicq/xxwidgets.git
+[submodule "dep/cdisasm"]
+	path = dep/cdisasm
+	url = https://github.com/horsicq/cdisasm.git

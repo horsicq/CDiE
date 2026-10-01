@@ -169,7 +169,9 @@ set(CDIE_DATABASE_DIR "" CACHE PATH "Directory holding db, db_extra and db_custo
 set(CDIE_DATABASE_IMPLICIT OFF)
 
 if(NOT CDIE_DATABASE_DIR)
-    if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../_mylibs/Detect-It-Easy/db")
+    if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/dep/Detect-It-Easy/db")
+        get_filename_component(CDIE_DATABASE_DIR "${CMAKE_CURRENT_LIST_DIR}/dep/Detect-It-Easy" ABSOLUTE)
+    elseif(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../_mylibs/Detect-It-Easy/db")
         get_filename_component(CDIE_DATABASE_DIR "${CMAKE_CURRENT_LIST_DIR}/../_mylibs/Detect-It-Easy" ABSOLUTE)
         set(CDIE_DATABASE_IMPLICIT ON)
     endif()

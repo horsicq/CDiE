@@ -33,6 +33,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install required libs
         run: |
@@ -56,9 +58,9 @@ jobs:
         run: |
           ./src/console/cdie --version
           ./src/console/cdie --help
-          # No signature database is checked out here, so the scan still
-          # prints the file type but exits CR_CANNOTFINDDATABASE (3). That
-          # status is expected; any other one is a regression in the binary.
+          # The signature database is checked out as a submodule, but is not
+          # next to this build output, so scanning exits
+          # CR_CANNOTFINDDATABASE (3). Any other status is a regression.
           ./src/console/cdie src/console/cdie || [ $? -eq 3 ]
           mv src/console/cdie src/console/cdie_linux
 
@@ -79,6 +81,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Build cdie
         run: |
@@ -116,6 +120,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install required libs
         run: |
@@ -210,6 +216,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Configure
         run: cmake -S . -B build ${{ matrix.configure }}

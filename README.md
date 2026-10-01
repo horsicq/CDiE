@@ -40,6 +40,12 @@ identical output from each. See [docs/TESTING.md](docs/TESTING.md).
 
 ## Quick start
 
+For a Git checkout, initialize the bundled dependencies first:
+
+```bash
+git submodule update --init --recursive
+```
+
 ```bash
 cmake -S cdie_source -B cdie_build -DCMAKE_BUILD_TYPE=Release
 cmake --build cdie_build

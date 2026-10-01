@@ -8,7 +8,13 @@
 set -e
 
 HERE=$(cd "$(dirname "$0")" && pwd)
-: "${CDIE_DB_ROOT:=$HERE/../../_mylibs/Detect-It-Easy}"
+if [ -z "${CDIE_DB_ROOT:-}" ]; then
+    if [ -d "$HERE/../dep/Detect-It-Easy/db" ]; then
+        CDIE_DB_ROOT="$HERE/../dep/Detect-It-Easy"
+    else
+        CDIE_DB_ROOT="$HERE/../../_mylibs/Detect-It-Easy"
+    fi
+fi
 CDIE_EXE="$HERE/../../cdie_build/src/console/cdie"
 
 if [ ! -x "$CDIE_EXE" ]; then
