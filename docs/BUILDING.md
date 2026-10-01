@@ -2,18 +2,13 @@
 
 ## Requirements
 
-A C compiler and CMake 3.16+. No Qt or code generation is required. The
-xxfclib engine builds the vendored pure-C Capstone x86 sources alongside its
-own sources and embeds them in the static archive. The default location is
-`_mylibs/XCapstone/3rdparty/Capstone/src`; set `XXFC_CAPSTONE_ROOT` when using
-a different source layout. Capstone's redistribution notices are in
-`LICENSES/`. There is no additional DLL dependency.
-
-The default matches diec's `XCapstone/x86` reduced configuration
-(`CAPSTONE_X86_REDUCE`). Set `-DXXFC_CAPSTONE_X86_REDUCE=OFF` to use the full
-x86 backend when matching a diec build configured with full `XCapstone`.
-The choice affects supported instructions and the script API's next-address
-behavior.
+A C11 compiler and CMake 3.16+. No Qt or code generation is required. The
+xxfclib engine uses `cdisasm` for x86 instruction decoding and Intel text
+formatting. CMake builds `cdisasm` from source with xxfclib and links it
+statically, so it adds no DLL dependency. In the local source layout,
+`cdisasm` lives at `_mylibs/cdisasm`; initialize the bundled dependencies in a
+Git checkout before building. Its license and generated-data notices are in
+the `cdisasm` source tree.
 
 Built and tested with MSVC 19.44 (Visual Studio 2022) on Windows and GCC 11.4
 on Linux; both produce identical scan output. Clang and macOS are expected to

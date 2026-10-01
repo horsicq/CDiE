@@ -32,9 +32,6 @@ requires both executables to remain unchanged.
 comparisons, searches, and the unmatched quote in the database's ZIP marker.
 `private_tests/test_windows_argv.c` compares the Windows UTF-8 argument parser
 with the CRT's wide-character parser. Both are private CMake test targets.
-The standalone `test_disasm_reference.c` and `test_js_trim_reference.cpp`
-compare primitives directly with the reference Capstone and Qt5Script
-libraries; those reference dependencies are not part of the production build.
 
 `private_tests/test_file_reads.c` checks the shared file loader with a 97-byte
 device that returns one or seven bytes per call. It verifies the complete
