@@ -66,6 +66,23 @@ PE64
     Debug data: Records[CodeView, VC Feature, POGO]
 ```
 
+## Windows GUI
+
+`cdie_gui.exe` uses the reusable xxwidgets scan panel and options dialogs.
+Choose or drop a file, then select a file type to scan it again with that
+parser. **Scan options** edits the flags and optional databases; **Fonts**
+chooses fonts for controls, tables, result trees and text. OK applies these
+choices for the current run; Cancel preserves the previous values.
+
+**Context menu** enables or removes the current-user Explorer entry
+**Scan with cdie**, following XOptions' quoted executable and file-argument
+registration. Explorer settings remain registered until disabled. A file
+argument also loads and scans directly:
+
+```bat
+cdie_gui.exe "C:\path with spaces\sample.exe"
+```
+
 ---
 
 ## Command line

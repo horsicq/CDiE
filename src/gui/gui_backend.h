@@ -65,6 +65,13 @@ void gui_backend_set_flags(int bDeep, int bHeuristic, int bVerbose, int bAggress
 /* Selects which databases contribute (the main database is always used). */
 void gui_backend_set_databases(int bUseExtra, int bUseCustom);
 
+/* Emits Automatic (id 0), then the preferred concrete type and the other
+ * detected concrete interpretations, including Binary. IDs are backend scan
+ * selectors rather than combo-box indexes. Labels are static UTF-8 strings.
+ * No callback runs on an invalid path, read failure, or before initialization. */
+typedef void (*gui_backend_file_type_fn)(int typeId, const char *pName, void *pUserData);
+int gui_backend_file_types(const char *pUtf8Path, gui_backend_file_type_fn pTypeFn, void *pUserData);
+
 /* Scans one file given a UTF-8 path. On success returns 1 and hands back two
  * heap strings (UTF-8): the formatted result text and the detected file-type
  * name; free each with gui_backend_free. On failure returns 0 and sets both
@@ -79,6 +86,13 @@ typedef void (*gui_backend_result_fn)(const char *pType, const char *pName,
     const char *pVersion, const char *pInfo, void *pUserData);
 int gui_backend_scan_results(const char *pUtf8Path, gui_backend_result_fn pResultFn,
     void *pUserData, char **ppResultText, char **ppTypeName);
+
+/* Scans the current file as the selected file-type ID from file_types().
+ * ID 0 is automatic; explicit IDs run only that interpretation's scan pass.
+ * The automatic APIs above do not retain a previous explicit selection. */
+int gui_backend_scan_results_type(const char *pUtf8Path, int nTypeId,
+    gui_backend_result_fn pResultFn, void *pUserData,
+    char **ppResultText, char **ppTypeName);
 
 /* Frees a string handed back by gui_backend_scan (uses the engine allocator,
  * which on the CRT-free build is not the Win32 heap the frontend uses). */

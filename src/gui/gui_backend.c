@@ -172,6 +172,41 @@ void gui_backend_set_databases(int bUseExtra, int bUseCustom)
     g_options.bUseCustomDatabase = bUseCustom ? 1 : 0;
 }
 
+typedef struct gui_file_types_context {
+    gui_backend_file_type_fn pTypeFn;
+    void *pUserData;
+    int bStarted;
+} gui_file_types_context;
+
+/* Broad database categories do not identify separate concrete format readers. */
+static int gui_concrete_file_type(XFileType type)
+{
+    return type != XFT_UNKNOWN && type != XFT_PE && type != XFT_ELF &&
+        type != XFT_MACHO && type != XFT_ARCHIVE && type != XFT_IMAGE &&
+        type != XFT_CLI_ASSEMBLY;
+}
+
+static void gui_emit_file_type(XFileType type, void *pUserData)
+{
+    gui_file_types_context *pContext = (gui_file_types_context *)pUserData;
+    if (!pContext->bStarted) {
+        pContext->pTypeFn(0, "Automatic", pContext->pUserData);
+        pContext->bStarted = 1;
+    }
+    if (gui_concrete_file_type(type))
+        pContext->pTypeFn((int)type, xft_to_string(type), pContext->pUserData);
+}
+
+int gui_backend_file_types(const char *pUtf8Path, gui_backend_file_type_fn pTypeFn, void *pUserData)
+{
+    gui_file_types_context context;
+    if (!g_bInited) return 0;
+    context.pTypeFn = pTypeFn;
+    context.pUserData = pUserData;
+    context.bStarted = 0;
+    return die_engine_detect_file_types(pUtf8Path, pTypeFn ? gui_emit_file_type : NULL, &context);
+}
+
 int gui_backend_scan(const char *pUtf8Path, char **ppResultText, char **ppTypeName)
 {
     return gui_backend_scan_results(pUtf8Path, NULL, NULL, ppResultText, ppTypeName);
@@ -179,6 +214,12 @@ int gui_backend_scan(const char *pUtf8Path, char **ppResultText, char **ppTypeNa
 
 int gui_backend_scan_results(const char *pUtf8Path, gui_backend_result_fn pResultFn,
     void *pUserData, char **ppResultText, char **ppTypeName)
+{
+    return gui_backend_scan_results_type(pUtf8Path, 0, pResultFn, pUserData, ppResultText, ppTypeName);
+}
+
+int gui_backend_scan_results_type(const char *pUtf8Path, int nTypeId,
+    gui_backend_result_fn pResultFn, void *pUserData, char **ppResultText, char **ppTypeName)
 {
     ScanResult result;
     char *pText = NULL;
@@ -193,11 +234,13 @@ int gui_backend_scan_results(const char *pUtf8Path, gui_backend_result_fn pResul
         *ppTypeName = NULL;
     }
 
-    if ((!g_bInited) || (pUtf8Path == NULL) || (pUtf8Path[0] == 0)) {
+    if ((!g_bInited) || (pUtf8Path == NULL) || (pUtf8Path[0] == 0) ||
+        nTypeId < 0 || nTypeId >= XFT_COUNT ||
+        (nTypeId != 0 && !gui_concrete_file_type((XFileType)nTypeId))) {
         return 0;
     }
 
-    if (!die_engine_scan_file(pUtf8Path, &g_db, &g_options, &result)) {
+    if (!die_engine_scan_file_type(pUtf8Path, &g_db, &g_options, (XFileType)nTypeId, &result)) {
         scan_result_free(&result);
         return 0;
     }
