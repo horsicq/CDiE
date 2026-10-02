@@ -50,7 +50,8 @@ cmake -S cdie_source -B cdie_build -DCMAKE_BUILD_TYPE=Release
 cmake --build cdie_build
 ```
 
-A portable Windows package (executable + database + docs, ~1.8 MB zipped):
+A portable Windows package contains the executable, database, docs, and
+decoder license notices:
 
 ```bat
 packaging\windows\build_portable_windows.cmd x64 win64_msvc2022
@@ -79,6 +80,12 @@ parser. **Scan options** edits the flags and optional databases; **Fonts**
 chooses fonts for controls, tables, result trees and text. OK applies these
 choices for the current run; Cancel preserves the previous values.
 
+**Optimization** sets the general memory buffer and file I/O buffer sizes
+through value comboboxes, including 1 KiB, 2 KiB, 4 KiB and 8 KiB. It also
+controls SSE2 and AVX2 acceleration. A switch is disabled when the CPU or OS
+does not support it. OK updates xxfclib's runtime settings for subsequent
+scans; Cancel keeps the previous settings.
+
 **Context menu** enables or removes the current-user Explorer entry
 **Scan with cdie**, following XOptions' quoted executable and file-argument
 registration. Explorer settings remain registered until disabled. A file
@@ -95,6 +102,19 @@ cdie_gui.exe "C:\path with spaces\sample.exe"
 ```text
 cdie [options] target
 ```
+
+The common xxfclib terminal options `--sse2` / `--nosse2` and `--avx2` /
+`--noavx2` enable or disable acceleration before scanning. Supported features
+are on by default; switches for unsupported CPU or OS features are accepted and
+ignored. The last switch for each feature wins. `--no-sse2` and `--no-avx2` are
+also accepted. For example, to scan with both accelerators disabled:
+
+```bash
+cdie --nosse2 --noavx2 -D /path/to/Detect-It-Easy/db /path/to/target.exe
+```
+
+Use `--` before a target whose name starts with a dash. The shared `--color` /
+`--nocolor` switches are accepted, although cdie's result output stays plain.
 
 The short options are the ones `diec` uses, so existing command lines work
 unchanged. Note that several are not the mnemonic you would guess — `-a` is

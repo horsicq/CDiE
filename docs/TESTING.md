@@ -104,6 +104,9 @@ Four things will produce false results if you skip them:
 
 ## Results
 
+The following console-parity results are the pre-cdisasm baseline. The corpus
+and output-mode sweeps have not yet been rerun with the cdisasm decoder.
+
 | Corpus | Files | Identical |
 | --- | --- | --- |
 | `C:\Windows\SysWOW64\*.dll` | 120 | 120 |

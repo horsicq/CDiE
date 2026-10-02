@@ -29,6 +29,8 @@
 #ifndef CDIE_GUI_BACKEND_H
 #define CDIE_GUI_BACKEND_H
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -64,6 +66,27 @@ void gui_backend_set_flags(int bDeep, int bHeuristic, int bVerbose, int bAggress
 
 /* Selects which databases contribute (the main database is always used). */
 void gui_backend_set_databases(int bUseExtra, int bUseCustom);
+
+typedef struct gui_backend_optimization_options {
+    size_t buffer_size;
+    size_t file_buffer_size;
+    int use_sse2;
+    int use_avx2;
+} gui_backend_optimization_options;
+
+typedef struct gui_backend_optimization_capabilities {
+    int sse2;
+    int avx2;
+} gui_backend_optimization_capabilities;
+
+/* Process-wide settings, independent of database initialization. Sizes are in
+ * bytes; zero restores the library default. SIMD fields must be 0 or 1 and
+ * unsupported acceleration is normalized to off. Invalid arguments return 0
+ * without changing any settings. Getters return the effective settings; AVX2
+ * support includes CPU and operating-system support. Changes affect next scans. */
+int gui_backend_get_optimization_options(gui_backend_optimization_options *pOptions);
+int gui_backend_get_optimization_capabilities(gui_backend_optimization_capabilities *pCapabilities);
+int gui_backend_set_optimization_options(const gui_backend_optimization_options *pOptions);
 
 /* Emits Automatic (id 0), then the preferred concrete type and the other
  * detected concrete interpretations, including Binary. IDs are backend scan

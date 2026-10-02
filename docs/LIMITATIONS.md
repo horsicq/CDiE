@@ -81,18 +81,15 @@ Not implemented:
 
 ## Disassembler
 
-`format/xdisasm.c` is an instruction **length** decoder for x86/x86-64 with
-mnemonics for the common integer opcodes (`MOV`, `PUSH`, `POP`, arithmetic
-and logic groups, shifts and rotates, `BT`/`BTS`/`BTR`/`BTC`, `BSF`/`BSR`,
-`BSWAP`, `Jcc`, `CALL`, `RET`, `LEA`, `INC`/`DEC`, `MUL`/`DIV`, `MOVZX`,
-`MOVSX`, `CMPXCHG`, …). It is not a full disassembler and prints no
-operands.
+The script API uses xxfclib's `cdisasm` adapter to decode x86 instructions in
+16-, 32- and 64-bit modes and format complete Intel instructions with operands.
+`getDisasmString()` returns uppercase text. `getDisasmNextAddress()` advances
+by the decoded instruction length, including for relative jumps, and returns
+zero for an invalid-byte fallback.
 
-Five database scripts use it — `protector_Arxan`, `protector_Obsidium`,
-`protector_PELock`, `protector_VMProtect` and the generic heuristic analysis
-file. `getDisasmNextAddress()` walks chains correctly for ordinary integer
-code, so those scripts terminate and mostly agree; a rule that depends on an
-exact operand string will not fire.
+The cdisasm decoder does not cover every x86 instruction. Database scripts
+that use disassembly, including protector and heuristic rules, need a new
+corpus comparison after the decoder migration.
 
 ## JavaScript
 

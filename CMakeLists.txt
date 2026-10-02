@@ -155,7 +155,17 @@ install(FILES
     DESTINATION . OPTIONAL)
 
 install(DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/docs" DESTINATION . OPTIONAL)
-install(DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/LICENSES" DESTINATION . OPTIONAL)
+
+# xxfclib is excluded from the install tree, so carry the notices for its
+# statically linked decoder in the CDiE package itself.
+if(XXFC_CDISASM_DIR AND EXISTS "${XXFC_CDISASM_DIR}/LICENSE")
+    install(FILES
+        "${XXFC_CDISASM_DIR}/LICENSE"
+        "${XXFC_CDISASM_DIR}/THIRD_PARTY_NOTICES.md"
+        DESTINATION "licenses/cdisasm" OPTIONAL)
+    install(DIRECTORY "${XXFC_CDISASM_DIR}/LICENSES/"
+        DESTINATION "licenses/cdisasm/LICENSES" OPTIONAL)
+endif()
 
 # ------------------------------------------------- signature database (opt)
 #

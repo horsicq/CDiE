@@ -26,6 +26,7 @@
 #include <xxfclib/fs/xx_fs.h>
 #include <xxfclib/list/xx_list.h>
 #include <xxfclib/rt/xx_rt.h>
+#include <xxfclib/terminal/xx_terminal.h>
 
 #include "../app/cdie_app.h"
 
@@ -47,6 +48,9 @@ static void print_help(void)
     xx_rt_printf("  -f, --format              Format the result strings (the default).\n");
     xx_rt_printf("      --noformat            Do not format the result strings.\n");
     xx_rt_printf("      --nocolor             Disable color output (cdie never colors).\n");
+    xx_rt_printf("      --sse2, --nosse2       Enable/disable SSE2 acceleration.\n");
+    xx_rt_printf("      --avx2, --noavx2       Enable/disable AVX2 acceleration.\n");
+    xx_rt_printf("                           Default: on when supported; unsupported keys are ignored.\n");
     xx_rt_printf("  -U, --hideunknown         Hide unknown results.\n");
     xx_rt_printf("  -M, --messages            Show engine messages.\n");
     xx_rt_printf("  -l, --profiling           Show profiling information.\n");
@@ -187,6 +191,10 @@ int x_main(int argc, char *argv[])
             continue;
         }
 
+        if (!bEndOfOptions && xx_terminal_handle_option(pArg)) {
+            continue;
+        }
+
         if (!bEndOfOptions && pArg[0] == '-' && pArg[1] == '-') {
             /* Long options starting with -- */
             if (xx_rt_strcmp(pArg, "--help") == 0) {
@@ -215,8 +223,6 @@ int x_main(int argc, char *argv[])
                 options.bFormatResult = 1;
             } else if (xx_rt_strcmp(pArg, "--noformat") == 0) {
                 options.bFormatResult = 0;
-            } else if (xx_rt_strcmp(pArg, "--nocolor") == 0) {
-                /* nothing to do */
             } else if (xx_rt_strcmp(pArg, "--hideunknown") == 0) {
                 options.bHideUnknown = 1;
             } else if (xx_rt_strcmp(pArg, "--messages") == 0) {

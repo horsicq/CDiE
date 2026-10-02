@@ -159,9 +159,9 @@ executable imports nothing but `KERNEL32.dll` — see
 * `xft.[ch]` — magic-based file type detection and `xft_check`, the
   equivalent of `XBinary::checkFileType` (so a `PE` database entry matches a
   `PE32`/`PE64` file).
-* `xdisasm.[ch]` — a compact x86/x86-64 instruction length decoder with
-  mnemonics for the common integer opcodes; only used by the handful of
-  protector scripts that walk instruction chains.
+* Disassembly for script rules lives in xxfclib's `die_engine` module. Its
+  `xx_die_engine_xdisasm.c` adapter decodes x86 instructions in 16-, 32- and
+  64-bit modes and formats Intel text through cdisasm.
 
 ### `js/`
 

@@ -367,8 +367,10 @@ inputs.
 ### Disassembly
 
 `getDisasmLength(address)`, `getDisasmString(address)`,
-`getDisasmNextAddress(address)` — backed by the compact length decoder in
-`format/xdisasm.c`.
+`getDisasmNextAddress(address)` — backed by xxfclib's `cdisasm` x86 decoder and
+Intel formatter. The string includes uppercase operands. The next-address
+call advances by the decoded instruction length, even for relative jumps; an
+invalid-byte fallback returns zero.
 
 ### Format checks
 

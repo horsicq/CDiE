@@ -7,19 +7,22 @@ xxfclib engine uses `cdisasm` for x86 instruction decoding and Intel text
 formatting. CMake builds `cdisasm` from source with xxfclib and links it
 statically, so it adds no DLL dependency. In the local source layout,
 `cdisasm` lives at `_mylibs/cdisasm`; initialize the bundled dependencies in a
-Git checkout before building. Its license and generated-data notices are in
-the `cdisasm` source tree.
+Git checkout before building. Set `-DXXFC_CDISASM_DIR=<path>` if the sources
+are elsewhere. Its license and generated-data notices are in the `cdisasm`
+source tree.
 
-Built and tested with MSVC 19.44 (Visual Studio 2022) on Windows and GCC 11.4
-on Linux; both produce identical scan output. Clang and macOS are expected to
-work but have not been exercised.
+The earlier scanner build was tested with MSVC 19.44 (Visual Studio 2022) on
+Windows and GCC 11.4 on Linux, with identical scan output. The `cdisasm`
+version builds with Clang 21 on Linux and passes the two available CDiE tests.
+Recheck corpus parity after the decoder migration. Windows and macOS builds
+have not yet been exercised with this decoder.
 
-The project compiles as **strict ISO C99** — `CMAKE_C_EXTENSIONS` is `OFF`,
-so GCC gets `-std=c99` rather than `-std=gnu99`. That hides every POSIX
-declaration behind a feature-test macro, which is why `core/cd_fs.c` defines
-`_POSIX_C_SOURCE`, `_DEFAULT_SOURCE` and (on Apple) `_DARWIN_C_SOURCE` before
-its first include. Any new file that calls a POSIX function needs the same
-preamble.
+The CDiE sources compile as **strict ISO C99** — `CMAKE_C_EXTENSIONS` is `OFF`,
+so GCC gets `-std=c99` rather than `-std=gnu99` for those sources. The xxfclib
+and cdisasm dependencies use C11. Strict C99 hides POSIX declarations behind
+feature-test macros, which is why `src/app/cdie_app.c` defines
+`_POSIX_C_SOURCE` before its first include. A new CDiE source file that calls
+POSIX functions needs the same preamble.
 
 ## Build
 
@@ -126,7 +129,8 @@ cmake --install cdie_build --prefix /where/you/want
 
 On Linux the binary goes to `bin/`; elsewhere to the prefix root. The install
 also places `README.md`, `LICENSE`, `changelog.txt` and `docs/` next to the
-binary, plus the signature database when one was found (see below).
+binary, plus cdisasm's license and generated-data notices under
+`licenses/cdisasm/` and the signature database when one was found (see below).
 
 ## Packaging
 
@@ -143,8 +147,8 @@ packaging\windows\build_portable_windows.cmd ARM64 winarm64_msvc2022
 ```
 
 Unlike the Qt projects in this repository the script takes **no Qt root** —
-`cdie` depends only on xxfclib, which is built from source alongside it, so the platform and the package suffix
-are the only arguments.
+`cdie` builds xxfclib and its cdisasm decoder from source, so the platform and
+the package suffix are the only arguments.
 
 Following the repo convention, build trees and CPack staging live under
 `%TEMP%` and only finished artefacts land in `release\`:
@@ -155,8 +159,9 @@ release\
 │   ├── cdie.exe
 │   ├── db\  db_extra\  db_custom\
 │   ├── docs\
+│   ├── licenses\cdisasm\
 │   └── README.md  LICENSE  changelog.txt
-└── cdie_win_x64_portable_1.0.0.zip       CPack ZIP, ~1.8 MB
+└── cdie_win_x64_portable_1.0.0.zip       CPack ZIP
 ```
 
 Environment overrides:

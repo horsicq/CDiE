@@ -31,6 +31,7 @@
 #include "../global.h"
 #include <xxfclib/die_engine/die_engine.h>
 #include <xxfclib/fs/xx_fs.h>
+#include <xxfclib/global/xx_global.h>
 #include <xxfclib/rt/xx_rt.h>
 
 #include "../app/cdie_app.h"
@@ -170,6 +171,38 @@ void gui_backend_set_databases(int bUseExtra, int bUseCustom)
 {
     g_options.bUseExtraDatabase = bUseExtra ? 1 : 0;
     g_options.bUseCustomDatabase = bUseCustom ? 1 : 0;
+}
+
+int gui_backend_get_optimization_options(gui_backend_optimization_options *pOptions)
+{
+    if (!pOptions) return 0;
+    pOptions->buffer_size = xx_get_buffer_size();
+    pOptions->file_buffer_size = xx_get_file_buffer_size();
+    pOptions->use_sse2 = xx_is_sse2_enabled() ? 1 : 0;
+    pOptions->use_avx2 = xx_is_avx2_enabled() ? 1 : 0;
+    return 1;
+}
+
+int gui_backend_get_optimization_capabilities(gui_backend_optimization_capabilities *pCapabilities)
+{
+    if (!pCapabilities) return 0;
+    pCapabilities->sse2 = xx_has_sse2() ? 1 : 0;
+    pCapabilities->avx2 = xx_has_avx2() ? 1 : 0;
+    return 1;
+}
+
+int gui_backend_set_optimization_options(const gui_backend_optimization_options *pOptions)
+{
+    gui_backend_optimization_options options;
+    if (!pOptions) return 0;
+    options = *pOptions;
+    if ((options.use_sse2 != 0 && options.use_sse2 != 1) ||
+        (options.use_avx2 != 0 && options.use_avx2 != 1)) return 0;
+    xx_set_buffer_size(options.buffer_size);
+    xx_set_file_buffer_size(options.file_buffer_size);
+    xx_set_sse2_enabled(options.use_sse2 != 0);
+    xx_set_avx2_enabled(options.use_avx2 != 0);
+    return 1;
 }
 
 typedef struct gui_file_types_context {

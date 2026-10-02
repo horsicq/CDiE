@@ -40,6 +40,7 @@
 #include <xxwidgets/xxwidgets_scan_options.h>
 #include <xxwidgets/xxwidgets_font_options.h>
 #include <xxwidgets/xxwidgets_context_options.h>
+#include <xxwidgets/xxwidgets_optimization_options.h>
 #include <limits.h>
 #include <string.h>
 
@@ -62,10 +63,11 @@
 #define IDC_BTN_DB_PATHS 115
 #define IDC_BTN_FONTS    116
 #define IDC_BTN_CONTEXT  117
+#define IDC_BTN_OPTIMIZATION 118
 
 enum gui_action { ACTION_NONE, ACTION_SCAN, ACTION_BROWSE,
                   ACTION_OPTIONS, ACTION_ABOUT, ACTION_REPORT,
-                  ACTION_DATABASE_PATHS, ACTION_FONTS, ACTION_CONTEXT };
+                  ACTION_DATABASE_PATHS, ACTION_FONTS, ACTION_CONTEXT, ACTION_OPTIMIZATION };
 
 static HINSTANCE g_hInst;
 static xxwidgets_app *g_app;
@@ -74,6 +76,7 @@ static xxwidgets_widget *g_flags, *g_databases, *g_msec, *g_scan, *g_results;
 static xxwidgets_widget *g_typeLabel, *g_flagLabel, *g_databaseLabel, *g_databasePaths;
 static xxwidgets_widget *g_options, *g_aboutButton, *g_reportButton, *g_exit, *g_status;
 static xxwidgets_widget *g_fontsButton, *g_contextButton;
+static xxwidgets_widget *g_optimizationButton;
 static xxwidgets_scan_panel *g_panel;
 static xxwidgets_about_dialog *g_about;
 static int g_running, g_pending;
@@ -464,6 +467,36 @@ static int do_options(void)
     return accepted;
 }
 
+static int do_optimization(void)
+{
+    gui_backend_optimization_options current;
+    gui_backend_optimization_capabilities features;
+    xxwidgets_optimization_options options;
+    xxwidgets_optimization_capabilities capabilities;
+    xxwidgets_status status;
+    int accepted = 0;
+    if (!gui_backend_get_optimization_options(&current) ||
+        !gui_backend_get_optimization_capabilities(&features)) {
+        report_ui_error("Read optimization options", XXWIDGETS_PLATFORM_ERROR); return -1;
+    }
+    options.buffer_size = current.buffer_size;
+    options.file_buffer_size = current.file_buffer_size;
+    options.use_sse2 = current.use_sse2; options.use_avx2 = current.use_avx2;
+    capabilities.sse2 = features.sse2; capabilities.avx2 = features.avx2;
+    status = xxwidgets_optimization_options_dialog(g_window, "cdie Optimization", &capabilities, &options, &accepted);
+    if (status != XXWIDGETS_OK) { report_ui_error("Open optimization options", status); return -1; }
+    if (accepted) {
+        current.buffer_size = options.buffer_size;
+        current.file_buffer_size = options.file_buffer_size;
+        current.use_sse2 = options.use_sse2; current.use_avx2 = options.use_avx2;
+        if (!gui_backend_set_optimization_options(&current)) {
+            report_ui_error("Apply optimization options", XXWIDGETS_PLATFORM_ERROR); return -1;
+        }
+        xxwidgets_widget_set_text(g_status, "Optimization settings applied to future scans.");
+    }
+    return accepted;
+}
+
 static int do_fonts(void)
 {
     xxwidgets_font_options options;
@@ -706,7 +739,7 @@ static void layout(void)
     RECT bounds, window_bounds;
     TEXTMETRICW metrics, edit_metrics;
     int width, height, results_bottom, row = 26, label = 16, path_y, label_y, choices_y, results_y;
-    int settings_width[4], settings_x, required_width, status_height = 36;
+    int settings_width[5], settings_x, required_width, status_height = 36;
     int type_width, flags_width, databases_width, flags_x, databases_x;
     int scan_width, browse_width, about_width, report_width, exit_width;
     const int margin = 10, gap = 8;
@@ -731,10 +764,12 @@ static void layout(void)
     flags_x = margin + type_width + gap;
     databases_x = flags_x + flags_width + gap;
     settings_width[0] = control_text_width(g_options, 110);
-    settings_width[1] = control_text_width(g_fontsButton, 92);
-    settings_width[2] = control_text_width(g_contextButton, 116);
-    settings_width[3] = control_text_width(g_databasePaths, 116);
-    required_width = settings_width[0] + settings_width[1] + settings_width[2] + settings_width[3] + 18 + 2 * margin;
+    settings_width[1] = control_text_width(g_optimizationButton, 116);
+    settings_width[2] = control_text_width(g_fontsButton, 92);
+    settings_width[3] = control_text_width(g_contextButton, 116);
+    settings_width[4] = control_text_width(g_databasePaths, 116);
+    required_width = settings_width[0] + settings_width[1] + settings_width[2] + settings_width[3] +
+        settings_width[4] + 24 + 2 * margin;
     if (databases_x + databases_width + gap + scan_width + margin > required_width)
         required_width = databases_x + databases_width + gap + scan_width + margin;
     if (about_width + report_width + exit_width + 12 + 2 * margin > required_width)
@@ -774,11 +809,13 @@ static void layout(void)
     settings_x = margin;
     MoveWindow(native(g_options), settings_x, height - margin - 2 * row - gap, settings_width[0], row, TRUE);
     settings_x += settings_width[0] + 6;
-    MoveWindow(native(g_fontsButton), settings_x, height - margin - 2 * row - gap, settings_width[1], row, TRUE);
+    MoveWindow(native(g_optimizationButton), settings_x, height - margin - 2 * row - gap, settings_width[1], row, TRUE);
     settings_x += settings_width[1] + 6;
-    MoveWindow(native(g_contextButton), settings_x, height - margin - 2 * row - gap, settings_width[2], row, TRUE);
+    MoveWindow(native(g_fontsButton), settings_x, height - margin - 2 * row - gap, settings_width[2], row, TRUE);
     settings_x += settings_width[2] + 6;
-    MoveWindow(native(g_databasePaths), settings_x, height - margin - 2 * row - gap, settings_width[3], row, TRUE);
+    MoveWindow(native(g_contextButton), settings_x, height - margin - 2 * row - gap, settings_width[3], row, TRUE);
+    settings_x += settings_width[3] + 6;
+    MoveWindow(native(g_databasePaths), settings_x, height - margin - 2 * row - gap, settings_width[4], row, TRUE);
     MoveWindow(native(g_aboutButton), margin, height - margin - row, about_width, row, TRUE);
     MoveWindow(native(g_reportButton), margin + about_width + 6, height - margin - row, report_width, row, TRUE);
     MoveWindow(native(g_exit), width - margin - exit_width, height - margin - row, exit_width, row, TRUE);
@@ -850,6 +887,7 @@ static void on_event(xxwidgets_app *app, const xxwidgets_event *event, void *use
         else if (event->widget == g_databasePaths) g_pending = ACTION_DATABASE_PATHS;
         else if (event->widget == g_fontsButton) g_pending = ACTION_FONTS;
         else if (event->widget == g_contextButton) g_pending = ACTION_CONTEXT;
+        else if (event->widget == g_optimizationButton) g_pending = ACTION_OPTIMIZATION;
     } else if (event->type == XXWIDGETS_EVENT_CHANGE &&
                (event->widget == g_flags || event->widget == g_databases)) {
         xxwidgets_status status = read_panel_options();
@@ -887,6 +925,7 @@ static int create_controls(void)
         !create_control(&g_msec, XXWIDGETS_LABEL, "", IDC_STATIC_MSEC) ||
         !create_control(&g_status, XXWIDGETS_LABEL, "", IDC_STATUS) ||
         !create_control(&g_options, XXWIDGETS_BUTTON, "Scan options", IDC_BTN_OPTIONS) ||
+        !create_control(&g_optimizationButton, XXWIDGETS_BUTTON, "Optimization", IDC_BTN_OPTIMIZATION) ||
         !create_control(&g_fontsButton, XXWIDGETS_BUTTON, "Fonts", IDC_BTN_FONTS) ||
         !create_control(&g_contextButton, XXWIDGETS_BUTTON, "Context menu", IDC_BTN_CONTEXT) ||
         !create_control(&g_aboutButton, XXWIDGETS_BUTTON, "About", IDC_BTN_ABOUT) ||
@@ -923,7 +962,7 @@ static int create_controls(void)
  * bounded timers on the UI thread. It never scans a user file or alters paths. */
 static const WCHAR *g_smokeTitle;
 static UINT_PTR g_smokeTimer;
-static int g_smokeAction, g_smokeDone, g_smokeTicks;
+static int g_smokeAction, g_smokeDone, g_smokeTicks, g_smokeFailed;
 
 static BOOL CALLBACK smoke_children(HWND child, LPARAM data)
 {
@@ -938,6 +977,40 @@ static BOOL CALLBACK smoke_children(HWND child, LPARAM data)
     return TRUE;
 }
 
+static BOOL CALLBACK smoke_optimization_children(HWND child, LPARAM data)
+{
+    HWND *controls = (HWND *)data;
+    WCHAR class_name[32], text[32];
+    GetClassNameW(child, class_name, 32);
+    if (!lstrcmpiW(class_name, L"COMBOBOX")) {
+        if (!controls[0]) controls[0] = child;
+        else if (!controls[1]) controls[1] = child;
+    } else if ((GetWindowLongPtrW(child, GWL_STYLE) & BS_TYPEMASK) == BS_AUTOCHECKBOX &&
+               !lstrcmpiW(class_name, L"BUTTON")) {
+        if (!controls[2]) controls[2] = child;
+        else if (!controls[3]) controls[3] = child;
+    }
+    GetWindowTextW(child, text, 32);
+    if (!lstrcmpW(text, L"OK")) controls[4] = child;
+    else if (!lstrcmpW(text, L"Cancel")) controls[5] = child;
+    return TRUE;
+}
+
+static int smoke_select_size(HWND window, HWND combo, const WCHAR *label)
+{
+    LRESULT count = SendMessageW(combo, CB_GETCOUNT, 0, 0), i;
+    for (i = 0; i < count; ++i) {
+        WCHAR text[96];
+        LRESULT length = SendMessageW(combo, CB_GETLBTEXTLEN, (WPARAM)i, 0);
+        if (length < 0 || length >= 96) continue;
+        if (SendMessageW(combo, CB_GETLBTEXT, (WPARAM)i, (LPARAM)text) == CB_ERR || lstrcmpW(text, label)) continue;
+        if (SendMessageW(combo, CB_SETCURSEL, (WPARAM)i, 0) == CB_ERR) return 0;
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(GetDlgCtrlID(combo), CBN_SELCHANGE), (LPARAM)combo);
+        return 1;
+    }
+    return 0;
+}
+
 static BOOL CALLBACK smoke_windows(HWND window, LPARAM data)
 {
     WCHAR title[128];
@@ -947,7 +1020,30 @@ static BOOL CALLBACK smoke_windows(HWND window, LPARAM data)
     GetWindowTextW(window, title, 128);
     if (lstrcmpW(title, g_smokeTitle)) return TRUE;
     if (IsWindowEnabled(native(g_window))) return TRUE;
-    if (g_smokeAction == 3) {
+    if (g_smokeAction == 4 || g_smokeAction == 5) {
+        HWND optimization[6] = {0};
+        gui_backend_optimization_capabilities capabilities;
+        gui_backend_optimization_options current;
+        int i;
+        EnumChildWindows(window, smoke_optimization_children, (LPARAM)optimization);
+        for (i = 0; i < 6; ++i) if (!optimization[i]) return TRUE;
+        if (!gui_backend_get_optimization_capabilities(&capabilities) ||
+            !gui_backend_get_optimization_options(&current) ||
+            !!IsWindowEnabled(optimization[2]) != capabilities.sse2 ||
+            !!IsWindowEnabled(optimization[3]) != capabilities.avx2 ||
+            (SendMessageW(optimization[2], BM_GETCHECK, 0, 0) == BST_CHECKED) != current.use_sse2 ||
+            (SendMessageW(optimization[3], BM_GETCHECK, 0, 0) == BST_CHECKED) != current.use_avx2 ||
+            !smoke_select_size(window, optimization[0], L"1 KiB") ||
+            !smoke_select_size(window, optimization[1], L"2 KiB")) {
+            g_smokeFailed = 1;
+            SendMessageW(window, WM_CLOSE, 0, 0);
+        } else {
+            for (i = 2; i < 4; ++i)
+                if (SendMessageW(optimization[i], BM_GETCHECK, 0, 0) == BST_CHECKED)
+                    SendMessageW(optimization[i], BM_CLICK, 0, 0);
+            SendMessageW(optimization[g_smokeAction == 5 ? 4 : 5], BM_CLICK, 0, 0);
+        }
+    } else if (g_smokeAction == 3) {
         HWND cancel = GetDlgItem(window, IDCANCEL);
         if (!cancel) return TRUE;
         SetDlgItemTextW(window, IDC_OPT_MAIN, L"Smoke test cancelled database path");
@@ -978,7 +1074,7 @@ static VOID CALLBACK smoke_tick(HWND window, UINT message, UINT_PTR timer, DWORD
 static int smoke_begin(const WCHAR *title, int action)
 {
     g_smokeTitle = title; g_smokeAction = action;
-    g_smokeDone = g_smokeTicks = 0;
+    g_smokeDone = g_smokeTicks = g_smokeFailed = 0;
     g_smokeTimer = SetTimer(NULL, 0, 20, smoke_tick);
     return g_smokeTimer != 0;
 }
@@ -987,7 +1083,7 @@ static int smoke_finish(void)
 {
     if (g_smokeTimer) KillTimer(NULL, g_smokeTimer);
     g_smokeTimer = 0;
-    return g_smokeDone && IsWindowEnabled(native(g_window));
+    return g_smokeDone && !g_smokeFailed && IsWindowEnabled(native(g_window));
 }
 
 static int smoke_failed(unsigned int line)
@@ -1065,6 +1161,18 @@ static int run_smoke(void)
     if (xxwidgets_scan_panel_get_flags(g_panel, &flags) != XXWIDGETS_OK || flags != 6u ||
         xxwidgets_scan_panel_get_databases(g_panel, &databases) != XXWIDGETS_OK || databases != 3u) return smoke_failed(__LINE__);
     {
+        gui_backend_optimization_options before, after;
+        if (!gui_backend_get_optimization_options(&before) ||
+            !smoke_begin(L"cdie Optimization", 4) || do_optimization() != 0 || !smoke_finish() ||
+            !gui_backend_get_optimization_options(&after) ||
+            after.buffer_size != before.buffer_size || after.file_buffer_size != before.file_buffer_size ||
+            after.use_sse2 != before.use_sse2 || after.use_avx2 != before.use_avx2) return smoke_failed(__LINE__);
+        if (!smoke_begin(L"cdie Optimization", 5) || do_optimization() != 1 || !smoke_finish() ||
+            !gui_backend_get_optimization_options(&after) ||
+            after.buffer_size != 1024 || after.file_buffer_size != 2048 ||
+            after.use_sse2 || after.use_avx2 || !gui_backend_set_optimization_options(&before)) return smoke_failed(__LINE__);
+    }
+    {
         xxwidgets_font_options before, after;
         if (xxwidgets_app_get_font_options(g_app, &before) != XXWIDGETS_OK ||
             !smoke_begin(L"cdie Fonts", 2) || do_fonts() != 0 || !smoke_finish() ||
@@ -1073,7 +1181,7 @@ static int run_smoke(void)
             xxwidgets_app_get_font_options(g_app, &after) != XXWIDGETS_OK || !memcmp(&before, &after, sizeof(before))) return smoke_failed(__LINE__);
         {
             xxwidgets_font_options large = after;
-            xxwidgets_widget *buttons[] = {g_scan, g_options, g_fontsButton, g_contextButton,
+            xxwidgets_widget *buttons[] = {g_scan, g_options, g_optimizationButton, g_fontsButton, g_contextButton,
                 g_databasePaths, g_aboutButton, g_reportButton, g_exit};
             RECT original, button_bounds, flags_bounds, database_bounds, scan_bounds;
             size_t i;
@@ -1098,6 +1206,16 @@ static int run_smoke(void)
                 TEXTMETRICW metrics = control_font_metrics(g_path);
                 /* The edit's client rectangle excludes its four-pixel border. */
                 if (button_bounds.bottom < metrics.tmHeight + metrics.tmExternalLeading + 4) return smoke_failed(__LINE__);
+            }
+            {
+                gui_backend_optimization_options optimization_before, optimization_after;
+                if (!gui_backend_get_optimization_options(&optimization_before) ||
+                    !smoke_begin(L"cdie Optimization", 4) || do_optimization() != 0 || !smoke_finish() ||
+                    !gui_backend_get_optimization_options(&optimization_after) ||
+                    optimization_after.buffer_size != optimization_before.buffer_size ||
+                    optimization_after.file_buffer_size != optimization_before.file_buffer_size ||
+                    optimization_after.use_sse2 != optimization_before.use_sse2 ||
+                    optimization_after.use_avx2 != optimization_before.use_avx2) return smoke_failed(__LINE__);
             }
             if (xxwidgets_app_set_font_options(g_app, &after) != XXWIDGETS_OK) return smoke_failed(__LINE__);
             layout();
@@ -1213,6 +1331,7 @@ int gui_run(void)
         case ACTION_DATABASE_PATHS: do_database_paths(); break;
         case ACTION_FONTS: do_fonts(); break;
         case ACTION_CONTEXT: do_context(); break;
+        case ACTION_OPTIMIZATION: do_optimization(); break;
         case ACTION_REPORT:
             status = xxwidgets_scan_panel_show_report(g_panel);
             if (status != XXWIDGETS_OK) report_ui_error("Open scan report", status);
