@@ -56,6 +56,32 @@
  * floating point. Normally libcmt supplies it; here it is just a symbol
  * that has to exist.                                                      */
 int _fltused = 0x9875;
+
+/* Static TLS support, normally libcmt's tlssup.obj. xxfclib keeps per-thread
+ * state in __declspec(thread) variables, which the compiler places in .tls$
+ * and addresses through _tls_index. The linker emits the PE TLS directory
+ * from _tls_used; .tls sorts before .tls$ and .tls$ZZZ after it, so
+ * _tls_start/_tls_end bracket the whole template. No TLS callbacks.        */
+ULONG _tls_index = 0;
+
+#pragma data_seg(".tls")
+char _tls_start = 0;
+#pragma data_seg(".tls$ZZZ")
+char _tls_end = 0;
+#pragma data_seg()
+
+#pragma comment(linker, "/INCLUDE:_tls_used")
+
+#pragma const_seg(".rdata$T")
+const IMAGE_TLS_DIRECTORY _tls_used = {
+    (ULONG_PTR)&_tls_start,
+    (ULONG_PTR)&_tls_end,
+    (ULONG_PTR)&_tls_index,
+    0, /* AddressOfCallBacks */
+    0, /* SizeOfZeroFill */
+    {0} /* Characteristics */
+};
+#pragma const_seg()
 #endif
 
 /* The compiler emits calls to these for aggregate initialisation and large

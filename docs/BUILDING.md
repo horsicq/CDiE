@@ -150,6 +150,13 @@ Unlike the Qt projects in this repository the script takes **no Qt root** —
 `cdie` builds xxfclib and its cdisasm decoder from source, so the platform and
 the package suffix are the only arguments.
 
+The default generator is Ninja. It builds the ~3400 xxfclib sources several
+times faster than a Visual Studio generator. Run the script from any prompt:
+when `cl.exe` is not already on `PATH` it finds Visual Studio with `vswhere`
+and calls `vcvarsall` for the requested platform (`x64`, `x64_x86` for `Win32`,
+`x64_arm64` for `ARM64`). From a Developer Command Prompt it uses that
+environment, but stops if the prompt targets a different architecture.
+
 Following the repo convention, build trees and CPack staging live under
 `%TEMP%` and only finished artefacts land in `release\`:
 
@@ -168,7 +175,7 @@ Environment overrides:
 
 | Variable | Effect |
 | --- | --- |
-| `CMAKE_GENERATOR_NAME` | generator, default `Visual Studio 17 2022` |
+| `CMAKE_GENERATOR_NAME` | generator, default `Ninja`; a Visual Studio generator (e.g. `Visual Studio 17 2022`) also works but builds much more slowly |
 | `CDIE_DATABASE_DIR` | directory holding `db`, `db_extra`, `db_custom`; `NONE` packages the binary alone |
 
 ### Bundling the signature database
