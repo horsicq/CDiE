@@ -137,10 +137,10 @@ binary, plus cdisasm's license and generated-data notices under
 
 ### GitHub Beta packages
 
-Run **Build and publish Beta** from the GitHub Actions tab on `main`. The
+Run **Build and publish Beta** from the GitHub Actions tab on `master`. The
 workflow runs only when started manually. It builds portable ZIP packages on
 Ubuntu 24.04, Windows 2022, and macOS 15 on Apple Silicon (arm64), then
-publishes all three to the `Beta` prerelease after checking that `main` still
+publishes all three to the `Beta` prerelease after checking that `master` still
 points at the packaged commit.
 
 The builds use the same resolved revisions of `xxfclib`, `cdisasm`, and the

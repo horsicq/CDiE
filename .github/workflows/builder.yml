@@ -252,7 +252,7 @@ jobs:
           if-no-files-found: error
 
   publish-beta:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/master'
     needs: [resolve-deps, ubuntu, macos, windows]
     runs-on: ubuntu-24.04
     permissions:
@@ -267,7 +267,7 @@ jobs:
           pattern: cdie-*
           merge-multiple: true
           path: release-assets
-      - name: Verify packages and current main
+      - name: Verify packages and current master
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -275,16 +275,16 @@ jobs:
           test "$(find release-assets -maxdepth 1 -type f -name 'cdie_ubuntu24_amd64_*.zip' | wc -l)" -eq 1
           test "$(find release-assets -maxdepth 1 -type f -name 'cdie_mac_arm64_portable_*.zip' | wc -l)" -eq 1
           test "$(find release-assets -maxdepth 1 -type f -name 'cdie_win_x64_portable_*.zip' | wc -l)" -eq 1
-          latest=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)
+          latest=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/master" --jq .object.sha)
           test "$latest" = "$GITHUB_SHA"
       - name: Point Beta tag at packaged commit
         uses: actions/github-script@v7
         with:
           script: |
             const { owner, repo } = context.repo;
-            const main = await github.rest.git.getRef({ owner, repo, ref: 'heads/main' });
-            if (main.data.object.sha !== context.sha) {
-              throw new Error('main moved before the Beta release was uploaded');
+            const master = await github.rest.git.getRef({ owner, repo, ref: 'heads/master' });
+            if (master.data.object.sha !== context.sha) {
+              throw new Error('master moved before the Beta release was uploaded');
             }
             try {
               await github.rest.git.getRef({ owner, repo, ref: 'tags/Beta' });
