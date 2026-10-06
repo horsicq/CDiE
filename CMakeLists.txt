@@ -81,7 +81,11 @@ endif()
 # xxfclib's own README.md/LICENSE/FIND_TEST_RESULTS.md at the package root,
 # where the first two collide with cdie's.
 if(NOT TARGET xxfclib AND NOT TARGET xxfclib_static)
-    set(XXFCLIB_DIR "${CMAKE_CURRENT_LIST_DIR}/dep/xxfclib"
+    set(_CDIE_DEFAULT_XXFCLIB_DIR "${CMAKE_CURRENT_LIST_DIR}/dep/xxfclib")
+    if(NOT EXISTS "${_CDIE_DEFAULT_XXFCLIB_DIR}/CMakeLists.txt")
+        set(_CDIE_DEFAULT_XXFCLIB_DIR "${CMAKE_CURRENT_LIST_DIR}/dep/xxfclib")
+    endif()
+    set(XXFCLIB_DIR "${_CDIE_DEFAULT_XXFCLIB_DIR}"
         CACHE PATH "Location of the xxfclib source tree")
     if(NOT EXISTS "${XXFCLIB_DIR}/CMakeLists.txt")
         message(FATAL_ERROR

@@ -34,6 +34,7 @@
 #include <xxfclib/die_engine/die_engine.h>
 #include <xxfclib/buf/xx_buf.h>
 #include <xxfclib/rt/xx_rt.h>
+#include <xxfclib/global/xx_global.h>
 
 #include "../src/app/cdie_app.h"
 
@@ -148,6 +149,26 @@ static char *die_dup_result(const char *pString)
 {
     return cdie_strdup(pString ? pString : "");
 }
+
+#if defined(_WIN32) && defined(DIE_BUILD_SHARED)
+/* die.dll embeds the static xxfclib, whose per-thread slots are process-wide
+ * TlsAlloc indices: give them back when the DLL is unloaded with FreeLibrary
+ * (lpvReserved NULL), not at process exit. Declared without <windows.h>,
+ * which the engine headers do not tolerate; the types match
+ * BOOL WINAPI DllMain(HINSTANCE, DWORD, LPVOID), and the CRT entry calls it. */
+int __stdcall DllMain(void *hinstDLL, unsigned long fdwReason, void *lpvReserved);
+
+int __stdcall DllMain(void *hinstDLL, unsigned long fdwReason, void *lpvReserved)
+{
+    (void)hinstDLL;
+
+    if ((fdwReason == 0UL /* DLL_PROCESS_DETACH */) && (lpvReserved == NULL)) {
+        xx_global_release_thread_slots();
+    }
+
+    return 1;
+}
+#endif
 
 /* --- wide <-> UTF-8 ----------------------------------------------------- */
 

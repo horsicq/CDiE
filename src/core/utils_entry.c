@@ -50,38 +50,16 @@
 
 #if defined(_MSC_VER)
 /* Keep the compiler from replacing an explicit call with the intrinsic. */
-#pragma function(memset, memcpy, memmove)
+#pragma function(memset, memcpy, memmove, memcmp, strlen)
 
 /* MSVC emits a reference to this marker from every object file that uses
  * floating point. Normally libcmt supplies it; here it is just a symbol
  * that has to exist.                                                      */
 int _fltused = 0x9875;
 
-/* Static TLS support, normally libcmt's tlssup.obj. xxfclib keeps per-thread
- * state in __declspec(thread) variables, which the compiler places in .tls$
- * and addresses through _tls_index. The linker emits the PE TLS directory
- * from _tls_used; .tls sorts before .tls$ and .tls$ZZZ after it, so
- * _tls_start/_tls_end bracket the whole template. No TLS callbacks.        */
-ULONG _tls_index = 0;
-
-#pragma data_seg(".tls")
-char _tls_start = 0;
-#pragma data_seg(".tls$ZZZ")
-char _tls_end = 0;
-#pragma data_seg()
-
-#pragma comment(linker, "/INCLUDE:_tls_used")
-
-#pragma const_seg(".rdata$T")
-const IMAGE_TLS_DIRECTORY _tls_used = {
-    (ULONG_PTR)&_tls_start,
-    (ULONG_PTR)&_tls_end,
-    (ULONG_PTR)&_tls_index,
-    0, /* AddressOfCallBacks */
-    0, /* SizeOfZeroFill */
-    {0} /* Characteristics */
-};
-#pragma const_seg()
+/* No TLS support here on purpose: xxfclib keeps per-thread state in TlsAlloc
+ * slots (xx_tls.h), not in __declspec(thread) variables, so the image has no
+ * PE TLS directory. A thread-local variable would fail to link (_tls_index). */
 #endif
 
 /* The compiler emits calls to these for aggregate initialisation and large
@@ -148,6 +126,39 @@ void *memmove(void *pDestination, const void *pSource, size_t nSize)
     }
 
     return pDestination;
+}
+
+/* xxfclib means to call its own x_/xx_rt_ functions, but a plain memcmp or
+ * strlen does slip into shared code now and then (xx_scan_types.c,
+ * xx_single_stream_writer.h). Supplying them here keeps such a slip from
+ * breaking this /NODEFAULTLIB link, as the three above already do for the
+ * compiler's own calls. */
+int memcmp(const void *pLeft, const void *pRight, size_t nSize)
+{
+    const unsigned char *pA = (const unsigned char *)pLeft;
+    const unsigned char *pB = (const unsigned char *)pRight;
+
+    while (nSize--) {
+        if (*pA != *pB) {
+            return (*pA < *pB) ? -1 : 1;
+        }
+
+        pA++;
+        pB++;
+    }
+
+    return 0;
+}
+
+size_t strlen(const char *pString)
+{
+    const char *pEnd = pString;
+
+    while (*pEnd) {
+        pEnd++;
+    }
+
+    return (size_t)(pEnd - pString);
 }
 
 #if defined(_MSC_VER)

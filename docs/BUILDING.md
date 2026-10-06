@@ -134,6 +134,19 @@ binary, plus cdisasm's license and generated-data notices under
 
 ## Packaging
 
+### GitHub Beta packages
+
+Run **Build and publish Beta** from the GitHub Actions tab on `main`. The
+workflow runs only when started manually. It builds portable ZIP packages on
+Ubuntu 24.04 and Windows 2022, then publishes both to the `Beta` prerelease
+after checking that `main` still points at the packaged commit.
+
+Both builds use the same resolved revisions of `xxfclib`, `cdisasm`, and the
+Detect It Easy signature database; Windows also uses `xxwidgets`. These are
+checked out from the `horsicq` GitHub repositories into `dep/`. If any of those
+repositories are private, add a `CDIE_DEPS_TOKEN` Actions secret with read
+access to them. Public repositories work with the workflow's default token.
+
 ### Windows portable package
 
 ```bat
