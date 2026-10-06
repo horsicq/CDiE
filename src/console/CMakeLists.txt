@@ -7,7 +7,7 @@ add_executable(cdie
 
 target_include_directories(cdie PRIVATE ${CMAKE_CURRENT_LIST_DIR}/..)
 
-target_link_libraries(cdie PRIVATE xxfclib::xxfclib)
+target_link_libraries(cdie PRIVATE xxfclib::die_engine)
 
 # ---------------------------------------------------------------- no CRT ---
 #
@@ -21,7 +21,7 @@ target_link_libraries(cdie PRIVATE xxfclib::xxfclib)
 # only for 64 bit MSVC builds.
 
 # CDIE_NO_CRT is declared at the top level, where it also decides how the
-# xxfclib archive is compiled. Here it is only consumed.
+# die_engine archive is compiled. Here it is only consumed.
 
 if(CDIE_NO_CRT AND MSVC)
     target_compile_definitions(cdie PRIVATE CDIE_NO_CRT)

@@ -21,6 +21,10 @@
 
 /* cdie_app.c - see cdie_app.h. */
 
+#if defined(__APPLE__) && !defined(_XOPEN_SOURCE)
+#define _XOPEN_SOURCE 700
+#endif
+
 #if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
 #define _POSIX_C_SOURCE 200809L
 #endif
@@ -37,6 +41,10 @@
 #include <windows.h>
 #else
 #include <unistd.h>
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#include <stdlib.h>
+#endif
 #endif
 
 int cdie_path_exists(const char *pPath)
@@ -105,6 +113,35 @@ char *cdie_app_dir(void)
     sPath[nLen] = 0;
 
     return cdie_dir_of(sPath);
+#elif defined(__APPLE__)
+    char sPath[4096];
+    uint32_t nPathSize = (uint32_t)sizeof(sPath);
+    char *pLongPath = NULL;
+    const char *pPath = sPath;
+    char *pResolvedPath;
+    char *pResult;
+
+    if (_NSGetExecutablePath(sPath, &nPathSize) != 0) {
+        /* The required size includes the terminator. Retry with that size
+         * rather than losing the adjacent database on a long install path. */
+        pLongPath = (char *)xx_rt_malloc(nPathSize);
+        if (!pLongPath) {
+            return cdie_strdup(".");
+        }
+        if (_NSGetExecutablePath(pLongPath, &nPathSize) != 0) {
+            xx_rt_free(pLongPath);
+            return cdie_strdup(".");
+        }
+        pPath = pLongPath;
+    }
+
+    /* The dyld path can contain symlinks or relative components. Resolve it
+     * so the database is found beside the actual executable. */
+    pResolvedPath = realpath(pPath, NULL);
+    pResult = cdie_dir_of(pResolvedPath ? pResolvedPath : pPath);
+    free(pResolvedPath);
+    xx_rt_free(pLongPath);
+    return pResult;
 #else
     char sPath[4096];
     ssize_t nLen = readlink("/proc/self/exe", sPath, sizeof(sPath) - 1);

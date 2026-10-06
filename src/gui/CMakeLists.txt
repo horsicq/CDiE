@@ -21,7 +21,7 @@ add_executable(cdie_gui WIN32
     ${CMAKE_CURRENT_LIST_DIR}/cdie_gui.rc
 )
 target_include_directories(cdie_gui PRIVATE ${CMAKE_CURRENT_LIST_DIR}/..)
-target_link_libraries(cdie_gui PRIVATE xxfclib::xxfclib xxwidgets::xxwidgets
+target_link_libraries(cdie_gui PRIVATE xxfclib::die_engine xxwidgets::xxwidgets
     user32 gdi32 comdlg32 comctl32 shell32 ole32)
 
 if(MSVC)

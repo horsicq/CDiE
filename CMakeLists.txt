@@ -93,6 +93,20 @@ if(NOT TARGET xxfclib AND NOT TARGET xxfclib_static)
             "'${XXFCLIB_DIR}'. Set -DXXFCLIB_DIR=<path> to point at it.")
     endif()
     add_subdirectory("${XXFCLIB_DIR}" "${CMAKE_BINARY_DIR}/xxfclib" EXCLUDE_FROM_ALL)
+
+    # The current xxfclib format readers need these POSIX compatibility
+    # definitions when compiled as strict C11. Keep them on the dependency
+    # target, as CXFileUnpacker does, so cdie's C99 flags stay independent.
+    if(UNIX)
+        foreach(_CDIE_XXFC_TARGET xxfclib xxfclib_static xxfclib_shared die_engine)
+            if(TARGET ${_CDIE_XXFC_TARGET})
+                target_compile_options(${_CDIE_XXFC_TARGET} PRIVATE
+                    "SHELL:-include string.h" "SHELL:-include stdlib.h")
+                target_compile_definitions(${_CDIE_XXFC_TARGET} PRIVATE
+                    _POSIX_C_SOURCE=200809L WEP_UNIX=AF_UNIX)
+            endif()
+        endforeach()
+    endif()
 endif()
 
 # ------------------------------------------------------- language + warnings

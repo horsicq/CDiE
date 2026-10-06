@@ -109,8 +109,9 @@ point and import behavior.
 
 The build also produces a shared and a static library exposing the
 die_library C API — `die.dll`/`die.lib` and `die_static.lib` on Windows,
-`libdie.so`/`libdie.a` on Unix — from the same engine sources (minus the
-console's `core/utils_entry.c`). They are on by default:
+`libdie.so`/`libdie.a` on Linux, and `libdie.dylib`/`libdie.a` on macOS — from
+the same engine sources (minus the console's `core/utils_entry.c`). They are
+on by default:
 
 ```bash
 cmake -S cdie_source -B cdie_build -DCMAKE_BUILD_TYPE=Release
@@ -138,10 +139,11 @@ binary, plus cdisasm's license and generated-data notices under
 
 Run **Build and publish Beta** from the GitHub Actions tab on `main`. The
 workflow runs only when started manually. It builds portable ZIP packages on
-Ubuntu 24.04 and Windows 2022, then publishes both to the `Beta` prerelease
-after checking that `main` still points at the packaged commit.
+Ubuntu 24.04, Windows 2022, and macOS 15 on Apple Silicon (arm64), then
+publishes all three to the `Beta` prerelease after checking that `main` still
+points at the packaged commit.
 
-Both builds use the same resolved revisions of `xxfclib`, `cdisasm`, and the
+The builds use the same resolved revisions of `xxfclib`, `cdisasm`, and the
 Detect It Easy signature database; Windows also uses `xxwidgets`. These are
 checked out from the `horsicq` GitHub repositories into `dep/`. If any of those
 repositories are private, add a `CDIE_DEPS_TOKEN` Actions secret with read
@@ -163,8 +165,9 @@ Unlike the Qt projects in this repository the script takes **no Qt root** —
 `cdie` builds xxfclib and its cdisasm decoder from source, so the platform and
 the package suffix are the only arguments.
 
-The default generator is Ninja. It builds the ~3400 xxfclib sources several
-times faster than a Visual Studio generator. Run the script from any prompt:
+The default generator is Ninja. It builds the focused `die_engine` archive
+and cdisasm decoder faster than a Visual Studio generator. Run the script from
+any prompt:
 when `cl.exe` is not already on `PATH` it finds Visual Studio with `vswhere`
 and calls `vcvarsall` for the requested platform (`x64`, `x64_x86` for `Win32`,
 `x64_arm64` for `ARM64`). From a Developer Command Prompt it uses that

@@ -13,7 +13,7 @@ rem
 rem Optional environment variables:
 rem   CMAKE_GENERATOR_NAME  default "Ninja". Any Visual Studio generator
 rem                         (e.g. "Visual Studio 17 2022") also works, but
-rem                         compiles xxfclib's ~3400 sources far more slowly.
+rem                         compiles the focused die_engine archive more slowly.
 rem                         With Ninja the MSVC environment for the requested
 rem                         platform is set up automatically (vswhere +
 rem                         vcvarsall) unless cl.exe is already on PATH.

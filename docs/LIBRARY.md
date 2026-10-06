@@ -10,14 +10,14 @@ library unchanged. The implementation is the pure-C `cdie` engine
 
 ## Artifacts
 
-| Target | Windows | Unix |
-| --- | --- | --- |
-| `die_shared` | `die.dll` + `die.lib` (import lib) | `libdie.so` |
-| `die_static` | `die_static.lib` | `libdie.a` |
+| Target | Windows | Linux | macOS |
+| --- | --- | --- | --- |
+| `die_shared` | `die.dll` + `die.lib` (import lib) | `libdie.so` | `libdie.dylib` |
+| `die_static` | `die_static.lib` | `libdie.a` | `libdie.a` |
 
 The static archive is named `die_static` on Windows only, because the shared
-library's import lib already claims `die.lib`; on Unix `libdie.a` and
-`libdie.so` coexist under the plain name.
+library's import lib already claims `die.lib`; on Linux and macOS the static
+archive and shared library have different extensions.
 
 Both are on by default. Configure with `-DCDIE_BUILD_LIBRARY=OFF` to build only
 the console scanner.
@@ -88,13 +88,19 @@ link /nologo simple.obj die.lib /SUBSYSTEM:CONSOLE
 Compile the consumer with `/MD` — the libraries use the dynamic CRT, so a
 default (`/MT`) `cl` invocation would warn `LNK4098`.
 
-Unix:
+Linux:
 
 ```bash
-gcc simple.c -o simple -I ../../lib -L<build>/lib -l:libdie.so
+build_dir=/path/to/cdie_build
+gcc simple.c -o simple -I ../../lib -L"$build_dir/lib" -l:libdie.so
 # or, static:
-gcc simple.c -o simple -I ../../lib <build>/lib/libdie.a -lm
+gcc simple.c -o simple -I ../../lib "$build_dir/lib/libdie.a" \
+    "$build_dir/xxfclib/libdie_engine.a" \
+    "$build_dir/xxfclib/cdisasm/libcdisasm.a" -lm
 ```
+
+For a static consumer, link the engine and cdisasm archives after `libdie.a`.
+The CMake `die_static` target carries those dependencies automatically.
 
 ## Compatibility notes
 
