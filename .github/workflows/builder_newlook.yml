@@ -164,6 +164,8 @@ jobs:
         working-directory: cdie
         env:
           NO_RUN: "1"
+          NO_NINJA: "1"
+          JOBS: "3"
           EXTRA_CMAKE_ARGS: -DXXFC_CDISASM_DIR=${{ github.workspace }}/cdie/dep/cdisasm
         run: |
           test "$(uname -m)" = arm64
