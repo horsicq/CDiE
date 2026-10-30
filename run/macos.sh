@@ -12,6 +12,7 @@
 #   CC=clang  ARCH=arm64|x86_64  XXW_LIB=/path/libxxwidgets.a
 #   XXF_LIB=/path/libdie_engine.a  CDIS_LIB=/path/libcdisasm.a
 #   REBUILD_DEPS=1  NO_RUN=1  MIN_MACOS=11.0
+#   NO_NINJA=1 (use Unix Makefiles for the dep builds)  JOBS=2 (parallel jobs)
 #   EXTRA_CMAKE_ARGS="-DXXFC_CDISASM_DIR=/path/to/cdisasm"   (extra flags for the dep builds)
 
 set -e
@@ -48,7 +49,7 @@ find_lib() { find "$1/build_macos" -type f -name "$2" 2>/dev/null | head -n 1; }
 build_dep() {
     [ -f "$1/CMakeLists.txt" ] || { echo "ERROR: no CMakeLists.txt in $1"; return 1; }
     command -v cmake >/dev/null 2>&1 || { echo "ERROR: cmake not found (brew install cmake ninja)."; return 1; }
-    GEN=; command -v ninja >/dev/null 2>&1 && GEN="-G Ninja"
+    GEN=; [ -z "$NO_NINJA" ] && command -v ninja >/dev/null 2>&1 && GEN="-G Ninja"
     TGT=; [ -n "$2" ] && TGT="--target $2"
     echo "Building $1 ..."
     # shellcheck disable=SC2086
@@ -58,7 +59,7 @@ build_dep() {
         -DXXWIDGETS_BUILD_EXAMPLES=OFF -DXXWIDGETS_BUILD_TESTS=OFF \
         -DXXWIDGETS_BUILD_SETTINGS=OFF -DBUILD_TESTING=OFF $EXTRA_CMAKE_ARGS
     # shellcheck disable=SC2086
-    cmake --build "$1/build_macos" $TGT -j "$(sysctl -n hw.ncpu 2>/dev/null || echo 2)"
+    cmake --build "$1/build_macos" $TGT -j "${JOBS:-$(sysctl -n hw.ncpu 2>/dev/null || echo 2)}"
 }
 
 if [ -n "$REBUILD_DEPS" ]; then
