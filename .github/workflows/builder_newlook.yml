@@ -118,71 +118,81 @@ jobs:
           path: cdie/release/cdie_ubuntu24_amd64_*.zip
           if-no-files-found: error
 
-  # macos:
-  #   needs: resolve-deps
-  #   runs-on: macos-15
-  #   steps:
-  #     - name: Check out cdie
-  #       uses: actions/checkout@v4
-  #       with:
-  #         path: cdie
-  #         persist-credentials: false
-  #     - name: Check out xxfclib
-  #       uses: actions/checkout@v4
-  #       with:
-  #         repository: horsicq/xxfclib
-  #         ref: ${{ needs.resolve-deps.outputs.xxfclib }}
-  #         path: cdie/dep/xxfclib
-  #         token: ${{ secrets.CDIE_DEPS_TOKEN || github.token }}
-  #         persist-credentials: false
-  #     - name: Check out cdisasm
-  #       uses: actions/checkout@v4
-  #       with:
-  #         repository: horsicq/cdisasm
-  #         ref: ${{ needs.resolve-deps.outputs.cdisasm }}
-  #         path: cdie/dep/cdisasm
-  #         token: ${{ secrets.CDIE_DEPS_TOKEN || github.token }}
-  #         persist-credentials: false
-  #     - name: Check out signature database
-  #       uses: actions/checkout@v4
-  #       with:
-  #         repository: horsicq/Detect-It-Easy
-  #         ref: ${{ needs.resolve-deps.outputs.detect_it_easy }}
-  #         path: cdie/dep/Detect-It-Easy
-  #         token: ${{ secrets.CDIE_DEPS_TOKEN || github.token }}
-  #         persist-credentials: false
-  #     - name: Configure
-  #       working-directory: cdie
-  #       run: |
-  #         test "$(uname -m)" = arm64
-  #         test -d dep/Detect-It-Easy/db
-  #         cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-  #           -DXXFCLIB_DIR="$PWD/dep/xxfclib" \
-  #           -DXXFC_CDISASM_DIR="$PWD/dep/cdisasm" \
-  #           -DCDIE_DATABASE_DIR="$PWD/dep/Detect-It-Easy"
-  #     - name: Build
-  #       working-directory: cdie
-  #       run: cmake --build build --parallel 2
-  #     - name: Package and verify macOS
-  #       working-directory: cdie
-  #       run: |
-  #         version=$(head -n 1 release_version.txt)
-  #         cpack --config build/CPackConfig.cmake -G ZIP -B release
-  #         archive="release/cdie_mac_arm64_portable_${version}.zip"
-  #         test -s "$archive"
-  #
-  #         extract_dir=$(mktemp -d)
-  #         unzip -q "$archive" -d "$extract_dir"
-  #         package_dir="$extract_dir/cdie_mac_arm64_portable_${version}"
-  #         test -x "$package_dir/cdie"
-  #         test -n "$(find "$package_dir/db" -type f -print -quit)"
-  #
-  #     - name: Save macOS package
-  #       uses: actions/upload-artifact@v4
-  #       with:
-  #         name: cdie-macos-arm64
-  #         path: cdie/release/cdie_mac_arm64_portable_*.zip
-  #         if-no-files-found: error
+  macos:
+     needs: resolve-deps
+     runs-on: macos-15
+     steps:
+      - name: Check out cdie NewLook
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-deps.outputs.cdie }}
+          path: cdie
+          persist-credentials: false
+      - name: Check out xxfclib
+        uses: actions/checkout@v4
+        with:
+          repository: horsicq/xxfclib
+          ref: ${{ needs.resolve-deps.outputs.xxfclib }}
+          path: cdie/dep/xxfclib
+          token: ${{ secrets.CDIE_DEPS_TOKEN || github.token }}
+          persist-credentials: false
+      - name: Check out cdisasm
+        uses: actions/checkout@v4
+        with:
+          repository: horsicq/cdisasm
+          ref: ${{ needs.resolve-deps.outputs.cdisasm }}
+          path: cdie/dep/cdisasm
+          token: ${{ secrets.CDIE_DEPS_TOKEN || github.token }}
+          persist-credentials: false
+      - name: Check out xxwidgets
+        uses: actions/checkout@v4
+        with:
+          repository: horsicq/xxwidgets
+          ref: ${{ needs.resolve-deps.outputs.xxwidgets }}
+          path: cdie/dep/xxwidgets
+          token: ${{ secrets.CDIE_DEPS_TOKEN || github.token }}
+          persist-credentials: false
+      - name: Check out signature database
+        uses: actions/checkout@v4
+        with:
+          repository: horsicq/Detect-It-Easy
+          ref: ${{ needs.resolve-deps.outputs.detect_it_easy }}
+          path: cdie/dep/Detect-It-Easy
+          token: ${{ secrets.CDIE_DEPS_TOKEN || github.token }}
+          persist-credentials: false
+      - name: Build macOS
+        working-directory: cdie
+        env:
+          NO_RUN: "1"
+          EXTRA_CMAKE_ARGS: -DXXFC_CDISASM_DIR=${{ github.workspace }}/cdie/dep/cdisasm
+        run: |
+          test "$(uname -m)" = arm64
+          test -d dep/Detect-It-Easy/db
+          chmod +x run/macos.sh
+          ./run/macos.sh
+          test -x build_macos/cdie_gui
+      - name: Package and verify macOS
+        working-directory: cdie
+        run: |
+          version=$(head -n 1 release_version.txt)
+          name="cdie_mac_arm64_portable_${version}"
+          mkdir -p "release/$name"
+          cp build_macos/cdie_gui "release/$name/cdie"
+          cp -R dep/Detect-It-Easy/db "release/$name/db"
+          [ -d dep/Detect-It-Easy/db_extra ]  && cp -R dep/Detect-It-Easy/db_extra  "release/$name/db_extra"
+          [ -d dep/Detect-It-Easy/db_custom ] && cp -R dep/Detect-It-Easy/db_custom "release/$name/db_custom"
+          (cd release && ditto -c -k --keepParent "$name" "$name.zip")
+          test -s "release/$name.zip"
+          extract_dir=$(mktemp -d)
+          unzip -q "release/$name.zip" -d "$extract_dir"
+          test -x "$extract_dir/$name/cdie"
+          test -n "$(find "$extract_dir/$name/db" -type f -print -quit)"
+      - name: Save macOS package
+        uses: actions/upload-artifact@v4
+        with:
+          name: cdie-newlook-macos-arm64
+          path: cdie/release/cdie_mac_arm64_portable_*.zip
+          if-no-files-found: error
 
   windows:
     needs: resolve-deps
