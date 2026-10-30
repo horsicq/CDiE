@@ -119,9 +119,9 @@ jobs:
           if-no-files-found: error
 
   macos:
-     needs: resolve-deps
-     runs-on: macos-15
-     steps:
+    needs: resolve-deps
+    runs-on: macos-15
+    steps:
       - name: Check out cdie NewLook
         uses: actions/checkout@v4
         with:
@@ -333,7 +333,7 @@ jobs:
           if-no-files-found: error
 
   publish-newlook:
-    needs: [resolve-deps, ubuntu, windows, windows-setup]
+    needs: [resolve-deps, ubuntu, macos, windows, windows-setup]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -349,8 +349,9 @@ jobs:
           path: release-assets
       - name: Verify packages
         run: |
-          test "$(find release-assets -maxdepth 1 -type f | wc -l)" -eq 3
+          test "$(find release-assets -maxdepth 1 -type f | wc -l)" -eq 4
           test "$(find release-assets -maxdepth 1 -type f -name 'cdie_ubuntu24_amd64_*.zip' | wc -l)" -eq 1
+          test "$(find release-assets -maxdepth 1 -type f -name 'cdie_mac_arm64_portable_*.zip' | wc -l)" -eq 1
           test "$(find release-assets -maxdepth 1 -type f -name 'cdie_win_x64_portable_*.zip' | wc -l)" -eq 1
           test "$(find release-assets -maxdepth 1 -type f -name 'cdie-setup*.exe' | wc -l)" -eq 1
       - name: Rename packages for NewLook
@@ -361,6 +362,9 @@ jobs:
           done
           for f in cdie_ubuntu24_amd64_*.zip; do
             mv "$f" "${f/cdie_ubuntu24_amd64_/cdie_newlook_ubuntu24_amd64_}"
+          done
+          for f in cdie_mac_arm64_portable_*.zip; do
+            mv "$f" "${f/cdie_mac_arm64_portable_/cdie_newlook_mac_arm64_portable_}"
           done
           ls -l
       - name: Point NewLook-Beta tag at packaged commit
