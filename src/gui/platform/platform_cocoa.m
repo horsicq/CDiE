@@ -33,6 +33,15 @@ static NSColor *ns(PlColor c)
                                alpha:1.0];
 }
 
+static int pl_mods(NSEvent *e)
+{
+    NSEventModifierFlags f = [e modifierFlags];
+    int m = 0;
+    if (f & (NSEventModifierFlagCommand | NSEventModifierFlagControl)) m |= PL_MOD_CTRL;
+    if (f & NSEventModifierFlagShift) m |= PL_MOD_SHIFT;
+    return m;
+}
+
 @interface PlView : NSView {
 @public
     PlWidgetOps ops;
@@ -44,6 +53,7 @@ static NSColor *ns(PlColor c)
 @implementation PlView
 - (BOOL)isFlipped { return YES; }
 - (BOOL)acceptsFirstMouse:(NSEvent *)e { return YES; }
+- (BOOL)acceptsFirstResponder { return ops.key != NULL; }
 
 - (void)drawRect:(NSRect)dirty
 {
@@ -80,6 +90,12 @@ static NSColor *ns(PlColor c)
     if (ops.mouse_move) ops.mouse_move(user, (int)p.x, (int)p.y);
 }
 
+- (void)mouseDragged:(NSEvent *)e
+{
+    NSPoint p = [self convertPoint:[e locationInWindow] fromView:nil];
+    if (ops.mouse_move) ops.mouse_move(user, (int)p.x, (int)p.y);
+}
+
 - (void)mouseExited:(NSEvent *)e
 {
     if (ops.mouse_leave) ops.mouse_leave(user);
@@ -88,7 +104,63 @@ static NSColor *ns(PlColor c)
 - (void)mouseDown:(NSEvent *)e
 {
     NSPoint p = [self convertPoint:[e locationInWindow] fromView:nil];
+    if (ops.key) [[self window] makeFirstResponder:self];
     if (ops.mouse_down) ops.mouse_down(user, (int)p.x, (int)p.y);
+}
+
+- (void)scrollWheel:(NSEvent *)e
+{
+    NSPoint p = [self convertPoint:[e locationInWindow] fromView:nil];
+    CGFloat d = [e scrollingDeltaY];
+    int delta;
+    if (!ops.wheel) { [super scrollWheel:e]; return; }
+    delta = [e hasPreciseScrollingDeltas] ? (int)(d * 4.0) : (int)(d * 120.0);
+    if (delta == 0) return;
+    ops.wheel(user, (int)p.x, (int)p.y, delta, pl_mods(e));
+}
+
+- (void)keyDown:(NSEvent *)e
+{
+    int key = PL_KEY_NONE;
+    uint32_t ch = 0;
+    int mods = pl_mods(e);
+
+    if (!ops.key) { [super keyDown:e]; return; }
+
+    switch ([e keyCode]) {
+    case 51:  key = PL_KEY_BACK;  break;
+    case 117: key = PL_KEY_DEL;   break;
+    case 48:  key = PL_KEY_TAB;   break;
+    case 36:
+    case 76:  key = PL_KEY_ENTER; break;
+    case 53:  key = PL_KEY_ESC;   break;
+    case 123: key = PL_KEY_LEFT;  break;
+    case 124: key = PL_KEY_RIGHT; break;
+    case 126: key = PL_KEY_UP;    break;
+    case 125: key = PL_KEY_DOWN;  break;
+    case 115: key = PL_KEY_HOME;  break;
+    case 119: key = PL_KEY_END;   break;
+    case 116: key = PL_KEY_PGUP;  break;
+    case 121: key = PL_KEY_PGDN;  break;
+    case 99:  key = PL_KEY_F3;    break;
+    default:
+        {
+            NSString *s = (mods & PL_MOD_CTRL) ? [e charactersIgnoringModifiers] : [e characters];
+            if ([s length] > 0) {
+                unichar u = [s characterAtIndex:0];
+                if (u >= 0xD800 && u < 0xDC00 && [s length] > 1) {
+                    unichar lo = [s characterAtIndex:1];
+                    ch = 0x10000 + (((uint32_t)u - 0xD800) << 10) + ((uint32_t)lo - 0xDC00);
+                }
+                else ch = u;
+                if (ch >= 0x20 && ch != 0x7F && !(ch >= 0xF700 && ch <= 0xF8FF))
+                    key = PL_KEY_CHAR;
+            }
+        }
+        break;
+    }
+    if (key == PL_KEY_NONE) return;
+    ops.key(user, key, ch, mods);
 }
 
 - (void)dealloc
@@ -151,10 +223,25 @@ void pl_invalidate(PlWidget *w, const PlRect *r)
     else   [v setNeedsDisplay:YES];
 }
 
+
 PlFont *pl_font_create(int pt, int bold)
 {
     NSFont *f = bold ? [NSFont boldSystemFontOfSize:pt + 3]
                      : [NSFont systemFontOfSize:pt + 3];   /* points -> comparable px size */
+    return (PlFont *)CFBridgingRetain(f);
+}
+
+PlFont *pl_font_create_family(const char *family, int pt, int bold)
+{
+    NSFont *f;
+    if (!family || !family[0]) return NULL;
+    f = [NSFont fontWithName:[NSString stringWithUTF8String:family] size:pt + 3];
+    if (!f) {
+        f = [[NSFontManager sharedFontManager] fontWithFamily:[NSString stringWithUTF8String:family]
+                                                       traits:0 weight:5 size:pt + 3];
+    }
+    if (!f) return NULL;
+    if (bold) f = [[NSFontManager sharedFontManager] convertFont:f toHaveTrait:NSBoldFontMask];
     return (PlFont *)CFBridgingRetain(f);
 }
 
@@ -232,5 +319,149 @@ void pl_text(PlCanvas *c, PlFont *f, PlRect r, const char *s, PlColor col, int f
     sz = [str sizeWithAttributes:at];
     [str drawInRect:NSMakeRect(r.l, r.t + ((r.b - r.t) - sz.height) / 2.0, r.r - r.l, sz.height)
      withAttributes:at];
+}
+
+void pl_image(PlCanvas *c, int x, int y, int w, int h, int src_w, int src_h,
+              const unsigned char *rgba)
+{
+    CGContextRef ctx;
+    CGColorSpaceRef cs;
+    CGDataProviderRef dp;
+    CGImageRef img;
+    if (!rgba || src_w <= 0 || src_h <= 0 || w <= 0 || h <= 0) return;
+    ctx = [[NSGraphicsContext currentContext] CGContext];
+    if (!ctx) return;
+
+    cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    dp = CGDataProviderCreateWithData(NULL, rgba, (size_t)src_w * (size_t)src_h * 4, NULL);
+    img = CGImageCreate((size_t)src_w, (size_t)src_h, 8, 32, (size_t)src_w * 4, cs,
+                        kCGBitmapByteOrderDefault | kCGImageAlphaLast,
+                        dp, NULL, true, kCGRenderingIntentDefault);
+    if (img) {
+        CGContextSaveGState(ctx);
+        CGContextSetInterpolationQuality(ctx, kCGInterpolationHigh);
+        CGContextTranslateCTM(ctx, x, y + h);
+        CGContextScaleCTM(ctx, 1.0, -1.0);
+        CGContextDrawImage(ctx, CGRectMake(0, 0, w, h), img);
+        CGContextRestoreGState(ctx);
+        CGImageRelease(img);
+    }
+    CGDataProviderRelease(dp);
+    CGColorSpaceRelease(cs);
+}
+
+@interface PlFlipView : NSView
+@end
+@implementation PlFlipView
+- (BOOL)isFlipped { return YES; }
+@end
+
+@interface PlWin : NSObject <NSWindowDelegate> {
+@public
+    void (*on_size)(void *, int, int);
+    void (*on_close)(void *);
+    void *user;
+}
+@property(strong) NSWindow *window;
+@property(strong) PlFlipView *content;
+@end
+
+@implementation PlWin
+- (void)windowDidResize:(NSNotification *)n
+{
+    NSSize s = [self.content bounds].size;
+    if (on_size) on_size(user, (int)s.width, (int)s.height);
+}
+
+- (BOOL)windowShouldClose:(id)sender
+{
+    if (on_close) { on_close(user); return NO; }
+    return YES;
+}
+
+- (void)windowWillClose:(NSNotification *)n
+{
+    if ([NSApp modalWindow] == self.window) [NSApp stopModal];
+}
+@end
+
+PlWindow *pl_window_create(void *owner_native, const char *title, int w, int h, int min_w, int min_h,
+                           void (*on_size)(void *u, int w, int h),
+                           void (*on_close)(void *u), void *user)
+{
+    PlWin *pw = [[PlWin alloc] init];
+    NSWindow *win;
+    NSWindow *owner = nil;
+    id o = (__bridge id)owner_native;
+    NSUInteger style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
+                       NSWindowStyleMaskResizable;
+
+    if ([o isKindOfClass:[NSWindow class]]) owner = (NSWindow *)o;
+    else if ([o isKindOfClass:[NSView class]]) owner = [(NSView *)o window];
+
+    win = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, w, h)
+                                      styleMask:style
+                                        backing:NSBackingStoreBuffered
+                                          defer:NO];
+    [win setReleasedWhenClosed:NO];
+    [win setTitle:title ? [NSString stringWithUTF8String:title] : @""];
+    [win setAppearance:[NSAppearance appearanceNamed:NSAppearanceNameDarkAqua]];
+    if (min_w > 0 && min_h > 0) [win setContentMinSize:NSMakeSize(min_w, min_h)];
+
+    pw.content = [[PlFlipView alloc] initWithFrame:NSMakeRect(0, 0, w, h)];
+    [win setContentView:pw.content];
+    pw.window = win;
+    pw->on_size = on_size;
+    pw->on_close = on_close;
+    pw->user = user;
+    [win setDelegate:pw];
+
+    if (owner) {
+        NSRect of = [owner frame];
+        NSRect wf = [win frame];
+        [win setFrameOrigin:NSMakePoint(NSMidX(of) - wf.size.width / 2.0,
+                                        NSMidY(of) - wf.size.height / 2.0)];
+    }
+    else [win center];
+
+    return (PlWindow *)CFBridgingRetain(pw);
+}
+
+void *pl_window_client(PlWindow *win)
+{
+    PlWin *pw = (__bridge PlWin *)win;
+    return (__bridge void *)pw.content;
+}
+
+void pl_window_run_modal(PlWindow *win)
+{
+    PlWin *pw = (__bridge PlWin *)win;
+    [pw.window makeKeyAndOrderFront:nil];
+    if (pw->on_size) {
+        NSSize s = [pw.content bounds].size;
+        pw->on_size(pw->user, (int)s.width, (int)s.height);
+    }
+    [NSApp runModalForWindow:pw.window];
+    [pw.window orderOut:nil];
+}
+
+void pl_window_close(PlWindow *win)
+{
+    PlWin *pw = (__bridge PlWin *)win;
+    if ([NSApp modalWindow] == pw.window) [NSApp stopModal];
+    [pw.window orderOut:nil];
+}
+
+void pl_window_destroy(PlWindow *win)
+{
+    PlWin *pw;
+    if (!win) return;
+    pw = (__bridge PlWin *)win;
+    pw->on_size = NULL;
+    pw->on_close = NULL;
+    [pw.window setDelegate:nil];
+    [pw.window orderOut:nil];
+    [pw.window close];
+    CFBridgingRelease((CFTypeRef)win);
 }
 #endif /* __APPLE__ */

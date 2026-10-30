@@ -35,11 +35,12 @@
 #define TVM_SETLINECOLOR (TV_FIRST + 40)
 #endif
 #include <xxwidgets/xxwidgets.h>
-#include <xxwidgets/xxwidgets_scan_panel.h>
-#include <xxwidgets/xxwidgets_combobox.h>
 #include <xxwidgets/xxwidgets_font_options.h>
 #include <xxwidgets/xxwidgets_context_options.h>
 #include <limits.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "core/gui_backend.h"
@@ -57,17 +58,6 @@
 #include "core/tray.h"
 #include "core/dlwatch.h"
 
-
-#define IDC_EDIT_PATH      102
-#define IDC_COMBO_TYPE     104
-#define IDC_COMBO_FLAGS    105
-#define IDC_COMBO_DATABASES 106
-#define IDC_STATIC_MSEC    107
-#define IDC_BTN_SCAN       108
-#define IDC_SCANRESULTS    109
-#define IDC_BTN_REPORT     113
-#define IDC_STATUS         114
-
  /* Store / VSIX builds get updates from Microsoft */
 #ifdef CDIE_STORE_BUILD
 #define CDIE_SHOW_UPDATES 0
@@ -79,18 +69,15 @@
 
 enum gui_action {
 	ACTION_NONE, ACTION_SCAN, ACTION_BROWSE,
-	ACTION_OPTIONS, ACTION_ABOUT, ACTION_REPORT,
+	ACTION_OPTIONS, ACTION_ABOUT,
 	ACTION_DATABASE_PATHS,
 	ACTION_SIGNATURES, ACTION_STRINGS,
 	ACTION_MONITOR
 };
 
 static xxwidgets_app* g_app;
-static xxwidgets_widget* g_window, * g_path, * g_type;
-static xxwidgets_widget* g_flags, * g_databases, * g_msec, * g_scan, * g_results;
-static xxwidgets_widget* g_typeLabel, * g_flagLabel, * g_databaseLabel;
-static xxwidgets_widget* g_reportButton, * g_status;
-static xxwidgets_scan_panel* g_panel;
+static xxwidgets_widget* g_window;
+static char* g_scanPath;          /* file to scan */
 
 /* Custom dark-chrome child windows */
 static Sidebar* g_sidebar;
@@ -104,7 +91,6 @@ static HANDLE g_hexFile = INVALID_HANDLE_VALUE;
 
 static int  g_running, g_pending;
 static int  g_startMonitor;
-static char* g_typePath;
 static char* g_lastPath;
 static int  g_minWindowWidth = 900;
 static int  g_minWindowHeight = 540;
@@ -125,13 +111,6 @@ static void on_tray_exit(void* user)
 static HWND native(xxwidgets_widget* widget)
 {
 	return (HWND)xxwidgets_widget_native_handle(widget);
-}
-
-static void apply_flags_to_backend(void)
-{
-	gui_backend_set_flags(g_bFlagDeep, g_bFlagHeur, g_bFlagVerbose,
-		g_bFlagAggr, g_bFlagHideUnknown, g_bFlagFormat);
-	gui_backend_set_databases(g_bDbExtra, g_bDbCustom);
 }
 
 static WCHAR* utf8_to_wide(const char* text)
@@ -169,6 +148,35 @@ static char* copy_utf8(const char* text)
 	return copy;
 }
 
+static void set_status(const char* text)
+{
+	if (g_bottombar) bottombar_set_status(g_bottombar, text);
+}
+
+static void set_status_wide(const WCHAR* wide)
+{
+	char* text = wide_to_utf8(wide);
+	if (text) {
+		set_status(text);
+		HeapFree(GetProcessHeap(), 0, text);
+	}
+}
+
+static void set_scan_path(const char* path)
+{
+	char* copy = copy_utf8(path);
+	if (!copy) return;
+	if (g_scanPath) HeapFree(GetProcessHeap(), 0, g_scanPath);
+	g_scanPath = copy;
+}
+
+static void apply_flags_to_backend(void)
+{
+	gui_backend_set_flags(g_bFlagDeep, g_bFlagHeur, g_bFlagVerbose,
+		g_bFlagAggr, g_bFlagHideUnknown, g_bFlagFormat);
+	gui_backend_set_databases(g_bDbExtra, g_bDbCustom);
+}
+
 static int hex_read(void* u, uint64_t off, void* buf, size_t len)
 {
 	LARGE_INTEGER pos;
@@ -203,28 +211,6 @@ static void hex_open(const char* utf8_path)
 	if (g_hexFile == INVALID_HANDLE_VALUE) return;
 	if (!GetFileSizeEx(g_hexFile, &size)) { hex_close(); return; }
 	if (g_hex) hexview_set_source(g_hex, (uint64_t)size.QuadPart, hex_read, NULL, 0);
-}
-
-static void set_status_wide(const WCHAR* wide)
-{
-	char* text = wide_to_utf8(wide);
-	if (text) {
-		xxwidgets_widget_set_text(g_status, text);
-		HeapFree(GetProcessHeap(), 0, text);
-	}
-}
-
-static void report_ui_error(const char* operation, xxwidgets_status status)
-{
-	WCHAR text[256];
-	WCHAR* name = utf8_to_wide(operation);
-	WCHAR* detail = utf8_to_wide(xxwidgets_status_string(status));
-	wsprintfW(text, L"%s: %s",
-		name ? name : L"Interface error",
-		detail ? detail : L"unknown error");
-	set_status_wide(text);
-	if (name)   HeapFree(GetProcessHeap(), 0, name);
-	if (detail) HeapFree(GetProcessHeap(), 0, detail);
 }
 
 typedef struct {
@@ -403,315 +389,68 @@ static void update_chrome_after_scan(const char* utf8_path, const char* type_nam
 	}
 }
 
-static unsigned int flags_mask(void)
-{
-	return (g_bFlagDeep ? 1u : 0u) | (g_bFlagHeur ? 2u : 0u) |
-		(g_bFlagVerbose ? 4u : 0u) | (g_bFlagAggr ? 8u : 0u) |
-		(g_bFlagHideUnknown ? 16u : 0u) | (g_bFlagFormat ? 32u : 0u);
-}
-
-static unsigned int databases_mask(void)
-{
-	return (g_bDbExtra ? 1u : 0u) | (g_bDbCustom ? 2u : 0u);
-}
-
-static xxwidgets_status sync_panel_options(void)
-{
-	xxwidgets_status status = xxwidgets_scan_panel_set_flags(g_panel, flags_mask());
-	if (status == XXWIDGETS_OK)
-		status = xxwidgets_scan_panel_set_databases(g_panel, databases_mask());
-	return status;
-}
-
-static xxwidgets_status read_panel_options(void)
-{
-	unsigned int flags = 0, databases = 0;
-	xxwidgets_status status = xxwidgets_scan_panel_get_flags(g_panel, &flags);
-	if (status == XXWIDGETS_OK)
-		status = xxwidgets_scan_panel_get_databases(g_panel, &databases);
-	if (status != XXWIDGETS_OK) return status;
-	g_bFlagDeep = (flags & 1u) != 0;
-	g_bFlagHeur = (flags & 2u) != 0;
-	g_bFlagVerbose = (flags & 4u) != 0;
-	g_bFlagAggr = (flags & 8u) != 0;
-	g_bFlagHideUnknown = (flags & 16u) != 0;
-	g_bFlagFormat = (flags & 32u) != 0;
-	g_bDbExtra = (databases & 1u) != 0;
-	g_bDbCustom = (databases & 2u) != 0;
-	apply_flags_to_backend();
-	return XXWIDGETS_OK;
-}
-
 static void clear_scan(void)
 {
-	xxwidgets_scan_panel_clear(g_panel);
 	if (g_tree) resultstree_clear(g_tree);
-	xxwidgets_widget_set_text(g_msec, "");
 	if (g_infobar_wnd) infobar_clear(g_infobar_wnd);
 	if (g_header_wnd)  header_clear(g_header_wnd);
 }
 
-typedef struct file_type_buffer {
-	xx_meta_string* records;
-	SIZE_T count, capacity;
-	int failed;
-} file_type_buffer;
-
-static void free_file_types(file_type_buffer* buffer)
-{
-	SIZE_T i;
-	for (i = 0; i < buffer->count; ++i) {
-		HeapFree(GetProcessHeap(), 0, buffer->records[i].meta_string->data);
-		HeapFree(GetProcessHeap(), 0, buffer->records[i].meta_string);
-	}
-	if (buffer->records) HeapFree(GetProcessHeap(), 0, buffer->records);
-}
-
-static void collect_file_type(int type_id, const char* name, void* user_data)
-{
-	file_type_buffer* buffer = (file_type_buffer*)user_data;
-	xx_meta_string record = { 0 };
-	WCHAR* wide;
-	SIZE_T length = 0;
-	if (buffer->failed) return;
-	if (buffer->count == buffer->capacity) {
-		SIZE_T capacity = buffer->capacity ? buffer->capacity * 2 : 8;
-		xx_meta_string* records;
-		if (capacity < buffer->capacity ||
-			capacity >((SIZE_T)-1) / sizeof(*records)) {
-			buffer->failed = 1; return;
-		}
-		records = buffer->records
-			? (xx_meta_string*)HeapReAlloc(GetProcessHeap(), 0,
-				buffer->records, capacity * sizeof(*records))
-			: (xx_meta_string*)HeapAlloc(GetProcessHeap(), 0,
-				capacity * sizeof(*records));
-		if (!records) { buffer->failed = 1; return; }
-		buffer->records = records; buffer->capacity = capacity;
-	}
-	wide = utf8_to_wide(name);
-	record.meta_string = (xx_str_w_s*)HeapAlloc(GetProcessHeap(),
-		HEAP_ZERO_MEMORY, sizeof(*record.meta_string));
-	if (!wide || !record.meta_string) {
-		if (wide) HeapFree(GetProcessHeap(), 0, wide);
-		if (record.meta_string) HeapFree(GetProcessHeap(), 0, record.meta_string);
-		buffer->failed = 1; return;
-	}
-	while (wide[length]) ++length;
-	record.meta_string->data = wide;
-	record.meta_string->length = length;
-	record.meta_string->capacity = length + 1;
-	record.meta_string->is_view = true;
-	record.var.type = XX_VAR_TYPE_UINT64;
-	record.var.val.u64 = (uint64_t)type_id;
-	buffer->records[buffer->count++] = record;
-}
-
-static xxwidgets_status selected_file_type(int* type_id)
-{
-	xx_var value = { 0 };
-	xxwidgets_status status = xxwidgets_combobox_get_current(g_type, &value);
-	if (status != XXWIDGETS_OK) return status;
-	if (value.type != XX_VAR_TYPE_UINT64 || value.val.u64 > INT_MAX)
-		return XXWIDGETS_INVALID_ARGUMENT;
-	*type_id = (int)value.val.u64;
-	return XXWIDGETS_OK;
-}
-
-static xxwidgets_status refresh_file_types(const char* path)
-{
-	file_type_buffer buffer = { 0 };
-	xxwidgets_status status;
-	char* new_path;
-	int type_id = 0, selected = 0;
-	SIZE_T i;
-	if (g_typePath && !lstrcmpA(g_typePath, path)) {
-		status = selected_file_type(&type_id);
-		if (status != XXWIDGETS_OK) return status;
-	}
-	if (!gui_backend_file_types(path, collect_file_type, &buffer)) {
-		free_file_types(&buffer);
-		return XXWIDGETS_PLATFORM_ERROR;
-	}
-	if (buffer.failed) { free_file_types(&buffer); return XXWIDGETS_OUT_OF_MEMORY; }
-	new_path = copy_utf8(path);
-	if (!new_path) { free_file_types(&buffer); return XXWIDGETS_OUT_OF_MEMORY; }
-	for (i = 0; i < buffer.count; ++i)
-		if (buffer.records[i].var.val.u64 == (uint64_t)type_id) {
-			selected = (int)i; break;
-		}
-	status = xxwidgets_combobox_set_records(g_type, buffer.records, buffer.count);
-	if (status == XXWIDGETS_OK)
-		status = xxwidgets_widget_set_value(g_type, selected);
-	free_file_types(&buffer);
-	if (status != XXWIDGETS_OK) {
-		HeapFree(GetProcessHeap(), 0, new_path); return status;
-	}
-	if (g_typePath) HeapFree(GetProcessHeap(), 0, g_typePath);
-	g_typePath = new_path;
-	return XXWIDGETS_OK;
-}
-
-typedef struct result_buffer {
-	xxwidgets_scan_result* records;
-	SIZE_T count, capacity;
-	int failed;
-} result_buffer;
-
-static void free_result_record(xxwidgets_scan_result* record)
-{
-	if (record->type)    HeapFree(GetProcessHeap(), 0, (void*)record->type);
-	if (record->name)    HeapFree(GetProcessHeap(), 0, (void*)record->name);
-	if (record->version) HeapFree(GetProcessHeap(), 0, (void*)record->version);
-	if (record->info)    HeapFree(GetProcessHeap(), 0, (void*)record->info);
-}
-
-static void free_result_buffer(result_buffer* buffer)
-{
-	SIZE_T i;
-	for (i = 0; i < buffer->count; ++i)
-		free_result_record(&buffer->records[i]);
-	if (buffer->records) HeapFree(GetProcessHeap(), 0, buffer->records);
-}
-
 static void collect_result(const char* type, const char* name,
-	const char* version, const char* info,
-	void* user_data)
+	const char* version, const char* info, void* user_data)
 {
-	result_buffer* buffer = (result_buffer*)user_data;
-	xxwidgets_scan_result record;
-	if (buffer->failed) return;
-	if (buffer->count == buffer->capacity) {
-		SIZE_T capacity = buffer->capacity ? buffer->capacity * 2 : 16;
-		xxwidgets_scan_result* records;
-		if (capacity < buffer->capacity ||
-			capacity >((SIZE_T)-1) / sizeof(*records)) {
-			buffer->failed = 1; return;
-		}
-		records = buffer->records
-			? (xxwidgets_scan_result*)HeapReAlloc(GetProcessHeap(), 0,
-				buffer->records, capacity * sizeof(*records))
-			: (xxwidgets_scan_result*)HeapAlloc(GetProcessHeap(), 0,
-				capacity * sizeof(*records));
-		if (!records) { buffer->failed = 1; return; }
-		buffer->records = records;
-		buffer->capacity = capacity;
-	}
-	record.type = copy_utf8(type);
-	record.name = copy_utf8(name);
-	record.version = copy_utf8(version);
-	record.info = copy_utf8(info);
-	if (!record.type || !record.name || !record.version || !record.info) {
-		free_result_record(&record);
-		buffer->failed = 1;
-		return;
-	}
-	buffer->records[buffer->count++] = record;
+	++*(unsigned int*)user_data;
+	resultstree_add(g_tree, type, name, version, info);
 }
 
 static void do_scan(void)
 {
-	SIZE_T required = 0;
-	char* path, * report = NULL, * type = NULL;
-	result_buffer buffer = { 0 };
+	char* path, * type = NULL;
+	unsigned int count = 0, msec = 0;
 	LARGE_INTEGER frequency, started, ended;
-	xxwidgets_status status;
-	int ok, type_id = 0;
+	int ok;
 
 	if (config_db_required()) {
-		xxwidgets_widget_set_text(g_status, "Select the signature database folder first.");
+		set_status("Select the signature database folder first.");
 		g_pending = ACTION_DATABASE_PATHS;
 		return;
 	}
-	status = xxwidgets_widget_get_text(g_path, NULL, 0, &required);
-	if (status != XXWIDGETS_OK) {
-		report_ui_error("Read file name", status); return;
-	}
-	if (required <= 1) {
-		MessageBeep(MB_ICONASTERISK);
-		xxwidgets_widget_focus(g_path);
-		return;
-	}
-	path = (char*)HeapAlloc(GetProcessHeap(), 0, required);
-	if (!path) { report_ui_error("Read file name", XXWIDGETS_OUT_OF_MEMORY); return; }
-	status = xxwidgets_widget_get_text(g_path, path, required, NULL);
-	if (status != XXWIDGETS_OK) {
-		HeapFree(GetProcessHeap(), 0, path);
-		report_ui_error("Read file name", status); return;
-	}
+	if (!g_scanPath || !g_scanPath[0]) { g_pending = ACTION_BROWSE; return; }
+	path = copy_utf8(g_scanPath);
+	if (!path) { set_status("Out of memory."); return; }
+
 	apply_flags_to_backend();
-	status = refresh_file_types(path);
-	if (status == XXWIDGETS_OK) status = selected_file_type(&type_id);
-	if (status != XXWIDGETS_OK) {
-		clear_scan();
-		xxwidgets_widget_set_enabled(g_type, 0);
-		HeapFree(GetProcessHeap(), 0, path);
-		report_ui_error("Load file types", status); return;
-	}
 	clear_scan();
-	xxwidgets_widget_set_enabled(g_scan, 0);
-	xxwidgets_widget_set_enabled(g_type, 0);
-	xxwidgets_widget_set_text(g_msec, "Scanning...");
-	xxwidgets_widget_set_text(g_status, "Scanning the selected file...");
+	set_status("Scanning the selected file...");
 	UpdateWindow(native(g_window));
+
 	QueryPerformanceFrequency(&frequency);
 	QueryPerformanceCounter(&started);
-	ok = gui_backend_scan_results_type(path, type_id, collect_result,
-		&buffer, &report, &type);
+	ok = gui_backend_scan_results_type(path, 0, collect_result, &count, NULL, &type);
 	QueryPerformanceCounter(&ended);
+
 	if (ok) {
 		WCHAR text[512];
-		unsigned int msec = frequency.QuadPart > 0
-			? (unsigned int)(((ended.QuadPart - started.QuadPart) * 1000)
-				/ frequency.QuadPart) : 0;
-		status = buffer.failed ? XXWIDGETS_OUT_OF_MEMORY
-			: xxwidgets_scan_panel_set_results(g_panel, path,
-				buffer.records, buffer.count, report);
-		if (status != XXWIDGETS_OK)
-			report_ui_error("Display scan results", status);
-		else {
-			SIZE_T k;
-			for (k = 0; k < buffer.count; ++k)
-				resultstree_add(g_tree, buffer.records[k].type, buffer.records[k].name,
-					buffer.records[k].version, buffer.records[k].info);
-			{
-				WCHAR* type_name = utf8_to_wide(type && type[0] ? type : "Unknown type");
-				wsprintfW(text,
-					L"Scan complete (%s). %u result%s. Use Report for full engine output.",
-					type_name ? type_name : L"Unknown type",
-					(unsigned int)buffer.count,
-					buffer.count == 1 ? L"" : L"s");
-				set_status_wide(text);
-				if (type_name) HeapFree(GetProcessHeap(), 0, type_name);
+		WCHAR* type_name = utf8_to_wide(type && type[0] ? type : "Unknown type");
+		if (frequency.QuadPart > 0)
+			msec = (unsigned int)(((ended.QuadPart - started.QuadPart) * 1000)
+				/ frequency.QuadPart);
+		wsprintfW(text, L"Scan complete (%s). %u result%s in %u ms.",
+			type_name ? type_name : L"Unknown type",
+			count, count == 1 ? L"" : L"s", msec);
+		set_status_wide(text);
+		if (type_name) HeapFree(GetProcessHeap(), 0, type_name);
 
-				update_chrome_after_scan(path, type);
-				if (g_lastPath) HeapFree(GetProcessHeap(), 0, g_lastPath);
-				g_lastPath = copy_utf8(path);
-				hex_open(path);
-			}
-		}
-		wsprintfW(text, L"%u ms", msec);
-		{
-			char* u = wide_to_utf8(text);
-			if (u) {
-				xxwidgets_widget_set_text(g_msec, u);
-				HeapFree(GetProcessHeap(), 0, u);
-			}
-		}
+		update_chrome_after_scan(path, type);
+		if (g_lastPath) HeapFree(GetProcessHeap(), 0, g_lastPath);
+		g_lastPath = copy_utf8(path);
+		hex_open(path);
 	}
 	else {
-		status = xxwidgets_scan_panel_set_results(g_panel, path, NULL, 0, report);
-		xxwidgets_widget_set_text(g_status,
-			report && report[0] ? report : "Cannot open the file.");
-		xxwidgets_widget_set_text(g_msec, "");
-		if (status != XXWIDGETS_OK) report_ui_error("Display scan report", status);
+		set_status("Cannot open the file.");
 	}
 	HeapFree(GetProcessHeap(), 0, path);
-	if (report) gui_backend_free(report);
-	if (type)   gui_backend_free(type);
-	free_result_buffer(&buffer);
-	xxwidgets_widget_set_enabled(g_type, 1);
-	xxwidgets_widget_set_enabled(g_scan, 1);
+	if (type) gui_backend_free(type);
 }
 
 static void do_browse(void)
@@ -719,7 +458,13 @@ static void do_browse(void)
 	OPENFILENAMEW picker;
 	WCHAR file[32768];
 	file[0] = 0;
-	GetWindowTextW(native(g_path), file, (int)(sizeof(file) / sizeof(file[0])));
+	{
+		WCHAR* current = utf8_to_wide(g_scanPath);
+		if (current) {
+			lstrcpynW(file, current, (int)(sizeof(file) / sizeof(file[0])));
+			HeapFree(GetProcessHeap(), 0, current);
+		}
+	}
 	ZeroMemory(&picker, sizeof(picker));
 	picker.lStructSize = sizeof(picker);
 	picker.hwndOwner = native(g_window);
@@ -731,7 +476,7 @@ static void do_browse(void)
 	if (GetOpenFileNameW(&picker)) {
 		char* path = wide_to_utf8(file);
 		if (path) {
-			xxwidgets_widget_set_text(g_path, path);
+			set_scan_path(path);
 			HeapFree(GetProcessHeap(), 0, path);
 			do_scan();
 		}
@@ -758,7 +503,7 @@ static int opt_set_scan(void* u, const OptionsScan* o)
 	if ((o->monitor_downloads != 0) != (dlwatch_enabled() != 0))
 		dlwatch_set_enabled(o->monitor_downloads ? 1 : 0);
 	apply_flags_to_backend();
-	return sync_panel_options() == XXWIDGETS_OK;
+	return 1;
 }
 
 static int opt_get_opt(void* u, OptionsOptimization* o)
@@ -920,8 +665,7 @@ static int opt_set_fonts(void* u, const OptionsFont in[OPTIONS_FONT_ROLES])
 	}
 	if (xxwidgets_app_set_font_options(g_app, &fo) != XXWIDGETS_OK) return 0;
 	layout();
-	xxwidgets_widget_set_text(g_status,
-		"Fonts applied to the interface, results and dialogs.");
+	set_status("Fonts applied to the interface, results and dialogs.");
 	return 1;
 }
 
@@ -963,8 +707,7 @@ static int opt_context_set(void* u, int enabled)
 	(void)u;
 	ok = context_access(0, &enabled);
 	if (ok)
-		xxwidgets_widget_set_text(g_status,
-			"Explorer context menu updated for the current user.");
+		set_status("Explorer context menu updated for the current user.");
 	return ok;
 }
 
@@ -1063,7 +806,7 @@ static void layout(void)
 {
 	RECT bounds, window_bounds;
 	int W, H, cx, cy, cw;
-	if (!g_results) return;
+	if (!g_window) return;
 
 	GetClientRect(native(g_window), &bounds);
 	W = bounds.right; H = bounds.bottom;
@@ -1100,13 +843,6 @@ static void layout(void)
 				g_page == NAV_HEX ? tw : 0, g_page == NAV_HEX ? th : 0);
 	}
 
-#define HIDE(w) if (w) MoveWindow(native(w), -9999, 0, 100, 26, FALSE)
-	HIDE(g_path);  HIDE(g_msec);  HIDE(g_status);  HIDE(g_reportButton);
-	HIDE(g_scan);  HIDE(g_type);  HIDE(g_flags);   HIDE(g_databases);
-	HIDE(g_typeLabel); HIDE(g_flagLabel); HIDE(g_databaseLabel);
-	HIDE(g_results);
-#undef HIDE
-
 	GetWindowRect(native(g_window), &window_bounds);
 	g_minWindowWidth = SIDEBAR_W + 520 +
 		(window_bounds.right - window_bounds.left - W);
@@ -1114,23 +850,6 @@ static void layout(void)
 	g_minWindowHeight = HEADER_H + INFOBAR_H + TABBAR_H + BOTTOMBAR_H + 200 +
 		(window_bounds.bottom - window_bounds.top - H);
 	if (g_minWindowHeight < 540) g_minWindowHeight = 540;
-}
-
-static LRESULT CALLBACK path_subclass(HWND handle, UINT message,
-	WPARAM wp, LPARAM lp,
-	UINT_PTR subclass_id, DWORD_PTR reference)
-{
-	(void)subclass_id; (void)reference;
-	if (message == WM_GETDLGCODE) {
-		MSG* key = (MSG*)lp;
-		LRESULT code = DefSubclassProc(handle, message, wp, lp);
-		if (key && key->wParam == VK_RETURN) code |= DLGC_WANTMESSAGE;
-		return code;
-	}
-	if (message == WM_KEYDOWN && wp == VK_RETURN) { g_pending = ACTION_SCAN; return 0; }
-	if (message == WM_CHAR && wp == VK_RETURN) return 0;
-	if (message == WM_NCDESTROY) RemoveWindowSubclass(handle, path_subclass, 1);
-	return DefSubclassProc(handle, message, wp, lp);
 }
 
 static void on_browse(void* user)
@@ -1169,14 +888,14 @@ static void on_nav(void* user, int nav_id)
 static void mon_request_scan(const char* path, void* u)
 {
 	(void)u;
-	xxwidgets_widget_set_text(g_path, path);
+	set_scan_path(path);
 	g_pending = ACTION_SCAN;
 }
 
 static void mon_set_status(const char* text, void* u)
 {
 	(void)u;
-	xxwidgets_widget_set_text(g_status, text);
+	set_status(text);
 }
 
 static void mon_restore_flags(void* u)
@@ -1218,7 +937,7 @@ static LRESULT CALLBACK window_subclass(HWND handle, UINT message,
 		if (wide && DragQueryFileW(drop, 0, wide, length + 1)) {
 			char* path = wide_to_utf8(wide);
 			if (path) {
-				xxwidgets_widget_set_text(g_path, path);
+				set_scan_path(path);
 				HeapFree(GetProcessHeap(), 0, path);
 				g_pending = ACTION_SCAN;
 			}
@@ -1248,101 +967,23 @@ static void on_event(xxwidgets_app* app, const xxwidgets_event* event,
 	else if (event->type == XXWIDGETS_EVENT_RESIZE && event->widget == g_window) {
 		layout();
 	}
-	else if (event->type == XXWIDGETS_EVENT_CLICK) {
-		if (event->widget == g_scan)              g_pending = ACTION_SCAN;
-		else if (event->widget == g_reportButton) g_pending = ACTION_REPORT;
-	}
-	else if (event->type == XXWIDGETS_EVENT_CHANGE &&
-		event->widget == g_path && g_type) {
-		xxwidgets_widget_set_enabled(g_type, 0);
-	}
-	else if (event->type == XXWIDGETS_EVENT_SELECT && event->widget == g_type) {
-		SIZE_T required = 0;
-		if (xxwidgets_widget_get_text(g_path, NULL, 0, &required) == XXWIDGETS_OK
-			&& required > 1)
-			g_pending = ACTION_SCAN;
-	}
 	else if (event->type == XXWIDGETS_EVENT_SHORTCUT) {
 		g_pending = event->value;
 	}
 }
 
-static int create_control(xxwidgets_widget** control, xxwidgets_kind kind,
-	const char* text, int id)
-{
-	xxwidgets_rect bounds = { 1, 1, 12, 1 };
-	xxwidgets_status status =
-		xxwidgets_widget_create(g_app, g_window, kind, text, bounds, control);
-	if (status != XXWIDGETS_OK) return 0;
-	if (id) SetWindowLongPtrW(native(*control), GWLP_ID, id);
-	return 1;
-}
-
-static LRESULT CALLBACK status_subclass(HWND handle, UINT message, WPARAM wp, LPARAM lp,
-	UINT_PTR subclass_id, DWORD_PTR reference)
-{
-	(void)subclass_id; (void)reference;
-	if (message == WM_SETTEXT && g_bottombar) {
-		char* utf8 = wide_to_utf8((const WCHAR*)lp);
-		if (utf8) {
-			bottombar_set_status(g_bottombar, utf8);
-			HeapFree(GetProcessHeap(), 0, utf8);
-		}
-	}
-	if (message == WM_NCDESTROY) RemoveWindowSubclass(handle, status_subclass, 3);
-	return DefSubclassProc(handle, message, wp, lp);
-}
-
 static int create_controls(void)
 {
-	xxwidgets_rect panel_bounds = { 1, 4, 96, 18 };
 	xxwidgets_shortcut shortcuts[] = {
-			{ "F5",          ACTION_SCAN },
-			{ "Ctrl+O",      ACTION_BROWSE },
-			{ "F1",          ACTION_ABOUT },
-			{ "Ctrl+Shift+D",ACTION_DATABASE_PATHS },
-			{ "Ctrl+M",      ACTION_MONITOR }
+		{ "F5",           ACTION_SCAN },
+		{ "Ctrl+O",       ACTION_BROWSE },
+		{ "F1",           ACTION_ABOUT },
+		{ "Ctrl+Shift+D", ACTION_DATABASE_PATHS },
+		{ "Ctrl+M",       ACTION_MONITOR }
 	};
 
-	if (!create_control(&g_path, XXWIDGETS_EDIT, "", IDC_EDIT_PATH) ||
-		!create_control(&g_msec, XXWIDGETS_LABEL, "", IDC_STATIC_MSEC) ||
-		!create_control(&g_status, XXWIDGETS_LABEL, "", IDC_STATUS))
+	if (!SetWindowSubclass(native(g_window), window_subclass, 1, 0))
 		return 0;
-
-	if (xxwidgets_scan_panel_create(g_window, panel_bounds, &g_panel) != XXWIDGETS_OK)
-		return 0;
-
-	g_type = xxwidgets_scan_panel_control(g_panel, XXWIDGETS_SCAN_PANEL_FILE_TYPE);
-	g_typeLabel = xxwidgets_scan_panel_control(g_panel, XXWIDGETS_SCAN_PANEL_FILE_TYPE_LABEL);
-	g_flags = xxwidgets_scan_panel_control(g_panel, XXWIDGETS_SCAN_PANEL_FLAGS);
-	g_databases = xxwidgets_scan_panel_control(g_panel, XXWIDGETS_SCAN_PANEL_DATABASES);
-	g_scan = xxwidgets_scan_panel_control(g_panel, XXWIDGETS_SCAN_PANEL_SCAN);
-	g_reportButton = xxwidgets_scan_panel_control(g_panel, XXWIDGETS_SCAN_PANEL_REPORT);
-	g_results = xxwidgets_scan_panel_control(g_panel, XXWIDGETS_SCAN_PANEL_RESULTS);
-	g_flagLabel = xxwidgets_scan_panel_control(g_panel, XXWIDGETS_SCAN_PANEL_FLAGS_LABEL);
-	g_databaseLabel = xxwidgets_scan_panel_control(g_panel, XXWIDGETS_SCAN_PANEL_DATABASES_LABEL);
-
-	if (!g_type || !g_typeLabel || !g_flags || !g_databases || !g_scan ||
-		!g_reportButton || !g_results || !g_flagLabel || !g_databaseLabel ||
-		sync_panel_options() != XXWIDGETS_OK)
-		return 0;
-
-	SetWindowLongPtrW(native(g_type), GWLP_ID, IDC_COMBO_TYPE);
-	SetWindowLongPtrW(native(g_flags), GWLP_ID, IDC_COMBO_FLAGS);
-	SetWindowLongPtrW(native(g_databases), GWLP_ID, IDC_COMBO_DATABASES);
-	SetWindowLongPtrW(native(g_scan), GWLP_ID, IDC_BTN_SCAN);
-	SetWindowLongPtrW(native(g_reportButton), GWLP_ID, IDC_BTN_REPORT);
-	SetWindowLongPtrW(native(g_results), GWLP_ID, IDC_SCANRESULTS);
-
-	xxwidgets_widget_set_text(g_databaseLabel, "Databases (Main always)");
-
-	if (!SetWindowSubclass(native(g_path), path_subclass, 1, 0) ||
-		!SetWindowSubclass(native(g_window), window_subclass, 1, 0))
-		return 0;
-
-	SetWindowLongPtrW(native(g_msec), GWL_STYLE,
-		(GetWindowLongPtrW(native(g_msec), GWL_STYLE)
-			& ~(LONG_PTR)SS_TYPEMASK) | SS_RIGHT);
 
 	DragAcceptFiles(native(g_window), TRUE);
 
@@ -1358,7 +999,6 @@ static int create_controls(void)
 	g_tree = resultstree_create(native(g_window), SIDEBAR_W, 0, 100, 100);
 	g_hex = hexview_create(native(g_window), NULL, SIDEBAR_W, 0, 0, 0);
 	if (g_hex) hexview_set_callbacks(g_hex, NULL, opt_copy_text, NULL);
-	SetWindowSubclass(native(g_status), status_subclass, 3, 0);
 
 	if (!g_sidebar || !g_header_wnd || !g_infobar_wnd || !g_bottombar || !g_tree || !g_hex) {
 		WCHAR msg[200];
@@ -1380,7 +1020,8 @@ static int set_startup_file(void)
 	if (arguments && argc > 1) {
 		char* path = wide_to_utf8(arguments[1]);
 		if (path) {
-			has_file = xxwidgets_widget_set_text(g_path, path) == XXWIDGETS_OK;
+			set_scan_path(path);
+			has_file = g_scanPath != NULL;
 			HeapFree(GetProcessHeap(), 0, path);
 		}
 	}
@@ -1481,7 +1122,6 @@ static void apply_saved_prefs(void)
 	g_bDbExtra = cfg.db_extra;        g_bDbCustom = cfg.db_custom;
 	g_startMonitor = cfg.monitor_downloads;
 	apply_flags_to_backend();
-	sync_panel_options();
 
 	if (opt_get_opt(NULL, &opt)) {     /* fills has_sse2 / has_avx2 */
 		opt.buffer_size = (size_t)cfg.buffer_size;
@@ -1572,15 +1212,13 @@ int gui_run(void)
 		set_status_wide(ready);
 	}
 	else {
-		xxwidgets_widget_set_text(g_status,
-			"Main signature database not found. "
+		set_status("Main signature database not found. "
 			"Select the database folder in the window that opens.");
 	}
 	apply_flags_to_backend();
 	layout();
 
 	xxwidgets_widget_set_visible(g_window, 1);
-	xxwidgets_widget_focus(g_path);
 	if (set_startup_file()) do_scan();
 	if (g_startMonitor) dlwatch_set_enabled(1);
 	if (!db_ok) g_pending = ACTION_DATABASE_PATHS;
@@ -1602,12 +1240,7 @@ int gui_run(void)
 		case ACTION_SIGNATURES:     signatures_show(g_app, g_window); break;
 		case ACTION_STRINGS:
 			if (g_lastPath) strings_show(g_app, g_window, g_lastPath);
-			else xxwidgets_widget_set_text(g_status, "Scan a file first to view its strings.");
-			break;
-		case ACTION_REPORT:
-			status = xxwidgets_scan_panel_show_report(g_panel);
-			if (status != XXWIDGETS_OK)
-				report_ui_error("Open scan report", status);
+			else set_status("Scan a file first to view its strings.");
 			break;
 		default: break;
 		}
@@ -1621,13 +1254,11 @@ finish:
 	tray_remove();
 	save_config_on_exit();
 	gui_backend_shutdown();
-	if (g_panel && xxwidgets_scan_panel_destroy(g_panel) != XXWIDGETS_OK) result = 1;
-	g_panel = NULL;
-	if (g_typePath) HeapFree(GetProcessHeap(), 0, g_typePath);
-	g_typePath = NULL;
 	if (xxwidgets_app_destroy(g_app) != XXWIDGETS_OK) result = 1;
 	g_app = NULL;
 	if (g_lastPath) HeapFree(GetProcessHeap(), 0, g_lastPath);
 	g_lastPath = NULL;
+	if (g_scanPath) HeapFree(GetProcessHeap(), 0, g_scanPath);
+	g_scanPath = NULL;
 	return result;
 }
