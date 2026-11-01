@@ -12,6 +12,24 @@ if(POLICY CMP0184)
 endif()
 file(STRINGS ${CMAKE_CURRENT_LIST_DIR}/release_version.txt CDIE_VERSION)
 
+# macOS: the binaries and Info.plist's LSMinimumSystemVersion (src/gui) must
+# name the same macOS. Without a deployment target the compiler targets the
+# SDK's macOS, newer than the plist claims, and an older macOS fails to load
+# the app instead of naming the version it needs. It must be set before
+# project(); the defaults are build_macos.sh's (11.0 for arm64 alone, 10.14
+# otherwise), and MACOSX_DEPLOYMENT_TARGET or -DCMAKE_OSX_DEPLOYMENT_TARGET win.
+if(CMAKE_HOST_APPLE AND NOT CMAKE_OSX_DEPLOYMENT_TARGET AND NOT DEFINED ENV{MACOSX_DEPLOYMENT_TARGET})
+    set(_cdie_macos_archs "${CMAKE_OSX_ARCHITECTURES}")
+    if(NOT _cdie_macos_archs)
+        execute_process(COMMAND uname -m OUTPUT_VARIABLE _cdie_macos_archs OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    endif()
+    if(_cdie_macos_archs MATCHES "^(arm64|aarch64)$")
+        set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
+    else()
+        set(CMAKE_OSX_DEPLOYMENT_TARGET "10.14" CACHE STRING "Minimum macOS version")
+    endif()
+endif()
+
 project(cdie VERSION ${CDIE_VERSION} LANGUAGES C)
 
 set(X_COMPANYNAME "NTInfo")
@@ -31,6 +49,11 @@ set(X_MAINTAINER  "horsicq@gmail.com")
 
 # Database creation needs plain TAR writing; other archive formats are read-only.
 set(XXFC_DIE_ENGINE_TAR_ONLY_WRITING ON)
+
+# Omit large East Asian double-byte codepage tables (~490 KiB) not needed by cdie.
+set(XXFC_CODEPAGE_JAPANESE OFF CACHE BOOL "Include Japanese CP932" FORCE)
+set(XXFC_CODEPAGE_CHINESE OFF CACHE BOOL "Include Chinese CP936 and CP950" FORCE)
+set(XXFC_CODEPAGE_KOREAN OFF CACHE BOOL "Include Korean CP949" FORCE)
 
 # Compile only the optional format streams used by this application.
 if(NOT TARGET xxfclib::xxfclib)
@@ -241,6 +264,68 @@ if(COMMAND xxfclib_require_streams AND TARGET xxfclib::die_engine)
     xxfclib_require_streams(xxfclib::die_engine DATASTRUCTS)
 endif()
 
+# ------------------------------------------------------ xxnetlib + xxgithub --
+#
+# die-update (src/updater) and the GUIs' database update download through
+# xxgithub over xxnetlib. Like xxfclib, both are added above cdie's warning
+# policy and EXCLUDE_FROM_ALL, so neither inherits cdie's flags nor adds its
+# install rules to the package. xxnetlib is pointed at the die_engine archive
+# cdie already builds instead of the full ~3400-object xxfclib, so no program
+# links two archives compiled from the same sources. Without their sources
+# (dep/ first, then ../_mylibs) the updater is left out with a warning.
+option(CDIE_BUILD_UPDATER "Build die-update and the GUI database update" ON)
+if(CDIE_BUILD_UPDATER AND NOT TARGET xxgithub::xxgithub)
+    set(_cdie_updater_missing "")
+    if(CMAKE_VERSION VERSION_LESS 3.20)
+        list(APPEND _cdie_updater_missing "CMake 3.20 or newer")
+    endif()
+    if(NOT TARGET xxfclib::die_engine)
+        list(APPEND _cdie_updater_missing "xxfclib's die_engine target")
+    endif()
+    foreach(_cdie_net_lib xxnetlib xxgithub)
+        string(TOUPPER "${_cdie_net_lib}" _cdie_net_upper)
+        set(_cdie_net_default "${CMAKE_CURRENT_LIST_DIR}/dep/${_cdie_net_lib}")
+        if(NOT EXISTS "${_cdie_net_default}/CMakeLists.txt")
+            set(_cdie_net_default "${CMAKE_CURRENT_LIST_DIR}/../_mylibs/${_cdie_net_lib}")
+        endif()
+        set(CDIE_${_cdie_net_upper}_DIR "${_cdie_net_default}" CACHE PATH "Location of the ${_cdie_net_lib} source tree")
+        if(NOT EXISTS "${CDIE_${_cdie_net_upper}_DIR}/CMakeLists.txt")
+            list(APPEND _cdie_updater_missing "${_cdie_net_lib} (set CDIE_${_cdie_net_upper}_DIR)")
+        endif()
+    endforeach()
+
+    if(_cdie_updater_missing)
+        string(REPLACE ";" ", " _cdie_updater_missing "${_cdie_updater_missing}")
+        message(WARNING "cdie: die-update and the GUI database update are not built; missing: ${_cdie_updater_missing}")
+        set(CDIE_BUILD_UPDATER OFF)
+    else()
+        set(XXNETLIB_XXFCLIB_TARGET xxfclib::die_engine CACHE STRING "xxfclib target that xxnetlib links" FORCE)
+        set(XXNETLIB_BUILD_TESTS OFF)
+        set(XXNETLIB_BUILD_CLI OFF)
+        set(XXNETLIB_INSTALL OFF)
+        set(XXNETLIB_ONLINE_TESTS OFF)
+        # The local HTTP server the update tests run against.
+        set(XXNETLIB_BUILD_TESTKIT ${CDIE_BUILD_TESTS})
+        add_subdirectory("${CDIE_XXNETLIB_DIR}" "${CMAKE_BINARY_DIR}/xxnetlib" EXCLUDE_FROM_ALL)
+        set(XXGITHUB_BUILD_TESTS OFF)
+        set(XXGITHUB_BUILD_CLI OFF)
+        set(XXGITHUB_INSTALL OFF)
+        set(XXGITHUB_ONLINE_TESTS OFF)
+        add_subdirectory("${CDIE_XXGITHUB_DIR}" "${CMAKE_BINARY_DIR}/xxgithub" EXCLUDE_FROM_ALL)
+
+        # die_engine uses the static runtime when the console is CRT-free;
+        # every hosted library linked beside it must match.
+        if(MSVC AND CDIE_NO_CRT AND NOT BUILD_SHARED_LIBS)
+            foreach(_cdie_net_target xxnetlib xxgithub xxnetlib_testkit)
+                if(TARGET ${_cdie_net_target})
+                    set_property(TARGET ${_cdie_net_target} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded")
+                endif()
+            endforeach()
+        endif()
+        message(STATUS "cdie: die-update with xxnetlib ${CDIE_XXNETLIB_DIR} and xxgithub ${CDIE_XXGITHUB_DIR}")
+    endif()
+endif()
+
 # ------------------------------------------------------- language + warnings
 #
 # cdie's own targets only. See the xxfclib note above for why this block has to
@@ -262,7 +347,7 @@ else()
 endif()
 
 # Resolve the database before the GUI so the macOS bundle can carry it.
-set(CDIE_DATABASE_DIR "" CACHE PATH "Directory holding db, db_extra and db_custom")
+set(CDIE_DATABASE_DIR "" CACHE PATH "Directory holding db and db_custom")
 
 set(CDIE_DATABASE_IMPLICIT OFF)
 
@@ -284,6 +369,43 @@ if(NOT CDIE_INFO_DIR)
             break()
         endif()
     endforeach()
+endif()
+
+# Where the executables are installed. The frontends find their databases
+# beside themselves, so CDIE_DATABASE_DESTINATION below follows this.
+#
+# CDIE_INSTALL_LAYOUT picks the Linux install tree. PORTABLE (the default) is
+# the self-contained tree the portable packages have always had: programs and
+# databases together in <prefix>/bin. FHS is for system packages (.deb,
+# AppImage): die, diec, die-update and their databases share the private
+# directory CDIE_INSTALL_PKGLIBDIR, and bin/ holds relative symlinks to them.
+# cdie_app_dir() resolves /proc/self/exe, so the programs still find the
+# databases beside their real path. Windows and macOS have only PORTABLE.
+set(CDIE_INSTALL_LAYOUT "PORTABLE" CACHE STRING "Install layout: PORTABLE (self-contained tree) or FHS (Linux system packages)")
+set_property(CACHE CDIE_INSTALL_LAYOUT PROPERTY STRINGS PORTABLE FHS)
+if(NOT CDIE_INSTALL_LAYOUT MATCHES "^(PORTABLE|FHS)$")
+    message(FATAL_ERROR "CDIE_INSTALL_LAYOUT must be PORTABLE or FHS, not '${CDIE_INSTALL_LAYOUT}'")
+endif()
+if(CDIE_INSTALL_LAYOUT STREQUAL "FHS" AND NOT (UNIX AND NOT APPLE))
+    message(FATAL_ERROR "CDIE_INSTALL_LAYOUT=FHS is for Linux; Windows and macOS packages use PORTABLE")
+endif()
+
+if(UNIX AND NOT APPLE)
+    include(GNUInstallDirs)
+    if(CDIE_INSTALL_LAYOUT STREQUAL "FHS")
+        # Not CMAKE_INSTALL_LIBDIR: for the /usr prefix on Debian that is the
+        # multiarch library directory, and this one holds programs and data.
+        set(CDIE_INSTALL_PKGLIBDIR "lib/cdie" CACHE STRING
+            "FHS layout: directory for the programs and their databases, relative to the prefix")
+        if(IS_ABSOLUTE "${CDIE_INSTALL_PKGLIBDIR}" OR IS_ABSOLUTE "${CMAKE_INSTALL_BINDIR}")
+            message(FATAL_ERROR "CDIE_INSTALL_LAYOUT=FHS needs CDIE_INSTALL_PKGLIBDIR and CMAKE_INSTALL_BINDIR relative to the prefix")
+        endif()
+        set(CDIE_BINARY_DESTINATION "${CDIE_INSTALL_PKGLIBDIR}")
+    else()
+        set(CDIE_BINARY_DESTINATION "${CMAKE_INSTALL_BINDIR}")
+    endif()
+else()
+    set(CDIE_BINARY_DESTINATION ".")
 endif()
 
 file(GLOB CDIE_TRANSLATION_CATALOGS CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/translations/*.po")
@@ -316,13 +438,23 @@ endif()
 
 # ---------------------------------------------------------------- documents
 
+# A portable tree keeps its documents at the root; the FHS layout uses the
+# system documentation directory (share/doc/cdie).
+if(CDIE_INSTALL_LAYOUT STREQUAL "FHS")
+    set(CDIE_DOC_DESTINATION "${CMAKE_INSTALL_DOCDIR}")
+    set(CDIE_LICENSES_DESTINATION "${CMAKE_INSTALL_DOCDIR}/licenses")
+else()
+    set(CDIE_DOC_DESTINATION ".")
+    set(CDIE_LICENSES_DESTINATION "licenses")
+endif()
+
 install(FILES
     "${CMAKE_CURRENT_LIST_DIR}/README.md"
     "${CMAKE_CURRENT_LIST_DIR}/LICENSE"
     "${CMAKE_CURRENT_LIST_DIR}/changelog.txt"
-    DESTINATION . OPTIONAL)
+    DESTINATION "${CDIE_DOC_DESTINATION}" OPTIONAL)
 
-install(DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/docs" DESTINATION . OPTIONAL)
+install(DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/docs" DESTINATION "${CDIE_DOC_DESTINATION}" OPTIONAL)
 
 # xxfclib is excluded from the install tree, so carry the notices for its
 # statically linked decoder in the CDiE package itself.
@@ -330,29 +462,25 @@ if(XXFC_CDISASM_DIR AND EXISTS "${XXFC_CDISASM_DIR}/LICENSE")
     install(FILES
         "${XXFC_CDISASM_DIR}/LICENSE"
         "${XXFC_CDISASM_DIR}/THIRD_PARTY_NOTICES.md"
-        DESTINATION "licenses/cdisasm" OPTIONAL)
+        DESTINATION "${CDIE_LICENSES_DESTINATION}/cdisasm" OPTIONAL)
     install(DIRECTORY "${XXFC_CDISASM_DIR}/LICENSES/"
-        DESTINATION "licenses/cdisasm/LICENSES" OPTIONAL)
+        DESTINATION "${CDIE_LICENSES_DESTINATION}/cdisasm/LICENSES" OPTIONAL)
 endif()
 
 # ------------------------------------------------- signature database (opt)
 #
 # cdie is useless without a signature database, so a portable package bundles
 # one when it can find it. Point CDIE_DATABASE_DIR at the directory holding
-# db/, db_extra/ and db_custom/, or set it to NONE to package the binary
-# alone.
+# db/ and db_custom/, or set it to NONE to package the binary alone. cdie has
+# no extra database: a db_extra/ folder there is never installed (its rules
+# are part of db/, tagged extra).
 
 # main_console.c resolve_database_path() looks for db/ next to the executable
 # and nowhere else, so the database has to land in the same directory the
-# console binary does. On Linux that is <prefix>/bin (src/console installs
-# there); everywhere else both are flat at the prefix root.
+# console binary does: CDIE_BINARY_DESTINATION, which is <prefix>/bin on Linux
+# (<prefix>/lib/cdie in the FHS layout) and the prefix root everywhere else.
 
-if(UNIX AND NOT APPLE)
-    include(GNUInstallDirs)
-    set(CDIE_DATABASE_DESTINATION "${CMAKE_INSTALL_BINDIR}")
-else()
-    set(CDIE_DATABASE_DESTINATION ".")
-endif()
+set(CDIE_DATABASE_DESTINATION "${CDIE_BINARY_DESTINATION}")
 
 if(CDIE_DATABASE_DIR AND (NOT CDIE_DATABASE_DIR STREQUAL "NONE") AND EXISTS "${CDIE_DATABASE_DIR}/db")
     message(STATUS "cdie: packaging the signature database from ${CDIE_DATABASE_DIR}")
@@ -374,7 +502,7 @@ if(CDIE_DATABASE_DIR AND (NOT CDIE_DATABASE_DIR STREQUAL "NONE") AND EXISTS "${C
         PATTERN "_ai_provenance" EXCLUDE
         PATTERN ".git*" EXCLUDE)
 
-    foreach(_extra db_extra db_custom)
+    foreach(_extra db_custom)
         if(EXISTS "${CDIE_DATABASE_DIR}/${_extra}")
             install(DIRECTORY "${CDIE_DATABASE_DIR}/${_extra}/" DESTINATION "${CDIE_DATABASE_DESTINATION}/${_extra}"
                 PATTERN ".vscode" EXCLUDE
@@ -382,6 +510,10 @@ if(CDIE_DATABASE_DIR AND (NOT CDIE_DATABASE_DIR STREQUAL "NONE") AND EXISTS "${C
                 PATTERN ".git*" EXCLUDE)
         endif()
     endforeach()
+
+    if(EXISTS "${CDIE_DATABASE_DIR}/db_extra")
+        message(STATUS "cdie: ignoring ${CDIE_DATABASE_DIR}/db_extra (cdie uses only db and db_custom)")
+    endif()
 else()
     message(STATUS "cdie: no signature database packaged (set CDIE_DATABASE_DIR to bundle one)")
 endif()
@@ -390,6 +522,49 @@ endif()
 if(CDIE_INFO_DIR AND (NOT CDIE_INFO_DIR STREQUAL "NONE") AND EXISTS "${CDIE_INFO_DIR}/html")
     install(DIRECTORY "${CDIE_INFO_DIR}/html/" DESTINATION "${CDIE_DATABASE_DESTINATION}/info/html"
         FILES_MATCHING PATTERN "*.html")
+endif()
+
+# ------------------------------------------------ FHS desktop integration --
+#
+# bin/ gets relative symlinks to the programs in CDIE_INSTALL_PKGLIBDIR. They
+# are made here in the build tree and installed as symlinks, so DESTDIR,
+# CPack and an AppDir all receive ../lib/cdie/<name> and the links resolve
+# inside whatever tree the install lands in. The desktop entry, icons and
+# AppStream data come from packaging/linux/ (the PNGs are generated from
+# src/gui/images/main.ico by packaging/linux/extract_icons.py).
+
+if(CDIE_INSTALL_LAYOUT STREQUAL "FHS")
+    set(_cdie_link_dir "${CMAKE_BINARY_DIR}/cdie_fhs_bin")
+    file(REMOVE_RECURSE "${_cdie_link_dir}")
+    file(MAKE_DIRECTORY "${_cdie_link_dir}")
+    set(_cdie_links)
+    foreach(_cdie_program cdie_gui=die cdie=diec cdie_update=die-update)
+        string(REPLACE "=" ";" _cdie_program "${_cdie_program}")
+        list(GET _cdie_program 0 _cdie_target)
+        list(GET _cdie_program 1 _cdie_name)
+        if(TARGET ${_cdie_target})
+            file(RELATIVE_PATH _cdie_relative "/${CMAKE_INSTALL_BINDIR}" "/${CDIE_INSTALL_PKGLIBDIR}/${_cdie_name}")
+            file(CREATE_LINK "${_cdie_relative}" "${_cdie_link_dir}/${_cdie_name}" SYMBOLIC)
+            list(APPEND _cdie_links "${_cdie_link_dir}/${_cdie_name}")
+        endif()
+    endforeach()
+    if(_cdie_links)
+        install(FILES ${_cdie_links} DESTINATION "${CMAKE_INSTALL_BINDIR}")
+    endif()
+
+    if(TARGET cdie_gui)
+        set(_cdie_linux_dir "${CMAKE_CURRENT_LIST_DIR}/packaging/linux")
+        install(FILES "${_cdie_linux_dir}/io.github.horsicq.cdie.desktop"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
+        install(FILES "${_cdie_linux_dir}/io.github.horsicq.cdie.metainfo.xml"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/metainfo")
+        foreach(_cdie_icon_size 48 128 256)
+            install(FILES "${_cdie_linux_dir}/icons/${_cdie_icon_size}x${_cdie_icon_size}/io.github.horsicq.cdie.png"
+                DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/${_cdie_icon_size}x${_cdie_icon_size}/apps")
+        endforeach()
+    endif()
+
+    install(FILES "${CMAKE_CURRENT_LIST_DIR}/packaging/debian/copyright" DESTINATION "${CMAKE_INSTALL_DOCDIR}")
 endif()
 
 # -------------------------------------------------------------------- CPack
@@ -421,7 +596,12 @@ else()
     # and Makefiles the instruction set has to come from the processor name.
     # Pointer size alone cannot tell x86_64 from aarch64, and labelling an
     # arm64 package "x64" makes it collide with the real x64 one in release/.
-    if(CMAKE_OSX_ARCHITECTURES)
+    # A macOS build for several architectures (arm64;x86_64) is "universal",
+    # as packaging/macos/build_macos.sh names it.
+    list(LENGTH CMAKE_OSX_ARCHITECTURES _cdie_osx_arch_count)
+    if(_cdie_osx_arch_count GREATER 1)
+        set(CDIE_PROCESSOR "universal")
+    elseif(CMAKE_OSX_ARCHITECTURES)
         list(GET CMAKE_OSX_ARCHITECTURES 0 CDIE_PROCESSOR)
     else()
         set(CDIE_PROCESSOR "${CMAKE_SYSTEM_PROCESSOR}")
@@ -429,9 +609,11 @@ else()
 
     string(TOLOWER "${CDIE_PROCESSOR}" CDIE_PROCESSOR)
 
-    if(CDIE_PROCESSOR MATCHES "^(x86_64|amd64)$")
+    if(CDIE_PROCESSOR STREQUAL "universal")
+        set(CDIE_ARCH "universal")
+    elseif(CDIE_PROCESSOR MATCHES "^(x86_64|amd64)$")
         set(CDIE_ARCH "x64")
-    elseif(CDIE_PROCESSOR MATCHES "^(aarch64|arm64)$")
+    elseif(CDIE_PROCESSOR MATCHES "^(aarch64|arm64e?)$")
         set(CDIE_ARCH "arm64")
     elseif(CDIE_PROCESSOR MATCHES "^(i[3-6]86|x86)$")
         set(CDIE_ARCH "x86")
@@ -453,9 +635,48 @@ set(CPACK_PACKAGE_HOMEPAGE_URL      "${X_HOMEPAGE}")
 set(CPACK_PACKAGE_CONTACT           "${X_MAINTAINER}")
 set(CPACK_RESOURCE_FILE_LICENSE     "${CMAKE_CURRENT_LIST_DIR}/LICENSE")
 set(CPACK_PACKAGE_INSTALL_DIRECTORY "cdie")
-set(CPACK_PACKAGE_FILE_NAME         "cdie_${CDIE_OSNAME}_${CDIE_ARCH}_portable_${PROJECT_VERSION}")
+if(CDIE_INSTALL_LAYOUT STREQUAL "FHS")
+    set(CPACK_PACKAGE_FILE_NAME     "cdie_${CDIE_OSNAME}_${CDIE_ARCH}_${PROJECT_VERSION}")
+else()
+    set(CPACK_PACKAGE_FILE_NAME     "cdie_${CDIE_OSNAME}_${CDIE_ARCH}_portable_${PROJECT_VERSION}")
+endif()
 set(CPACK_ARCHIVE_COMPONENT_INSTALL OFF)
 set(CPACK_COMPONENTS_ALL_IN_ONE_PACKAGE ON)
+
+# Debian package: cpack -G DEB on an FHS tree (packaging/debian/build_deb.sh).
+# Only the DEB generator reads CPACK_DEBIAN_*, so the ZIP packages are
+# unaffected; packaging/cpack_project_config.cmake refuses a .deb made from a
+# PORTABLE tree, which would scatter db/ and README.md over /usr.
+set(CPACK_PROJECT_CONFIG_FILE       "${CMAKE_CURRENT_LIST_DIR}/packaging/cpack_project_config.cmake")
+set(CPACK_CDIE_INSTALL_LAYOUT       "${CDIE_INSTALL_LAYOUT}")
+set(CPACK_DEBIAN_PACKAGE_NAME       "cdie")
+set(CPACK_DEBIAN_FILE_NAME          "DEB-DEFAULT")
+set(CPACK_DEBIAN_PACKAGE_SECTION    "devel")
+set(CPACK_DEBIAN_PACKAGE_PRIORITY   "optional")
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "hors <horsicq@gmail.com>")
+set(CPACK_DEBIAN_PACKAGE_HOMEPAGE   "https://github.com/horsicq/Detect-It-Easy")
+# The DEB generator takes the synopsis from CPACK_PACKAGE_DESCRIPTION_SUMMARY,
+# which describes the console engine; the project config file swaps this in.
+set(CPACK_CDIE_DEBIAN_SUMMARY       "Detect It Easy (C port): identifies compilers, packers and file types")
+set(CPACK_DEBIAN_PACKAGE_DESCRIPTION
+    "cdie is a C port of Detect It Easy. It runs the Detect It Easy signature\n"
+    "database to identify the file type, compiler, linker, packer, protector and\n"
+    "installer of PE, ELF, Mach-O, DEX, APK and other files.\n"
+    "\n"
+    "The package contains the GTK desktop application (die), the command-line\n"
+    "scanner (diec), the signature database updater (die-update) and a bundled\n"
+    "signature database.")
+string(REPLACE ";" "" CPACK_DEBIAN_PACKAGE_DESCRIPTION "${CPACK_DEBIAN_PACKAGE_DESCRIPTION}")
+set(CPACK_DEBIAN_PACKAGE_CONTROL_STRICT_PERMISSION ON)
+# dpkg-shlibdeps finds libc and GTK. xxnetlib dlopen()s libcurl, which it
+# cannot see; without libcurl die-update and Update database cannot use https.
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+if(TARGET cdie_update)
+    set(CPACK_DEBIAN_PACKAGE_DEPENDS "libcurl4t64 | libcurl4 | libcurl3t64-gnutls | libcurl3-gnutls")
+endif()
+# The Qt Detect It Easy package owns /usr/bin/die and /usr/bin/diec as well.
+set(CPACK_DEBIAN_PACKAGE_CONFLICTS  "detectiteasy")
+set(CPACK_DEBIAN_PACKAGE_REPLACES   "detectiteasy")
 
 include(CPack)
 
@@ -472,7 +693,7 @@ find_program(CDIE_XGETTEXT_EXECUTABLE xgettext)
 if(CDIE_XGETTEXT_EXECUTABLE AND TARGET cdie_ui_translation)
     file(GLOB_RECURSE _cdie_translation_inputs RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/gui/*.c" "${CMAKE_CURRENT_SOURCE_DIR}/src/gui/*.m"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/tui/*.c")
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/gui/*.h" "${CMAKE_CURRENT_SOURCE_DIR}/src/tui/*.c")
     get_target_property(_cdie_widgets_source xxwidgets::xxwidgets SOURCE_DIR)
     file(GLOB_RECURSE _cdie_widget_inputs
         "${_cdie_widgets_source}/src/*.c" "${_cdie_widgets_source}/src/*.m")
@@ -493,7 +714,13 @@ if(CDIE_XGETTEXT_EXECUTABLE AND TARGET cdie_ui_translation)
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         COMMENT "Extracting combined CDiE and xxwidgets translation catalog")
 endif()
-if(UNIX AND NOT APPLE)
+if(CDIE_INSTALL_LAYOUT STREQUAL "FHS")
+    # The GUI loads a catalog from the path given in Options; nothing searches
+    # a fixed folder. Keep them where the build tree and the Windows package
+    # have them (and the macOS bundle's Resources): translations/ beside die.
+    install(DIRECTORY translations/ DESTINATION "${CDIE_BINARY_DESTINATION}/translations"
+        FILES_MATCHING PATTERN "*.po" PATTERN "*.pot")
+elseif(UNIX AND NOT APPLE)
     include(GNUInstallDirs)
     install(DIRECTORY translations/ DESTINATION "${CMAKE_INSTALL_DATADIR}/cdie/translations"
         FILES_MATCHING PATTERN "*.po" PATTERN "*.pot")

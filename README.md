@@ -50,12 +50,22 @@ The console exposes the shared engine's additional scan passes:
 - `-a` / `--alltypes` scans applicable parent file types.
 - `--overlayscan` scans trailing overlays.
 - `--resourcesscan` scans PE/ELF resource payloads.
-- `--archivesscan` scans supported archive members at one level.
+- `--archivesscan` scans the members of ZIP, JAR, APK and IPA archives,
+  nested archives included.
 
-Archive scanning includes ZIP-family, LHA, GZIP and BZIP2 members plus Mach-O
-Fat slices. Nested recursion and RAR/CAB member expansion are not exposed by
-this scan path. Directory traversal remains controlled by `-r` /
-`--recursivescan`. See [docs/LIMITATIONS.md](docs/LIMITATIONS.md).
+Archive scanning follows Detect It Easy 4.0.0. A member, overlay or resource
+that is itself an archive is expanded too, down to 20 archive levels. Without
+`-g` (`--aggressivescan`) only members that Detect It Easy considers scannable
+(executables, DEX, PDF, TAR and archives) are scanned, at most 21 per archive.
+Every member reached is CRC-checked, stored members included: a damaged member
+is skipped, the result ends with `Last error: Invalid CRC`, and the exit code
+stays 0. GZIP, BZIP2, LHA and Mach-O Fat files are scanned as files and not
+expanded, as in Detect It Easy; 7z, RAR, CAB and ISO 9660 members are not
+expanded yet. As a safety limit that Detect It Easy does not have, one input
+scans at most 10,000 archive members (100,000 with `-g`). Directory traversal
+remains controlled by `-r` / `--recursivescan`, which, as in Detect It Easy,
+also turns on resource and overlay scanning. See
+[docs/LIMITATIONS.md](docs/LIMITATIONS.md).
 
 ## File Information
 
@@ -385,11 +395,23 @@ cmake -S cdie_source -B cdie_build -DCMAKE_BUILD_TYPE=Release
 cmake --build cdie_build
 ```
 
-A portable Windows package contains `die.exe`, `diec.exe`, an empty `PORTABLE`
-marker beside them, the database, docs, and decoder license notices:
+A portable Windows package contains `die.exe`, `diec.exe`, the database
+updater `die-update.exe`, an empty `PORTABLE` marker beside them, the
+database, docs, and decoder license notices:
 
 ```bat
 packaging\windows\build_portable_windows.cmd x64 win64_msvc2022
+```
+
+The macOS packages come in pairs per architecture, `cdie_mac_arm64_*` and
+`cdie_mac_x64_*`: a `.zip` holding `die.app` and a `.pkg` that installs it
+into `/Applications` (`MACOS_ARCHITECTURES='arm64;x86_64'` makes one
+universal pair instead). No signing certificate or password is needed;
+without them `die.app` is sealed ad hoc and nothing is notarized. See
+[docs/BUILDING.md](docs/BUILDING.md#macos-zip-and-installer):
+
+```bash
+CDIE_DATABASE_DIR=/path/to/Detect-It-Easy packaging/macos/build_macos.sh
 ```
 
 ```bash
@@ -409,9 +431,17 @@ PE64
 
 ## Frontends
 
-Windows and Linux builds provide the native GUI `die` and the console scanner
-`diec` (`die.exe` and `diec.exe` on Windows). macOS builds provide only the
-`die.app` GUI. The TUI application is disabled on every platform.
+Windows and Linux builds provide the native GUI `die`, the console scanner
+`diec` and the signature database updater `die-update` (`die.exe`, `diec.exe`
+and `die-update.exe` on Windows). macOS builds provide only the `die.app` GUI,
+which carries `die-update` in `Contents/MacOS`. The TUI application is
+disabled on every platform. `die-update` and the GUIs' **Update database**
+need the `xxnetlib` and `xxgithub` sources; see
+[docs/BUILDING.md](docs/BUILDING.md#packaging).
+
+Every GUI has an **Update database** button (Ctrl+U; Cmd+U and an app-menu
+item on macOS) that checks for and installs a newer signature database; see
+[Updating the signature database](#updating-the-signature-database).
 
 The CMake target names remain `cdie_gui` and `cdie` for build-script compatibility.
 Linux GUI builds require the GTK 3 development package.
@@ -436,16 +466,17 @@ Category colors come from the C port of XScanEngine in
 `xxfclib/src/scan/xx_scan_color.c`, with its light/dark defaults, protection
 aliases and malware background colors.
 
-The app bundles the signature databases selected by `CDIE_DATABASE_DIR` and
-finds them independently of the working directory. **Database paths** can load
-other signature folders; successful choices are remembered for later runs.
+The app bundles the main and custom signature databases (`db` and
+`db_custom`) from `CDIE_DATABASE_DIR` and finds them independently of the
+working directory. The database folders on the **Options > Scan** page can
+load other signature folders; successful choices are remembered for later runs.
 See [docs/BUILDING.md](docs/BUILDING.md#macos-gui) for build and smoke-test commands.
 
 ## Windows GUI
 
 `die.exe` uses the reusable xxwidgets scan panel and options dialogs.
 Choose or drop a file, then select a file type to scan it again with that
-parser. **Scan options** edits the flags and optional databases; **Fonts**
+parser. **Scan options** edits the flags and the custom database; **Fonts**
 chooses fonts for controls, tables, result trees and text. OK applies these
 choices for the current run; Cancel preserves the previous values.
 
@@ -519,12 +550,13 @@ accepted as an alias (shown in parentheses) except where it would collide.
 | --- | --- |
 | `-h`, `-?`, `--help` | show usage |
 | `-v`, `--version` | show the version |
-| `-r`, `--recursivescan` | descend into directories |
+| `-r`, `--recursivescan` | descend into directories; as in Detect It Easy, also scans resources and overlays |
+| `-O`, `--overlayscan` / `-R`, `--resourcesscan` / `-A`, `--archivesscan` | scan overlays / resources / archive members |
 | `-d`, `--deepscan` | enable deep-scan signatures (`DS.*`, `EP.*`) |
 | `-u` (`-he`), `--heuristicscan` | enable heuristic signatures (`HEUR.*`) |
 | `-g`, `--aggressivecscan` | aggressive scan (`--aggressivescan` also accepted) |
 | `-b` (`-V`), `--verbose` | verbose detections (operation system, language, …) |
-| `-a` (`-A`), `--alltypes` | scan applicable parent file types |
+| `-a`, `--alltypes` | scan applicable parent file types |
 | `-f`, `--format` | put a space before `(version)` and `[info]` |
 | `-U` (`-hu`), `--hideunknown` | drop `Unknown: Unknown` results |
 | `-M` (`-m`), `--messages` | print engine/script messages on stderr |
@@ -533,10 +565,16 @@ accepted as an alias (shown in parentheses) except where it would collide.
 | `-x`, `--xml` | XML output |
 | `-c`, `--csv` / `-t`, `--tsv` | delimited output |
 | `-p` (`-P`), `--plaintext` | plain text output |
+| `--format <layout>` | `text`, `json`, `xml`, `csv` or `tsv`, as in Detect It Easy (a bare `--format` still means `-f`) |
 | `-D`, `--database <path>` | main database directory |
-| `-E`, `--extradatabase <path>` | extra database directory |
 | `-C`, `--customdatabase <path>` | custom database directory |
 | `-s`, `--showdatabase` | print database paths and signature counts |
+| `--checkupdate` | check for a database update by running `die-update --check` (long form only: `-u` is `--heuristicscan`) |
+| `--update` | download and install a database update by running `die-update` |
+
+`-E` and `--extradatabase` were removed: cdie uses only the main (`-D`) and
+custom (`-C`) databases. Either option is refused with exit code `4`; its path
+argument is consumed and nothing is scanned.
 
 Output formats are mutually exclusive and may be selected only once. JSON and
 XML remain single documents when several files are scanned; the multi-file
@@ -547,12 +585,168 @@ standard output.
 `--test` and `--createtest` are not ported; see
 [docs/LIMITATIONS.md](docs/LIMITATIONS.md).
 
-When a database path is not given, `diec` looks for `db`, `db_extra` and
-`db_custom` next to the executable and then in the working directory.
+When a database path is not given, `diec` looks for each of `db` and
+`db_custom` first in the per-user folder that `die-update` fills when the
+shipped database is read-only (never in a portable installation), then next
+to the executable (a folder or `<name>.tar`), and then in the working
+directory. A `db_extra` folder is never loaded.
 
 Exit codes follow the original tool: `0` success, `1` file not found,
 `2` cannot open file, `3` database not found, `4` invalid parameter. This port
-also returns `5` when writing or flushing standard output fails.
+also returns `5` when writing or flushing standard output fails. With
+`--checkupdate` or `--update`, `diec` returns `die-update`'s exit code (see
+[below](#updating-the-signature-database)), and `127` when `die-update` cannot
+be found or started.
+
+## Updating the signature database
+
+```text
+die-update [options]            install a newer database when the source has one
+die-update --check [options]    only report whether there is one
+diec --checkupdate | --update   the same, through diec
+```
+
+`diec --checkupdate` and `diec --update` start `die-update` from `diec`'s own
+folder (the `CDIE_UPDATER` environment variable can name another executable),
+pass on `-D` and `-j`, and cannot be combined with a target or another mode.
+With `-E` or `--extradatabase`, `diec` exits with code `4` and does not start
+`die-update`.
+
+| Option | Meaning |
+| --- | --- |
+| `-h`, `--help` / `-v`, `--version` | show usage / the version |
+| `-c`, `--check` | only check; exit code `1` when an update is available |
+| `-u`, `--update` | install an available update (the default) |
+| `-f`, `--force` | install even when the database is up to date |
+| `-D`, `--database <path>` | the `db` folder to update |
+| `-U`, `--url <url>` | the update source |
+| `-s`, `--settings <ini>` | read the settings from this INI file |
+| `--nosettings` | ignore the stored settings |
+| `-j`, `--json` | result as JSON |
+| `-q`, `--quiet` | print errors only |
+
+`-E` and `--extradatabase` were removed; they exit with code `4` before any
+settings, lock or network access.
+
+| Exit code | Meaning |
+| --- | --- |
+| `0` | up to date, or the update was installed |
+| `1` | an update is available (`--check`) |
+| `2` | the source could not be reached or read |
+| `3` | the database folder cannot be written or replaced |
+| `4` | invalid parameter, URL or settings |
+| `5` | verification failed (size, MD5, zip or database) |
+| `6` | cancelled; Ctrl+C stops the update cleanly |
+| `7` | another update is running |
+
+**Settings.** `die-update` reads Detect It Easy's own settings, the store the
+cdie GUI uses too: `die.ini` beside the executable when a `PORTABLE` (or
+`portable`) file sits there, otherwise the native `NTInfo/die` store (the
+registry key `HKCU\Software\NTInfo\die` on Windows,
+`~/.config/NTInfo/die.conf` on Linux, the `biz.ntinfo.die` preferences domain
+on macOS, which is what Qt names it after Detect It Easy's organization
+domain `ntinfo.biz`). It uses two keys, and the command line wins over them:
+
+| Key | Meaning |
+| --- | --- |
+| `Scan/Die/Database/Main/Path` | the `db` folder; a leading `$data` is the executable's folder |
+| `Scan/Die/Database/Main/UpdateUrl` | the update source |
+
+```ini
+[Scan]
+Die\Database\Main\Path=$data/db
+```
+
+A stored `Scan/Die/Database/Extra/Path` (written by Detect It Easy or an
+earlier cdie) is ignored and left in place. A `die.ini` that the settings
+parser rejects is still searched for these two keys.
+
+**Source.** The default is
+`https://github.com/horsicq/Detect-It-Easy/releases/tag/current-database`:
+its `db.zip` asset holds `db/` (other folders in it, such as `db_extra/`, are
+ignored), and `db.zip.md5` its checksum. An empty URL and the old default
+`.../releases/tag/db` mean the default. `-U` also takes a GitHub or GitHub
+Enterprise release page
+(`/<owner>/<repo>/releases/tag/<tag>` or `/releases/latest`), a release
+download URL, or any `http(s)` URL of a zip, with an optional `<url>.md5`
+beside it. Release details come from the GitHub API; when it is rate limited
+(60 requests an hour without a token), a tagged release falls back to its
+direct download addresses. Release assets are always downloaded from those
+browser addresses, which do not count against the limit.
+
+**Detecting an update.** Each installation records its archive in
+`db/die-update.ini`. The remote archive is compared with that record by MD5
+when the source publishes one, otherwise by the GitHub asset's id, size and
+upload time; a database without the record always has an update available.
+See [docs/DATABASE.md](docs/DATABASE.md#updating-the-database).
+
+**Where the database goes.** Without `-D` or a stored path, `die-update`
+updates the folder the scanners use: an existing per-user copy, else `db`
+beside the executable, else (macOS) the app bundle's `Contents/Resources`,
+else `db` in the working directory. `db_custom` and any `db_extra` folder are
+never touched. The default database of a read-only installation -- an
+installed package (`/usr`, `/usr/local`), an
+AppImage, a macOS app bundle -- is never updated in place, even by root: the
+update goes to the per-user folder, which `diec` and the GUIs search first.
+So does an update of any other default folder that turns out not to be
+writable, unless the installation is portable. The per-user folder is
+`%LOCALAPPDATA%\NTInfo\cdie` on Windows,
+`~/Library/Application Support/NTInfo/cdie` on macOS,
+`$XDG_DATA_HOME/NTInfo/cdie` (default `~/.local/share/NTInfo/cdie`)
+elsewhere; `CDIE_USER_DATA_DIR` overrides it (ignored for root, whose home
+folder must belong to root). An existing folder is replaced only when it
+looks like a signature database (it holds `_init`, `*.sg`, the engine's
+file-type folders or die-update's own `die-update.ini`), and never when it is
+a drive root, the home folder, the program's folder, the current folder, or a
+folder named `db_extra`. On Linux and macOS HTTPS needs the system libcurl,
+which is loaded at run time.
+
+**In the GUI.** **Update database** runs the same check and installation on
+a worker thread. A progress dialog with Cancel appears after a second; the
+databases are reloaded afterwards and the result is shown in the status bar.
+The source is the setting `Scan/Die/Database/Main/UpdateUrl`
+(Options > Scan), whose default is the `current-database` release above.
+A main database folder chosen in the GUI is updated where it is; the custom
+database folder is never touched.
+
+**GUI settings.** The GUI keeps its Options in the same store as
+`die-update` and Detect It Easy itself (`die.ini` when portable, else native
+`NTInfo/die`), under Detect It Easy's key names and in the forms its Qt
+settings use: `true`/`false`, decimal numbers, `QFont` strings and
+`#rrggbb|#rrggbb` colors, with `$data/db` and `$data/db_custom` for the
+default database folders. Options > Scan has two database folders, main and
+custom, and one database switch, the custom database (on by default; the
+main database is always used). Detect It Easy's
+`Scan/Die/Database/Extra/Path` and `Scan/Die/Database/Extra/Enabled` are
+neither read nor written, and are never deleted. Only options changed in
+cdie are written, so values Detect It Easy stored keep their form; cdie never
+writes `View/Style`, `View/Qss`, `File/Context` or Detect It Easy's
+`RecentFiles` list (its own history is `cdie/RecentFiles`; Detect It Easy's
+list is shown while cdie has none), and a scan engine it lacks (`nfd`, `peid`,
+`yara`) counts as `auto` without being overwritten. The language is
+`cdie/Lang`: Detect It Easy's `View/Lang` names a `.qm` file, so cdie changes
+it only to `System` or English (`""`), never to a `.po` path. Fonts always
+carry a family Qt can resolve, and cdie's colors are opaque (`#aarrggbb`
+values are read blended over white); Detect It Easy's one color per scan
+category is cdie's light-theme color, the dark theme's stay in
+`Scan/Color/Dark`. On the first start, settings an older cdie saved in
+`cdie.ini` or `NTInfo/cdie` fill whatever the store does not hold yet, once:
+both stores get `cdie/Migrated`, so resetting Detect It Easy's settings does
+not bring them back, and the old settings are otherwise left as they were.
+`CDIE_SETTINGS=<file.ini>` names another INI file instead, which is never
+migrated into.
+
+**Upgrading from an earlier version.** cdie no longer has an extra database;
+like Detect It Easy it uses the main and custom databases only. A `db_extra`
+folder from an earlier version (beside the executable, in the per-user folder,
+or named in the settings) is no longer used: it is neither loaded, updated nor
+deleted. Delete it, or move your own `.sg` files to `db_custom`. The former
+extra rules are in `db`, tagged `extra` (skip them with `--excludetags extra`).
+Until Detect It Easy publishes that merged `db`, the `current-database`
+`db.zip` still carries them under `db_extra/`, which `die-update` does not
+install. `diec`, `die-update` and `cdie_tui` refuse `-E` and `--extradatabase`
+with exit code `4`. An interrupted update from an earlier version that had
+moved `db_extra` aside is still put back by the next run.
 
 ---
 
@@ -591,7 +785,7 @@ Windows) `DIE_VB_ScanFile[Callback]`. A worked sample is in
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | module map and the scan pipeline |
 | [docs/JS_ENGINE.md](docs/JS_ENGINE.md) | the JavaScript engine: grammar, objects, memory model, regexps |
 | [docs/SCRIPT_API.md](docs/SCRIPT_API.md) | every function the signature scripts can call |
-| [docs/DATABASE.md](docs/DATABASE.md) | database layout, load order, priorities, signature syntax |
+| [docs/DATABASE.md](docs/DATABASE.md) | database layout, load order, priorities, signature syntax, updates |
 | [docs/BUILDING.md](docs/BUILDING.md) | building and installing |
 | [docs/LIBRARY.md](docs/LIBRARY.md) | the die_library-compatible shared/static library API |
 | [docs/TESTING.md](docs/TESTING.md) | comparing against `diec`, tracing, robustness notes |
@@ -626,7 +820,8 @@ cdie_source/
     ├── js/                   the JavaScript engine
     ├── format/               binary access, signatures, PE, file types, disasm
     ├── engine/               database, script API, scan driver, output
-    └── console/              command line front end
+    ├── console/              command line front end
+    └── updater/              die-update and the update engine the GUIs share
 ```
 
 ## License

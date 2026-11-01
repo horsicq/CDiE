@@ -2,6 +2,7 @@
 #include "app/cdie_translation.h"
 #include "gui_strings.h"
 #include "gui_strings_source.h"
+#include "gui_error.h"
 #include <xxfclib/rt/xx_rt.h>
 #include <xxwidgets/xxwidgets_process.h>
 #include <xxfclib/threads/xx_threads.h>
@@ -145,7 +146,10 @@ static xxwidgets_status strings_show_job(xxwidgets_widget *owner, const char *pa
     if (!joined) status = XXWIDGETS_PLATFORM_ERROR;
     else if (status == XXWIDGETS_OK && job.ok)
         status = xxwidgets_strings_source_dialog(owner, CDIE_TR("Strings"), path, gui_strings_source_size(job.source), gui_strings_source_model(job.source));
-    else if (status == XXWIDGETS_OK && !job.work.is_stop) status = xxwidgets_text_dialog(owner, CDIE_TR("Strings"), job.error ? job.error : "Cannot extract strings");
+    else if (status == XXWIDGETS_OK && !job.work.is_stop && generated_count)
+        status = xxwidgets_text_dialog(owner, CDIE_TR("Strings"), job.error ? job.error : CDIE_TR("Cannot generate the strings."));
+    else if (status == XXWIDGETS_OK && !job.work.is_stop)
+        status = gui_error_show_file(owner, CDIE_TR("Strings"), CDIE_N_("Cannot extract the strings of %s."), path, job.error);
     gui_strings_source_free(job.source);
     xx_rt_free(job.error);
     return status;

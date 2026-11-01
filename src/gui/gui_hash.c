@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 hors<horsicq@gmail.com>. SPDX-License-Identifier: MIT */
 #include "app/cdie_translation.h"
 #include "gui_hash.h"
+#include "gui_error.h"
 #include <xxfclib/rt/xx_rt.h>
 #include <xxwidgets/xxwidgets_process.h>
 #include <xxfclib/threads/xx_threads.h>
@@ -78,7 +79,7 @@ xxwidgets_status gui_hash_show(xxwidgets_widget *owner, const char *path)
     else if (status == XXWIDGETS_OK && job.ok)
         status = show_hash(owner, path, job.data);
     else if (status == XXWIDGETS_OK && !job.work.is_stop)
-        status = xxwidgets_text_dialog(owner, CDIE_TR("Hash"), job.error ? job.error : "Cannot calculate hash");
+        status = gui_error_show_file(owner, CDIE_TR("Hash"), CDIE_N_("Cannot calculate the hashes of %s."), path, job.error);
     xx_rt_free(job.data); xx_rt_free(job.error);
     return status;
 }

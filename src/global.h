@@ -34,6 +34,17 @@
 #define X_ORGANIZATIONNAME       "NTInfo"
 #define X_ORGANIZATIONDOMAIN     "ntinfo.biz"
 
+/* Detect It Easy's settings store, which the GUI, the TUI and die-update
+ * share with it: die.ini beside a portable executable, else QSettings'
+ * native store for organization/application. On macOS Qt names that store
+ * after the organization domain, reversed: biz.ntinfo.die. */
+#ifdef __APPLE__
+#define X_SETTINGS_ORGANIZATION  "biz.ntinfo"
+#else
+#define X_SETTINGS_ORGANIZATION  X_ORGANIZATIONNAME
+#endif
+#define X_SETTINGS_APPLICATION   "die"
+
 /* Exit codes 0-4 mirror the original console tool. */
 #define CR_SUCCESS            0
 #define CR_CANNOTFINDFILE     1
@@ -41,6 +52,9 @@
 #define CR_CANNOTFINDDATABASE 3
 #define CR_INVALIDPARAMETER   4
 #define CR_CANNOTWRITEOUTPUT  5
+/* --checkupdate and --update exit with die-update's own code; this one, the
+ * shell's "command not found", when die-update cannot be started. */
+#define CR_CANNOTRUNUPDATER   127
 
 /* The program entry point. src/core/utils_entry.c calls this from either
  * main() or the CRT-free x_entry_point; src/console/main_console.c defines it.

@@ -3,7 +3,7 @@
 #
 #   ./run_cdie.sh <target> [extra cdie options]
 #
-# Set CDIE_DB_ROOT to the directory that holds db, db_extra and db_custom.
+# Set CDIE_DB_ROOT to the directory that holds db and db_custom.
 
 set -e
 
@@ -25,6 +25,5 @@ fi
 
 exec "$CDIE_EXE" \
     -D "$CDIE_DB_ROOT/db" \
-    -E "$CDIE_DB_ROOT/db_extra" \
     -C "$CDIE_DB_ROOT/db_custom" \
     "$@"

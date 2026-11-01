@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 hors<horsicq@gmail.com>. SPDX-License-Identifier: MIT */
 #include "gui_file_information.h"
 #include "gui_backend.h"
+#include "gui_error.h"
 #include "app/cdie_translation.h"
 #include "../app/cdie_file_info.h"
 #include <xxwidgets/xxwidgets_process.h>
@@ -171,7 +172,7 @@ xxwidgets_status gui_file_information_show(xxwidgets_widget *owner, const char *
         status = xxwidgets_file_information_dialog(owner, CDIE_TR("File Information"), job.data->path, job.data->file_type,
             job.data->size, job.data->items, job.data->count);
     else if (status == XXWIDGETS_OK && !job.work.is_stop)
-        status = xxwidgets_text_dialog(owner, CDIE_TR("File Information"), job.error ? job.error : "Cannot load File Information");
+        status = gui_error_show_file(owner, CDIE_TR("File Information"), CDIE_N_("Cannot read the file information of %s."), path, job.error);
     gui_file_information_free(job.data); gui_backend_free(job.error);
     return status;
 }

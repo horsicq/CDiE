@@ -2,6 +2,7 @@
 #include "gui_tree.h"
 #include "app/cdie_translation.h"
 #include "gui_backend.h"
+#include "gui_error.h"
 #include <xxwidgets/die_engine/xxwidgets_die_signature_editor.h>
 #include <xxwidgets/xxwidgets_process.h>
 #include <xxwidgets/xxwidgets_scan_directory.h>
@@ -379,7 +380,7 @@ static xxwidgets_status scan_directory_file(xxwidgets_scan_directory_task *task,
 static xxwidgets_status directory_window(xxwidgets_widget *owner)
 {
     xxwidgets_scan_options options = {XXWIDGETS_SCAN_DEEP | XXWIDGETS_SCAN_HEURISTIC | XXWIDGETS_SCAN_VERBOSE,
-        XXWIDGETS_SCAN_DATABASE_EXTRA | XXWIDGETS_SCAN_DATABASE_CUSTOM};
+        XXWIDGETS_SCAN_DATABASE_CUSTOM};
     char *folder = copy_text(g_marks.path ? g_marks.path : "");
     xxwidgets_status status;
     if (!folder) return XXWIDGETS_OUT_OF_MEMORY;
@@ -414,6 +415,15 @@ static char *search_url(const char *name)
     return url;
 }
 
+/* The status bar line for a window that did not open: a sentence, not the
+ * status name ("operation unavailable during callback or polling"). */
+static const char *window_failed(char *message, size_t capacity, const char *window, xxwidgets_status status)
+{
+    if (status == XXWIDGETS_OK) return NULL;
+    cdie_translation_snprintf(message, capacity, CDIE_N_("Cannot open %s. %s"), window, gui_error_status_text(status));
+    return message;
+}
+
 const char *gui_tree_process(xxwidgets_widget *owner)
 {
     static char message[512];
@@ -422,17 +432,18 @@ const char *gui_tree_process(xxwidgets_widget *owner)
     xxwidgets_status status;
     g_marks.pending = PENDING_NONE;
     if (pending == PENDING_SIGNATURES || pending == PENDING_DIRECTORY || pending == PENDING_LOG) {
+        const char *window = pending == PENDING_SIGNATURES ? CDIE_TR("Signatures") : pending == PENDING_DIRECTORY ? CDIE_TR("Scan directory") : CDIE_TR("Log");
         if (pending == PENDING_SIGNATURES) status = signatures_window(owner, NULL);
         else if (pending == PENDING_DIRECTORY) status = directory_window(owner);
         else status = xxwidgets_text_dialog(owner, CDIE_TR("Log"), g_marks.log && g_marks.log[0] ? g_marks.log : CDIE_TR("No messages."));
         if (status == XXWIDGETS_UNAVAILABLE && pending == PENDING_SIGNATURES) return CDIE_TR("No signatures loaded.");
-        return status == XXWIDGETS_OK ? NULL : xxwidgets_status_string(status);
+        return window_failed(message, sizeof(message), window, status);
     }
     if (pending != PENDING_MARK || mark < 0 || node >= g_marks.rows.count) return NULL;
     if (mark == MARK_SIGNATURE) {
         /* As DIE: the Signatures window, on the script that found the row. */
         status = signatures_window(owner, g_marks.rows.signatures[node]);
-        return status == XXWIDGETS_OK ? NULL : xxwidgets_status_string(status);
+        return window_failed(message, sizeof(message), CDIE_TR("Signatures"), status);
     }
     {
         const char *name = g_marks.rows.names[node];
@@ -440,10 +451,10 @@ const char *gui_tree_process(xxwidgets_widget *owner)
         if (info) {
             status = xxwidgets_text_dialog(owner, name, info);
             gui_backend_free(info);
-            return status == XXWIDGETS_OK ? NULL : xxwidgets_status_string(status);
+            return window_failed(message, sizeof(message), name, status);
         }
         url = search_url(name);
-        if (!url) return xxwidgets_status_string(XXWIDGETS_OUT_OF_MEMORY);
+        if (!url) return gui_error_status_text(XXWIDGETS_OUT_OF_MEMORY);
         status = xxwidgets_open_url(owner, url);
         /* Without a browser, say where to look instead. */
         if (status == XXWIDGETS_OK) cdie_translation_snprintf(message, sizeof(message), CDIE_N_("No description of %s is bundled; searching the web for it."), name);

@@ -242,6 +242,17 @@ low 6 bits of `n`).
 `getNEOffset(off)`, `getBaseOffset()` and `addressToOffset(addr)` are supplied
 by the `db/MSDOS/_init` framework script on top of `readDword`/`readWord`.
 
+An MS-DOS file is mapped as `XMSDOS` maps it, and as DIE 3.10 reports it: the
+image base (`getImageBase()`) is `0x10000000`, and `getAddressOfEntryPoint()`
+is that base plus CS:IP, wrapped at 1 MiB (`0x10000020` for CS:IP 0000:0020).
+The native entry-point offset is the header size plus CS:IP, or -1 when that
+lies outside the load image; `compareEP` uses it even where `db/MSDOS/_init`
+replaces `getEntryPointOffset` in script. In an MS-DOS signature a four-byte
+`#` pointer is followed as a real-mode far pointer, as XBinary does: header
+size plus segment * 16 plus offset, wrapped at 1 MiB and valid up to the end
+of the file. `db/MSDOS/compiler_Borland_Pascal.4.sg` and other compiler rules
+rely on `9a########`.
+
 ## Archive (ZIP / JAR / APK / NPM / IPA)
 
 The central directory of a ZIP-family container is walked into a record-name

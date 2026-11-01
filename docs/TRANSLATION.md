@@ -25,8 +25,10 @@ An unreadable or malformed catalog reports an error at startup. Missing, empty
 or fuzzy messages fall back to the original English. Languages are selected at
 startup; changing already-created labels requires restarting the GUI.
 
-`translations/de.po` is a partial German example. It includes shared xxwidgets
-messages and CDiE captions. Untranslated text remains English. The template
+`translations/de.po` is the German catalog. It includes shared xxwidgets
+messages and CDiE captions. Untranslated text remains English. `cdie.catalog`
+and `xxwidgets.catalog` load the German catalogs and check sample translations
+from the main window, Options and the signature editor. The template
 `translations/cdie.pot` combines source messages from CDiE and the configured
 xxwidgets source tree. Built frontend directories carry a `translations` folder
 beside the executable; a macOS bundle carries it in `Contents/Resources`.
@@ -78,3 +80,16 @@ ctest --test-dir build -R '^cdie.translation$' --output-on-failure
 Linux GUI tests use a virtual display when `xvfb-run` is available. The regression
 checks command-line parsing, shared widget/application messages, failure
 preservation, environment precedence, format rejection and UTF-8 truncation.
+
+`cdie.translations` (`tests/test_translations.py`, no gettext tools needed)
+checks the shipped catalogs on every platform: the template holds every
+translatable literal of `src/` and none that the sources no longer have (a
+renamed caption otherwise silently stays English), each catalog holds exactly
+the template's messages with a `Language` header naming its file, plural
+entries carry `nplurals` forms, and a translation keeps the shape of its
+original: the same printf conversions in the same order, the same trailing
+newline, surrounding spaces, trailing colon and ellipsis. With the GUI built,
+`gui_catalog_probe` also loads every catalog with the real reader. On macOS,
+`gui_cocoa_de` runs the whole Cocoa dialog smoke under `de.po`: the driver
+matches captions in English or their translation, so a translated caption the
+code still compares in English fails there.

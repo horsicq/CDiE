@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 hors<horsicq@gmail.com>. SPDX-License-Identifier: MIT */
 #include "gui_options_extra.h"
+#include "gui_error.h"
 #include "app/cdie_translation.h"
 #include <xxwidgets/xxwidgets_combobox.h>
 #ifdef validate
@@ -133,61 +134,68 @@ static xxwidgets_status create(xxwidgets_widget *dialog,xxwidgets_rect bounds,vo
     if(!p)return XXWIDGETS_OUT_OF_MEMORY;p->config=c;p->dialog=dialog;p->bounds=bounds;
     switch(c->id){
     case GUI_OPTIONS_APPEARANCE:
-        BOOL("Stay on top",appearance.stay_on_top);BOOL("Single application",appearance.single_application);
-        TEXT("Style",appearance.style);if(s==XXWIDGETS_OK)s=xxwidgets_widget_set_enabled(p->fields[p->field_count-1].control,0);
-        TEXT("QSS",appearance.qss);if(s==XXWIDGETS_OK)s=xxwidgets_widget_set_enabled(p->fields[p->field_count-1].control,0);
-        if(s==XXWIDGETS_OK)s=control(p,XXWIDGETS_LABEL,"System native appearance; Qt styles and QSS are unavailable.",0,p->row,bounds.width,1,NULL);p->row+=2;
-        TEXT("Language (.po / System)",appearance.language);
-        if(s==XXWIDGETS_OK)s=control(p,XXWIDGETS_BUTTON,"Choose translation...",23,p->row,25,1,&p->browse);p->row+=2;
-        if(s==XXWIDGETS_OK)s=control(p,XXWIDGETS_LABEL,"Single application and language changes apply after restarting.",0,p->row,bounds.width,1,NULL);
+        BOOL(CDIE_N_("Stay on top"),appearance.stay_on_top);BOOL(CDIE_N_("Single application"),appearance.single_application);
+        TEXT(CDIE_N_("Style"),appearance.style);if(s==XXWIDGETS_OK)s=xxwidgets_widget_set_enabled(p->fields[p->field_count-1].control,0);
+        TEXT(CDIE_N_("QSS"),appearance.qss);if(s==XXWIDGETS_OK)s=xxwidgets_widget_set_enabled(p->fields[p->field_count-1].control,0);
+        if(s==XXWIDGETS_OK)s=control(p,XXWIDGETS_LABEL,CDIE_N_("System native appearance; Qt styles and QSS are unavailable."),0,p->row,bounds.width,1,NULL);p->row+=2;
+        TEXT(CDIE_N_("Language (.po / System)"),appearance.language);
+        if(s==XXWIDGETS_OK)s=control(p,XXWIDGETS_BUTTON,CDIE_N_("Choose translation..."),23,p->row,25,1,&p->browse);p->row+=2;
+        if(s==XXWIDGETS_OK)s=control(p,XXWIDGETS_LABEL,CDIE_N_("Single application and language changes apply after restarting."),0,p->row,bounds.width,1,NULL);
+        p->row+=2;if(s==XXWIDGETS_OK)s=control(p,XXWIDGETS_LABEL,"",0,p->row,bounds.width,1,&p->message);
         break;
     case GUI_OPTIONS_FILE:
-        BOOL("Save last directory",file.save_last_directory);BOOL("Save history",file.save_recent_files);BOOL("Save backup",file.save_backup);
-        BOOL("Add to context menu",file.context_menu);
+        BOOL(CDIE_N_("Save last directory"),file.save_last_directory);BOOL(CDIE_N_("Save history"),file.save_recent_files);BOOL(CDIE_N_("Save backup"),file.save_backup);
+        BOOL(CDIE_N_("Add to context menu"),file.context_menu);
 #ifndef _WIN32
         if(s==XXWIDGETS_OK)s=xxwidgets_widget_set_enabled(p->fields[p->field_count-1].control,0);
 #endif
-        BOOL("Set system environment variable",file.set_environment);
+        BOOL(CDIE_N_("Set system environment variable"),file.set_environment);
 #ifndef _WIN32
         if(s==XXWIDGETS_OK)s=xxwidgets_widget_set_enabled(p->fields[p->field_count-1].control,0);
-        if(s==XXWIDGETS_OK)s=control(p,XXWIDGETS_LABEL,"Explorer context menus and user PATH registration are Windows-only.",0,p->row,bounds.width,1,NULL);
+        if(s==XXWIDGETS_OK)s=control(p,XXWIDGETS_LABEL,CDIE_N_("Explorer context menus and user PATH registration are Windows-only."),0,p->row,bounds.width,1,NULL);
 #endif
         break;
     case GUI_OPTIONS_SIGNATURES:
-        TEXT("Search signatures",signatures.path);
+        TEXT(CDIE_N_("Search signatures"),signatures.path);
         if(s==XXWIDGETS_OK)s=xxwidgets_widget_set_enabled(p->fields[p->field_count-1].control,0);
-        if(s==XXWIDGETS_OK)s=control(p,XXWIDGETS_LABEL,"The Qt search-signatures browser is unavailable in this native build.",0,p->row,bounds.width,1,NULL);
+        if(s==XXWIDGETS_OK)s=control(p,XXWIDGETS_LABEL,CDIE_N_("The Qt search-signatures browser is unavailable in this native build."),0,p->row,bounds.width,1,NULL);
         break;
     case GUI_OPTIONS_ONLINE:
-        TEXT("VirusTotal API key",online.virustotal_api_key);
+        TEXT(CDIE_N_("VirusTotal API key"),online.virustotal_api_key);
         if(s==XXWIDGETS_OK)s=xxwidgets_widget_set_enabled(p->fields[p->field_count-1].control,0);
-        if(s==XXWIDGETS_OK)s=control(p,XXWIDGETS_BUTTON,"Get",23,p->row,12,1,&p->update);p->row+=2;
-        if(s==XXWIDGETS_OK)s=control(p,XXWIDGETS_LABEL,"The Qt VirusTotal API report widget is unavailable in this native build.",0,p->row,bounds.width,1,NULL);
+        if(s==XXWIDGETS_OK)s=control(p,XXWIDGETS_BUTTON,CDIE_N_("Get API key"),23,p->row,18,1,&p->update);p->row+=2;
+        if(s==XXWIDGETS_OK)s=control(p,XXWIDGETS_LABEL,CDIE_N_("The Qt VirusTotal API report widget is unavailable in this native build."),0,p->row,bounds.width,1,NULL);
+        p->row+=2;if(s==XXWIDGETS_OK)s=control(p,XXWIDGETS_LABEL,CDIE_N_("Get API key opens the VirusTotal page in the web browser."),0,p->row,bounds.width,1,&p->message);
         break;
     case GUI_OPTIONS_INFO:
-        TEXT("Info database",info.path);
-        if(s==XXWIDGETS_OK)s=control(p,XXWIDGETS_BUTTON,"Browse...",23,p->row,16,1,&p->browse);p->row+=2;
-        TEXT("Database update URL",info.update_url);
-        if(s==XXWIDGETS_OK)s=control(p,XXWIDGETS_BUTTON,"Update",23,p->row,12,1,&p->update);
+        TEXT(CDIE_N_("Info database"),info.path);
+        if(s==XXWIDGETS_OK)s=control(p,XXWIDGETS_BUTTON,CDIE_N_("Browse..."),23,p->row,16,1,&p->browse);p->row+=2;
+        if(s==XXWIDGETS_OK&&!c->host->browse)s=xxwidgets_widget_set_enabled(p->browse,0);
+        TEXT(CDIE_N_("Database update URL"),info.update_url);
+        /* Only shows the address; nothing is downloaded from here. */
+        if(s==XXWIDGETS_OK)s=control(p,XXWIDGETS_BUTTON,CDIE_N_("Open page"),23,p->row,16,1,&p->update);
+        p->row+=2;if(s==XXWIDGETS_OK)s=control(p,XXWIDGETS_LABEL,CDIE_N_("Open page shows this address in the web browser."),0,p->row,bounds.width,1,&p->message);
         break;
     case GUI_OPTIONS_DISASM: {
-        const char*syntax[]={"Intel","AT&T"};const char*names[XXWIDGETS_DISASM_COLOR_COUNT];size_t i;
-        s=field(p,FIELD_COMBO,"Syntax",&v->disasm.syntax,&d->disasm.syntax,0,&w);
+        const char*syntax[]={CDIE_N_("Intel"),CDIE_N_("AT&T")};const char*names[XXWIDGETS_DISASM_COLOR_COUNT];size_t i;
+        s=field(p,FIELD_COMBO,CDIE_N_("Syntax"),&v->disasm.syntax,&d->disasm.syntax,0,&w);
         if(s==XXWIDGETS_OK)s=choices(w,syntax,2);if(s==XXWIDGETS_OK)s=xxwidgets_widget_set_value(w,v->disasm.syntax);
-        BOOL("Uppercase",disasm.uppercase);BOOL("Show colons in addresses",disasm.location_colon);BOOL("Highlight",disasm.highlight);
-        TEXT("Font family",disasm.font.family);
-        if(s==XXWIDGETS_OK)s=field(p,FIELD_UINT,"Font size",&v->disasm.font.point_size,&d->disasm.font.point_size,0,NULL);
-        if(s==XXWIDGETS_OK)s=control(p,XXWIDGETS_BUTTON,"Choose font...",23,p->row,20,1,&p->choose);p->row+=2;
+        BOOL(CDIE_N_("Uppercase"),disasm.uppercase);BOOL(CDIE_N_("Show colons in addresses"),disasm.location_colon);BOOL(CDIE_N_("Highlight"),disasm.highlight);
+        TEXT(CDIE_N_("Font family"),disasm.font.family);
+        if(s==XXWIDGETS_OK)s=field(p,FIELD_UINT,CDIE_N_("Font size"),&v->disasm.font.point_size,&d->disasm.font.point_size,0,NULL);
+        if(s==XXWIDGETS_OK)s=control(p,XXWIDGETS_BUTTON,CDIE_N_("Choose font..."),23,p->row,20,1,&p->choose);p->row+=2;
+        /* Without a native chooser (Cocoa, the terminal) the family and size are typed. */
+        if(s==XXWIDGETS_OK&&!xxwidgets_font_choose_available(xxwidgets_widget_app(dialog)))s=xxwidgets_widget_set_enabled(p->choose,0);
         for(i=0;i<XXWIDGETS_DISASM_COLOR_COUNT;++i)names[i]=xxwidgets_disasm_color_name((xxwidgets_disasm_color_id)i);
-        if(s==XXWIDGETS_OK)s=control(p,XXWIDGETS_LABEL,"Color category",0,p->row,22,1,NULL);
+        if(s==XXWIDGETS_OK)s=control(p,XXWIDGETS_LABEL,CDIE_N_("Color category"),0,p->row,22,1,NULL);
         if(s==XXWIDGETS_OK)s=control(p,XXWIDGETS_COMBOBOX,"",23,p->row,bounds.width-23,2,&p->color_select);
         if(s==XXWIDGETS_OK)s=choices(p->color_select,names,XXWIDGETS_DISASM_COLOR_COUNT);p->row+=2;
-        if(s==XXWIDGETS_OK)s=control(p,XXWIDGETS_LABEL,"Text color",0,p->row,22,1,NULL);
+        if(s==XXWIDGETS_OK)s=control(p,XXWIDGETS_LABEL,CDIE_N_("Text color"),0,p->row,22,1,NULL);
         if(s==XXWIDGETS_OK)s=control(p,XXWIDGETS_EDIT,"",23,p->row,18,1,&p->color_fore);p->row+=2;
-        if(s==XXWIDGETS_OK)s=control(p,XXWIDGETS_LABEL,"Background color",0,p->row,22,1,NULL);
+        if(s==XXWIDGETS_OK)s=control(p,XXWIDGETS_LABEL,CDIE_N_("Background color"),0,p->row,22,1,NULL);
         if(s==XXWIDGETS_OK)s=control(p,XXWIDGETS_EDIT,"",23,p->row,18,1,&p->color_back);p->row+=2;
         memcpy(p->colors,v->disasm.colors,sizeof(p->colors));if(s==XXWIDGETS_OK)s=show_color(p);
-        if(s==XXWIDGETS_OK)s=control(p,XXWIDGETS_LABEL,"#RRGGBB or Default",0,p->row,bounds.width,1,&p->message);
+        if(s==XXWIDGETS_OK)s=control(p,XXWIDGETS_LABEL,CDIE_N_("#RRGGBB or Default"),0,p->row,bounds.width,1,&p->message);
         break;}
     default:s=XXWIDGETS_INVALID_ARGUMENT;break;
     }
@@ -199,17 +207,40 @@ static void event(void *state,const xxwidgets_event*e)
     if(e->type==XXWIDGETS_EVENT_CLICK){if(e->widget==p->browse)p->pending=1;else if(e->widget==p->update)p->pending=2;else if(e->widget==p->choose)p->pending=3;}
     if(e->type==XXWIDGETS_EVENT_SELECT && e->widget==p->color_select)p->pending=4;
 }
+/* A page action reports on the page and returns OK: an error from process
+ * ends the whole Options dialog, and every edit on every page with it. */
+static xxwidgets_status page_message(extra_page*p,const char*text){return p->message?xxwidgets_widget_set_text(p->message,text):XXWIDGETS_OK;}
+static xxwidgets_status page_failure(extra_page*p,const char*action,xxwidgets_status failure)
+{
+    char text[256];xx_rt_snprintf(text,sizeof(text),"%s %s",CDIE_TR(action),gui_error_status_text(failure));return page_message(p,text);
+}
+static xxwidgets_status open_page(extra_page*p,const char*url)
+{
+    char text[GUI_PREFERENCE_URL_MAX+160];xxwidgets_status s;
+    if(!url[0])return page_message(p,CDIE_TR("Enter the address first."));
+    s=xxwidgets_open_url(p->dialog,url);if(s==XXWIDGETS_OK)return s;
+    if(s==XXWIDGETS_INVALID_ARGUMENT)return page_message(p,CDIE_TR("Enter an http:// or https:// address without spaces."));
+    cdie_translation_snprintf(text,sizeof(text),CDIE_N_("No web browser opened; visit %s yourself."),url);return page_message(p,text);
+}
 static xxwidgets_status process(void*state)
 {
     extra_page*p=state;gui_options_extra_values*c=p->config;int pending=p->pending,accepted=0;char*path=NULL;xxwidgets_status s=XXWIDGETS_OK;
     p->pending=0;if(!pending)return s;
     if(pending==4){int selected=0;s=xxwidgets_widget_get_value(p->color_select,&selected);if(s!=XXWIDGETS_OK)return s;if(!save_color(p)){(void)xxwidgets_widget_set_value(p->color_select,p->selected_color);return xxwidgets_widget_set_text(p->message,CDIE_TR("Use #RRGGBB or Default before selecting another color."));}if(selected>=0&&selected<XXWIDGETS_DISASM_COLOR_COUNT){p->selected_color=selected;return show_color(p);}return XXWIDGETS_OK;}
-    if(pending==3){xxwidgets_disasm_options o=c->values->disasm;if(!read_fields(p,1,NULL,0))return XXWIDGETS_OK;o=c->values->disasm;s=xxwidgets_font_choose_dialog(p->dialog,XXWIDGETS_FONT_DISASM_VIEWS,&o.font,&accepted);if(s==XXWIDGETS_OK&&accepted){c->values->disasm.font=o.font;for(size_t i=0;i<p->field_count;++i)if(p->fields[i].value==c->values->disasm.font.family||p->fields[i].value==&c->values->disasm.font.point_size)s=fill_field(&p->fields[i],0);}return s==XXWIDGETS_UNAVAILABLE?XXWIDGETS_OK:s;}
-    if(pending==2){char url[GUI_PREFERENCE_URL_MAX];if(c->id==GUI_OPTIONS_ONLINE)strcpy(url,"https://www.virustotal.com/gui/my-apikey");else if(xxwidgets_widget_get_text(p->fields[1].control,url,sizeof(url),NULL)!=XXWIDGETS_OK)return XXWIDGETS_OK;return xxwidgets_open_url(p->dialog,url);}
+    if(pending==3){xxwidgets_disasm_options o=c->values->disasm;if(!read_fields(p,1,NULL,0))return page_message(p,CDIE_TR("Fix the font size (0 or 4..96) and the colors first."));
+        o=c->values->disasm;s=xxwidgets_font_choose_dialog(p->dialog,XXWIDGETS_FONT_DISASM_VIEWS,&o.font,&accepted);
+        if(s==XXWIDGETS_OK&&accepted){c->values->disasm.font=o.font;for(size_t i=0;i<p->field_count;++i)if(p->fields[i].value==c->values->disasm.font.family||p->fields[i].value==&c->values->disasm.font.point_size)s=fill_field(&p->fields[i],0);return s;}
+        if(s==XXWIDGETS_OK)return s;
+        /* A refused font (GTK: over 96 or under 4 points, absolute sizes) or no chooser. */
+        return page_message(p,s==XXWIDGETS_INVALID_ARGUMENT||s==XXWIDGETS_PLATFORM_ERROR?CDIE_TR("The chosen font cannot be used; pick a size of 4..96 points."):
+            CDIE_TR("No font chooser is available; type the family and size."));}
+    if(pending==2){char url[GUI_PREFERENCE_URL_MAX];if(c->id==GUI_OPTIONS_ONLINE)strcpy(url,"https://www.virustotal.com/gui/my-apikey");else if(xxwidgets_widget_get_text(p->fields[1].control,url,sizeof(url),NULL)!=XXWIDGETS_OK)return XXWIDGETS_OK;return open_page(p,url);}
     if(pending==1){extra_field*f=&p->fields[c->id==GUI_OPTIONS_APPEARANCE?4:0];char initial[GUI_PREFERENCE_PATH_MAX];if(xxwidgets_widget_get_text(f->control,initial,sizeof(initial),NULL)!=XXWIDGETS_OK)return XXWIDGETS_OK;
         if(c->id==GUI_OPTIONS_APPEARANCE)s=xxwidgets_file_dialog(p->dialog,XXWIDGETS_FILE_DIALOG_OPEN,CDIE_TR("Choose translation"),initial,&path,&accepted);
         else if(c->host->browse)s=c->host->browse(p->dialog,initial,&path,&accepted,c->host->user);
-        if(s==XXWIDGETS_OK&&accepted&&path)s=xxwidgets_widget_set_text(f->control,path);free(path);return s==XXWIDGETS_UNAVAILABLE?XXWIDGETS_OK:s;}
+        else s=XXWIDGETS_UNAVAILABLE;
+        if(s==XXWIDGETS_OK&&accepted&&path)s=xxwidgets_widget_set_text(f->control,path);free(path);
+        return s==XXWIDGETS_OK?s:page_failure(p,CDIE_N_("No chooser opened; type the path."),s);}
     return s;
 }
 static xxwidgets_status reset(void*state)
@@ -222,6 +253,6 @@ static int extra_validate(void*state,char*error,size_t capacity){return read_fie
 static int apply(void*state,char*error,size_t capacity){return read_fields(state,1,error,capacity);}
 xxwidgets_status gui_options_extra_page(xxwidgets_options_page*page,const char*title,gui_options_extra_values*values)
 {
-    if(!page||!title||!values)return XXWIDGETS_INVALID_ARGUMENT;memset(page,0,sizeof(*page));page->title=title;page->width=68;page->height=values->id==GUI_OPTIONS_DISASM?23:values->id==GUI_OPTIONS_APPEARANCE?16:12;
+    if(!page||!title||!values)return XXWIDGETS_INVALID_ARGUMENT;memset(page,0,sizeof(*page));page->title=title;page->width=68;page->height=values->id==GUI_OPTIONS_DISASM?23:values->id==GUI_OPTIONS_APPEARANCE?18:12;
     page->create=create;page->event=event;page->process=process;page->reset=reset;page->validate=extra_validate;page->apply=apply;page->destroy=destroy;page->user=values;return XXWIDGETS_OK;
 }

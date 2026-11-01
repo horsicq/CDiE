@@ -13,7 +13,7 @@ typedef struct options_session {
     xxwidgets_optimization_page_values *optimization;
     gui_backend_optimization_options previous_optimization;
     gui_backend_scan_preferences previous_scan;
-    char previous_paths[3][GUI_PREFERENCE_PATH_MAX];
+    char previous_paths[GUI_DB_COUNT][GUI_PREFERENCE_PATH_MAX];
     int committed, reloaded;
 } options_session;
 static xxwidgets_status browse_database(xxwidgets_widget *dialog,const char*initial,char**path,int*accepted,void*user)
@@ -63,21 +63,34 @@ static void commit_event(void*u,const xxwidgets_event*e){commit_state*s=u;if(s->
 static xxwidgets_status commit_process(void*u){commit_state*s=u;return s->binding->page.process?s->binding->page.process(s->page_state):XXWIDGETS_OK;}
 static xxwidgets_status commit_reset(void*u){commit_state*s=u;return s->binding->page.reset?s->binding->page.reset(s->page_state):XXWIDGETS_OK;}
 static int commit_validate(void*u,char*e,size_t n){commit_state*s=u;return !s->binding->page.validate||s->binding->page.validate(s->page_state,e,n);}
+/* The backend's reason in the user's language, naming the folder concerned. */
+static void configuration_error(const options_session*c,char*error,size_t capacity)
+{
+    const char*paths[GUI_DB_COUNT]={c->edited->databases.main_path,c->edited->databases.custom_path};int slot=-1;
+    gui_backend_configuration_failure failure=gui_backend_configuration_failed(&slot);
+    if(!error||!capacity)return;
+    if(failure==GUI_BACKEND_CONFIGURATION_OPTIONS)xx_rt_snprintf(error,capacity,"%s",CDIE_TR("These scan options cannot be used: the scan engine is not available."));
+    else if(failure!=GUI_BACKEND_CONFIGURATION_OK&&slot>=0&&slot<GUI_DB_COUNT)
+        gui_scan_options_database_error(slot,failure==GUI_BACKEND_CONFIGURATION_MISSING,paths[slot],error,capacity);
+}
+/* With the commit on the Scan page a later page can still reject OK; a second
+ * OK commits again, so a reload is remembered until the dialog ends. */
 static int commit_apply(void*u,char*error,size_t capacity)
 {
     commit_state*s=u;options_session*c=s->binding->session;gui_backend_scan_preferences scan;
-    gui_backend_optimization_options optimization;
+    gui_backend_optimization_options optimization;int changed;
     if(s->binding->page.apply&&!s->binding->page.apply(s->page_state,error,capacity))return 0;
     scan.recursive=c->edited->scan.recursive;scan.profiling=c->edited->scan.profiling;scan.sort=c->edited->scan.sort;scan.use_cache=c->edited->scan.use_cache;
     memcpy(scan.engine,c->edited->scan.engine,sizeof(scan.engine));
-    c->reloaded=!gui_backend_db_paths_current(c->edited->databases.main_path,c->edited->databases.extra_path,c->edited->databases.custom_path);
-    if(!gui_backend_apply_configuration(&scan,c->edited->databases.main_path,c->edited->databases.extra_path,c->edited->databases.custom_path,error,capacity)){c->reloaded=0;return 0;}
+    changed=!gui_backend_db_paths_current(c->edited->databases.main_path,c->edited->databases.custom_path);
+    if(!gui_backend_apply_configuration(&scan,c->edited->databases.main_path,c->edited->databases.custom_path,error,capacity)){
+        configuration_error(c,error,capacity);return 0;}
     optimization_from_page(&c->optimization->options,&optimization);
     if(!gui_backend_set_optimization_options(&optimization)) {
-        (void)gui_backend_apply_configuration(&c->previous_scan,c->previous_paths[0],c->previous_paths[1],c->previous_paths[2],NULL,0);
+        (void)gui_backend_apply_configuration(&c->previous_scan,c->previous_paths[GUI_DB_MAIN],c->previous_paths[GUI_DB_CUSTOM],NULL,0);
         if(error&&capacity)xx_rt_snprintf(error,capacity,"%s",CDIE_TR("Cannot apply optimization settings."));c->reloaded=0;return 0;
     }
-    c->committed=1;return 1;
+    c->reloaded|=changed;c->committed=1;return 1;
 }
 static xxwidgets_status commit_destroy(void*u){commit_state*s=u;xxwidgets_status result=s->binding->page.destroy?s->binding->page.destroy(s->page_state):XXWIDGETS_OK;free(s);return result;}
 static void bind_commit(xxwidgets_options_page*page,commit_binding*binding,options_session*session)
@@ -100,12 +113,11 @@ xxwidgets_status gui_options_dialog(xxwidgets_widget*owner,const gui_options_hos
     if(!gui_backend_get_optimization_options(&session.previous_optimization)||!gui_backend_get_optimization_capabilities(&features)||
        !gui_backend_get_scan_preferences(&session.previous_scan))return XXWIDGETS_PLATFORM_ERROR;
     session.host=host;session.edited=&edited;session.optimization=&optimization;edited=*values;gui_options_values_init(&defaults);
-    xx_rt_snprintf(session.previous_paths[0],sizeof(session.previous_paths[0]),"%s",gui_backend_main_db_path());
-    xx_rt_snprintf(session.previous_paths[1],sizeof(session.previous_paths[1]),"%s",gui_backend_extra_db_path());
-    xx_rt_snprintf(session.previous_paths[2],sizeof(session.previous_paths[2]),"%s",gui_backend_custom_db_path());
-    xx_rt_snprintf(edited.databases.main_path,sizeof(edited.databases.main_path),"%s",gui_backend_db_path_is_default(0)?"":gui_backend_main_db_path());
-    xx_rt_snprintf(edited.databases.extra_path,sizeof(edited.databases.extra_path),"%s",gui_backend_db_path_is_default(1)?"":gui_backend_extra_db_path());
-    xx_rt_snprintf(edited.databases.custom_path,sizeof(edited.databases.custom_path),"%s",gui_backend_db_path_is_default(2)?"":gui_backend_custom_db_path());
+    /* A rollback restores default slots as defaults ("") rather than pinning their current folder. */
+    xx_rt_snprintf(session.previous_paths[GUI_DB_MAIN],sizeof(session.previous_paths[GUI_DB_MAIN]),"%s",gui_backend_db_path_is_default(GUI_DB_MAIN)?"":gui_backend_main_db_path());
+    xx_rt_snprintf(session.previous_paths[GUI_DB_CUSTOM],sizeof(session.previous_paths[GUI_DB_CUSTOM]),"%s",gui_backend_db_path_is_default(GUI_DB_CUSTOM)?"":gui_backend_custom_db_path());
+    xx_rt_snprintf(edited.databases.main_path,sizeof(edited.databases.main_path),"%s",gui_backend_db_path_is_default(GUI_DB_MAIN)?"":gui_backend_main_db_path());
+    xx_rt_snprintf(edited.databases.custom_path,sizeof(edited.databases.custom_path),"%s",gui_backend_db_path_is_default(GUI_DB_CUSTOM)?"":gui_backend_custom_db_path());
     hex.options=edited.hex;hex.show_editable=0;optimization_to_page(&session.previous_optimization,&features,&optimization);
     database_callbacks.browse=host->browse?browse_database:NULL;
     scan_context=(gui_scan_options_page_context){&edited.scan,&edited.databases,database_callbacks,&session};
@@ -121,16 +133,20 @@ xxwidgets_status gui_options_dialog(xxwidgets_widget*owner,const gui_options_hos
         case GUI_OPTIONS_SCAN:status=gui_scan_options_page_ex(&pages[count],CDIE_TR("Scan"),&scan_context);break;
         case GUI_OPTIONS_HEX:status=xxwidgets_options_page_hex(&pages[count],CDIE_TR("Hex"),&hex);break;
         case GUI_OPTIONS_OPTIMIZATION:status=xxwidgets_options_page_optimization(&pages[count],CDIE_TR("Features"),&optimization);break;
-        default:{const char*title=id==GUI_OPTIONS_APPEARANCE?"Appearance":id==GUI_OPTIONS_FILE?"File":id==GUI_OPTIONS_SIGNATURES?"Signatures":id==GUI_OPTIONS_DISASM?"Disasm":id==GUI_OPTIONS_ONLINE?"Online tools":"Info";
+        default:{const char*title=id==GUI_OPTIONS_APPEARANCE?CDIE_N_("Appearance"):id==GUI_OPTIONS_FILE?CDIE_N_("File"):id==GUI_OPTIONS_SIGNATURES?CDIE_N_("Signatures"):
+                id==GUI_OPTIONS_DISASM?CDIE_N_("Disasm"):id==GUI_OPTIONS_ONLINE?CDIE_N_("Online tools"):CDIE_N_("Info");
             status=gui_options_extra_page(&pages[count],CDIE_TR(title),&extra[count]);break;}
         }
         if(status==XXWIDGETS_OK){if(id==*page)shown=count;ids[count++]=id;}
     }
     if(status==XXWIDGETS_OK&&!count)status=XXWIDGETS_INVALID_ARGUMENT;
-    if(status==XXWIDGETS_OK){bind_commit(&pages[count-1],&binding,&session);status=xxwidgets_options_pages_dialog(owner,CDIE_TR("Options"),pages,count,&shown,accepted);}
+    /* The commit rides on the Scan page when there is one, so a database that
+     * fails to load is reported where its folders are edited. */
+    if(status==XXWIDGETS_OK){size_t commit=count-1;for(i=0;i<count;++i)if(ids[i]==GUI_OPTIONS_SCAN)commit=i;
+        bind_commit(&pages[commit],&binding,&session);status=xxwidgets_options_pages_dialog(owner,CDIE_TR("Options"),pages,count,&shown,accepted);}
     if(status==XXWIDGETS_OK&&count)*page=ids[shown];
     if(status!=XXWIDGETS_OK||!*accepted){
-        if(session.committed){(void)gui_backend_apply_configuration(&session.previous_scan,session.previous_paths[0],session.previous_paths[1],session.previous_paths[2],NULL,0);(void)gui_backend_set_optimization_options(&session.previous_optimization);}
+        if(session.committed){(void)gui_backend_apply_configuration(&session.previous_scan,session.previous_paths[GUI_DB_MAIN],session.previous_paths[GUI_DB_CUSTOM],NULL,0);(void)gui_backend_set_optimization_options(&session.previous_optimization);}
         *accepted=0;return status;
     }
     edited.hex=hex.options;

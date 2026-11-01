@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 hors<horsicq@gmail.com>. SPDX-License-Identifier: MIT */
 #include "app/cdie_translation.h"
 #include "gui_memory_map.h"
+#include "gui_error.h"
 #include <xxfclib/io/xx_io.h>
 #include <xxfclib/rt/xx_rt.h>
 #include <xxfclib/threads/xx_threads.h>
@@ -147,7 +148,9 @@ static xxwidgets_status show_memory_map(xxwidgets_widget *owner, const char *pat
     if (!session.current) return XXWIDGETS_OUT_OF_MEMORY;
     session.device = xx_io_file_open(path, "rb");
     size = session.device ? xx_io_total_size(session.device) : -1;
-    if (size < 0 || (uint64_t)size != data->file_size) status = xxwidgets_text_dialog(owner, CDIE_TR("Memory Map"), "Cannot open the current file for Memory Map");
+    if (size < 0) status = gui_error_show_file(owner, CDIE_TR("Memory Map"), CDIE_N_("Cannot open %s for the Memory Map."), path, NULL);
+    else if ((uint64_t)size != data->file_size)
+        status = gui_error_show_file(owner, CDIE_TR("Memory Map"), CDIE_N_("%s changed while its Memory Map was read. Open the Memory Map again."), path, NULL);
     else status = xxwidgets_memory_map_dialog_with_device(owner, CDIE_TR("Memory Map"), &session.current->data, session.device, reload_memory_map, &session);
     /* dialog_with_device destroys the view before returning; its borrowed
      * device remains valid throughout preview reads and modal teardown. */
@@ -223,7 +226,8 @@ xxwidgets_status gui_memory_map_show(xxwidgets_widget *owner, const char *path)
     xx_mutex_destroy(job.lock);
     if (!joined) status = XXWIDGETS_PLATFORM_ERROR;
     else if (status == XXWIDGETS_OK && job.ok) status = show_memory_map(owner, path, job.data);
-    else if (status == XXWIDGETS_OK && !job.work.is_stop) status = xxwidgets_text_dialog(owner, CDIE_TR("Memory Map"), job.error ? job.error : "Cannot read Memory Map");
+    else if (status == XXWIDGETS_OK && !job.work.is_stop)
+        status = gui_error_show_file(owner, CDIE_TR("Memory Map"), CDIE_N_("Cannot read the Memory Map of %s."), path, job.error);
     xx_rt_free(job.data);
     xx_rt_free(job.error);
     return status;

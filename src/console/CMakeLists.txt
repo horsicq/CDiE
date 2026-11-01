@@ -7,6 +7,9 @@ add_executable(cdie
     ${CMAKE_CURRENT_LIST_DIR}/../app/cdie_entropy.c
     ${CMAKE_CURRENT_LIST_DIR}/../app/cdie_hash.c
     ${CMAKE_CURRENT_LIST_DIR}/../app/cdie_strings.c
+    # Runs die-update for --checkupdate/--update; diec only.
+    ${CMAKE_CURRENT_LIST_DIR}/../app/cdie_spawn.h
+    ${CMAKE_CURRENT_LIST_DIR}/../app/cdie_spawn.c
 )
 
 set_target_properties(cdie PROPERTIES OUTPUT_NAME "diec")
@@ -67,9 +70,6 @@ if(UNIX)
     endif()
 endif()
 
-if(UNIX AND NOT APPLE)
-    include(GNUInstallDirs)
-    install(TARGETS cdie RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-else()
-    install(TARGETS cdie RUNTIME DESTINATION ".")
-endif()
+# bin/ on Linux (lib/cdie in the FHS layout), the prefix root elsewhere; see
+# CDIE_BINARY_DESTINATION in the top-level CMakeLists.txt.
+install(TARGETS cdie RUNTIME DESTINATION "${CDIE_BINARY_DESTINATION}")

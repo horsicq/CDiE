@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 hors<horsicq@gmail.com>. SPDX-License-Identifier: MIT */
 #include "app/cdie_translation.h"
 #include "gui_hex_view.h"
+#include "gui_error.h"
 #include "../app/cdie_app.h"
 #include <xxfclib/rt/xx_rt.h>
 
@@ -28,9 +29,9 @@ int gui_hex_view_open(const char *path, xx_io_device **out, char **error)
     if (!out || !error) return 0;
     *out = NULL; *error = NULL;
     device = path && *path ? xx_io_file_open(path, "rb") : NULL;
-    if (!device) { *error = cdie_strdup("Cannot open file for Hex View"); return 0; }
+    if (!device) { *error = cdie_strdup(CDIE_N_("Cannot open file for Hex View")); return 0; }
     if (xx_io_total_size(device) < 0) {
-        xx_io_close(device); *error = cdie_strdup("Cannot determine file size"); return 0;
+        xx_io_close(device); *error = cdie_strdup(CDIE_N_("Cannot determine file size")); return 0;
     }
     *out = device; return 1;
 }
@@ -41,7 +42,9 @@ xxwidgets_status gui_hex_view_show(xxwidgets_widget *owner, const char *path)
     xxwidgets_status status;
     if (!owner || !path || !*path) return XXWIDGETS_INVALID_ARGUMENT;
     if (!gui_hex_view_open(path, &device, &error)) {
-        status = xxwidgets_text_dialog(owner, CDIE_TR("Hex View"), error ? error : "Cannot open file");
+        /* The file system's reason says it better than the opener's detail. */
+        status = gui_error_show_file(owner, CDIE_TR("Hex View"), CDIE_N_("Cannot open %s in the Hex View."), path,
+            gui_error_file_reason(path) ? NULL : error);
         xx_rt_free(error); return status;
     }
     {

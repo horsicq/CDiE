@@ -24,5 +24,10 @@ typedef struct gui_scan_options_page_context {
     void *user;
 } gui_scan_options_page_context;
 xxwidgets_status gui_scan_options_page_ex(xxwidgets_options_page *page, const char *title, gui_scan_options_page_context *context);
+/* The translated sentence for a database the Scan page cannot apply: slot is
+ * GUI_DB_MAIN or GUI_DB_CUSTOM; missing says its folder does not exist, otherwise
+ * that no signatures load from path ("" = the default folder). The page's own
+ * check uses it on OK; Options uses it for a failed commit. */
+void gui_scan_options_database_error(int slot, int missing, const char *path, char *error, size_t capacity);
 
 #endif

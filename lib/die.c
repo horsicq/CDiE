@@ -68,8 +68,7 @@ static void die_options_from_flags(xx_scan_options *pOptions, unsigned int nFlag
     xx_scan_options_init(pOptions);
 
     /* getDefaultOptions sets only show type/version/info; it does not enable
-     * the extra/custom databases or the default sort that the console does. */
-    pOptions->use_extra_database = 0;
+     * the custom database or the default sort that the console does. */
     pOptions->use_custom_database = 0;
     pOptions->sort = (nFlags & SF_SORT) ? 1 : 0;
 

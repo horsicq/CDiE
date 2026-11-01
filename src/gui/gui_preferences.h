@@ -14,7 +14,7 @@ typedef struct gui_file_preferences {
     char last_directory[GUI_PREFERENCE_PATH_MAX], recent_files[16384];
 } gui_file_preferences;
 typedef struct gui_database_preferences {
-    char main_path[GUI_PREFERENCE_PATH_MAX], extra_path[GUI_PREFERENCE_PATH_MAX], custom_path[GUI_PREFERENCE_PATH_MAX];
+    char main_path[GUI_PREFERENCE_PATH_MAX], custom_path[GUI_PREFERENCE_PATH_MAX];
     char peid_path[GUI_PREFERENCE_PATH_MAX], yara_path[GUI_PREFERENCE_PATH_MAX];
     char main_update_url[GUI_PREFERENCE_URL_MAX], peid_update_url[GUI_PREFERENCE_URL_MAX], yara_update_url[GUI_PREFERENCE_URL_MAX];
 } gui_database_preferences;

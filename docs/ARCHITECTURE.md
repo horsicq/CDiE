@@ -388,25 +388,44 @@ See [JS_ENGINE.md](JS_ENGINE.md).
   `getScanID()`, and `isResource()` identifies these child scans.
   Malformed ranges, cancellation, allocation failure and more than 65,536
   resource leaves fail the scan and discard partial results.
-* `scan/xx_scan_archives.c` — visits ZIP (also JAR/APK/IPA), LHA, GZIP, BZIP2
-  and Mach-O Fat children when `archives_scan` is enabled. Compressed output
-  uses memory only when its decoded size is less than
-  `xx_get_file_buffer_size()`. Equality or a larger size uses `xx_io_temp_open()`;
-  temporary storage is cleaned up after scanning and honors an active
-  memory-only policy. GZIP/BZIP2 output spills as its size becomes known.
-  ZIP Store, ordinary LHA LH0/LZ4 members and Mach-O Fat slices use bounded
-  `xx_io_sub` source views after required integrity validation. Masked LHA
-  payloads require decoding. Archive child scans use the selected device
-  directly, without copying small inputs into memory again. No archive-derived
-  output paths are opened. This storage threshold does not bound decoder
-  internal buffers. Concatenated GZIP/BZIP2 streams are one logical child.
-  Directories are skipped. Encryption, unsupported
-  methods, malformed data, checksum failures and limits fail the scan.
-  Defaults are 256 MiB per member, 1 GiB total and 100,000 entries; the
-  `archive_max_member_size`, `archive_max_total_size` and `archive_max_members`
-  options override these when nonzero. Native decoder limits still apply;
-  LHA compressed or masked payloads retain their 256 MiB decoded-member ceiling.
-  Children disable further traversal.
+* `scan/xx_scan_archives.c` — walks archive members for the engine. With
+  `archives_scan` the engine expands only ZIP-family inputs (ZIP, JAR, APK,
+  IPA), as `XScanEngine` expands ZIP, 7Z, RAR, CAB and ISO 9660 containers;
+  GZIP, BZIP2, LHA and Mach-O Fat inputs are scanned unexpanded. (The walker
+  still visits LHA members and concatenated GZIP/BZIP2 streams for other
+  callers.) Like `XScanEngine`, it decodes or checksums every member it
+  reaches, Store members included. A member that fails its CRC, uses a ZIP
+  method XZip does not map, does not decode, is encrypted or exceeds a limit
+  is skipped; the first two report "Invalid CRC" or "Unknown compression
+  method: Unknown", which `xx_scan_engine.c` adds as a "Last error" record to
+  the result of the next scan that finishes, as `XScanEngine`'s single error
+  string does. Only storage faults, allocation failures and cancellation fail
+  the walk; an unreadable later record ends it after the members before it.
+  Without `aggressive_scan` a member is passed on only when its first 1,029
+  bytes can satisfy `XScanEngine::isScanable` (executables, DEX, PDF,
+  archives, TAR); any other member is decoded into a discarding sink for its
+  CRC alone, with no buffer, temporary file or type detection. Empty members
+  and directories therefore reach only an aggressive scan. A ZIP without end
+  records is read from its local headers (Store and Deflate members), and a
+  ZIP whose offsets count from the start of leading data is read as XZip
+  reads it. Compressed output uses memory only when its decoded size is less
+  than `xx_get_file_buffer_size()`. Equality or a larger size uses
+  `xx_io_temp_open()`; temporary storage is cleaned up after scanning and
+  honors an active memory-only policy. ZIP Store members use bounded
+  `xx_io_sub` source views after their CRC is verified. Archive child scans
+  use the selected device directly, without copying small inputs into memory
+  again. No archive-derived output paths are opened. This storage threshold
+  does not bound decoder internal buffers. Defaults are 256 MiB per member,
+  no total limit and 100,000 entries; the `archive_max_member_size`,
+  `archive_max_total_size` and `archive_max_members` options override these
+  when nonzero. Native decoder limits still apply.
+  The engine scans at most 21 members per archive (100,000 when aggressive).
+  Members keep `archives_scan` and clear the other traversal flags, so nested
+  archives expand, down to 20 archive levels (`XX_SCAN_ARCHIVE_MAX_DEPTH`).
+  As a deliberate cdie safety limit that `XScanEngine` does not have, one
+  input scans at most 10,000 archive members, all levels together (100,000
+  when aggressive); reaching it stops the expansion with "Last error: Archive
+  member scan limit reached (10000)".
   Records retain the member name, packed extent and compression state.
   Compressed child offsets refer to decoded data; stored child offsets refer
   to the original input. GUI, text and JSON output identify these separately.
@@ -427,7 +446,8 @@ See [JS_ENGINE.md](JS_ENGINE.md).
   to script boundaries and the `_isStop()` script helper.
 * `scan/xx_scan_result.c` — type priorities, the type-name table and the
   text/JSON/XML/CSV/TSV formatters. Each reproduces the corresponding DiE
-  output exactly, which for the structured ones means matching quirks of the
+  output exactly (child scans in the structured formats excepted; see
+  [LIMITATIONS.md](LIMITATIONS.md)), which for the structured ones means matching quirks of the
   Qt classes that produced them — `QJsonObject` orders keys alphabetically,
   and `QXmlStreamWriter` opens with a blank line.
   `xx_scan_print_text` reuses the same record formatter while writing colored
@@ -436,6 +456,73 @@ See [JS_ENGINE.md](JS_ENGINE.md).
   Windows console mappings. The console flushes buffered headers before direct
   writes and restores attributes/modes before diagnostics or the next file.
   Disabled colors, redirected streams and structured formats remain plain.
+
+### `updater/` and the database update
+
+* `updater/cdie_updater.[ch]` — the update engine, shared by `die-update` and
+  the GUIs. `cdie_update_config_load_settings` reads Detect It Easy's
+  settings (`die.ini` in a portable installation, else the native `NTInfo/die`
+  store). `cdie_update_check` resolves the target folder (`db` only; cdie has
+  no extra database), asks the source —
+  a GitHub release through xxgithub, or a plain zip URL through xxnetlib —
+  and compares it with the `db/die-update.ini` stamp. `cdie_update_install`
+  then locks, stages, downloads, checks size and MD5, extracts through
+  xxfclib's ZIP reader, loads the new database once with `db_load`, writes
+  the stamp and swaps the folder by rename with rollback (see
+  [DATABASE.md](DATABASE.md#updating-the-database)). Progress and
+  cancellation go through an `xx_pd_struct`, and the result codes are
+  `die-update`'s exit codes. The header names xxfclib types only, and
+  xxgithub/xxnetlib are linked `PRIVATE`, so their C11 requirement stays on
+  this static library.
+* `updater/main_updater.c` — `die-update`, the command line over the engine:
+  options and stored settings, text and JSON reports, a progress line on
+  stderr, and Ctrl+C (SIGINT/SIGTERM on POSIX) turned into a cooperative
+  stop. It reuses cdie's entry point but is a hosted program: the network
+  backends need the C runtime.
+* `gui/gui_update.[ch]` — **Update database** for the Windows, GTK and Cocoa
+  frontends: `cdie_update_install` on a worker thread behind xxwidgets'
+  cancellable process dialog, then a reload of the backend's databases.
+  Default folders are resolved again (the update may have created the
+  per-user copy); folders chosen in the GUI are updated and reloaded where
+  they are. The URL is the GUI's own `Scan/Die/Database/Main/UpdateUrl`.
+* `app/cdie_paths.[ch]` — where an unconfigured database lives, shared by
+  `diec`, the GUIs and `die-update` so that an update lands where the
+  scanners look: the per-user copy (never in a portable installation), beside
+  the executable, the macOS bundle's `Contents/Resources`, the current
+  directory. `cdie_user_data_dir()` names the per-user folder, which
+  `CDIE_USER_DATA_DIR` overrides. CRT-free safe: xx_rt plus
+  `GetEnvironmentVariableW`.
+* `app/cdie_spawn.[ch]` — `diec` only. `--checkupdate` and `--update` run
+  `die-update` (from `diec`'s folder, or `CDIE_UPDATER`) in the foreground
+  with `diec`'s console, standard handles, working directory and
+  environment, and return its exit code, or 127 when it cannot be started.
+  On Windows the three standard handles are duplicated as inheritable and a
+  `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` keeps every other handle out of the
+  child; a console control handler keeps `diec` waiting while Ctrl+C stops
+  the child cleanly. POSIX uses `posix_spawn` and, like `system()`, ignores
+  SIGINT and SIGQUIT until the child exits.
+
+**Why `diec` starts a separate program.** `diec` is CRT-free and imports
+only `KERNEL32.dll` ([The runtime layer](#the-runtime-layer)). An HTTPS
+client cannot be: WinHTTP is a DLL of its own, libcurl is loaded at run time,
+and xxnetlib and xxgithub are hosted C11 libraries. Keeping the network code
+in `die-update` costs `diec` only the KERNEL32 process functions in the
+import table below, and leaves a scanner that opens no connection unless an
+update is asked for.
+
+**How the network libraries link.** xxnetlib links `xxfclib::xxfclib`
+unless its cache variable `XXNETLIB_XXFCLIB_TARGET` names another target.
+cdie sets it to `xxfclib::die_engine`, the archive it already builds, which
+holds every module xxnetlib uses, so `die-update` and the GUIs do not link a
+second archive compiled from the same sources. xxnetlib and xxgithub are
+added `EXCLUDE_FROM_ALL` with their tests, tools and install rules off
+(xxnetlib's local test server is kept when cdie's tests are built). With the
+CRT-free console, `die_engine` uses the static runtime, and the network
+libraries and updater targets are switched to it too. All of this needs
+`CDIE_BUILD_UPDATER` (ON by default), CMake 3.20 and the xxnetlib and
+xxgithub sources (`dep/<lib>`, then `../_mylibs/<lib>`, or
+`CDIE_XXNETLIB_DIR`/`CDIE_XXGITHUB_DIR`); without them CMake warns and
+builds neither `die-update` nor **Update database**.
 
 ## The runtime layer
 
@@ -447,21 +534,29 @@ library is not called at all, and with the default MSVC 64-bit build it is not
 even linked. `x_strlen` is `lstrlenA`, `x_malloc` is `HeapAlloc` on
 `GetProcessHeap()`, `x_fopen` is `CreateFileW` and the returned `void *` is a
 `HANDLE`, `x_printf` formats into a buffer and hands it to `WriteFile` on
-`GetStdHandle(STD_OUTPUT_HANDLE)`. The current Release console image imports 50
-`KERNEL32.dll` symbols on x64 and 51 on ARM64; the ARM64 image adds
+`GetStdHandle(STD_OUTPUT_HANDLE)`. The current Release console image imports 71
+`KERNEL32.dll` symbols on x64; the ARM64 image adds
 `IsProcessorFeaturePresent` for CPU capability detection. The import set is:
 
 | Area | Functions |
 | --- | --- |
 | Memory | `GetProcessHeap`, `HeapAlloc`, `HeapReAlloc`, `HeapFree` |
-| Files and metadata | `CreateFileW`, `ReadFile`, `SetFilePointerEx`, `CloseHandle`, `GetFileAttributesW`, `DeleteFileW`, `GetFileInformationByHandle`, `GetFileSizeEx`, `GetFileType`, `LocalFileTimeToFileTime`, `SetFileAttributesW`, `SetFileTime`, `DosDateTimeToFileTime`, `MoveFileExW` |
-| Console | `GetStdHandle`, `WriteFile`, `FlushFileBuffers`, `GetConsoleMode`, `SetConsoleMode` |
-| Directories and paths | `FindFirstFileW`, `FindNextFileW`, `FindClose`, `GetModuleFileNameA`, `CreateDirectoryW`, `GetFullPathNameW`, `RemoveDirectoryW`, `GetTempPathW` |
-| Process, timing, errors and threads | `GetCommandLineW`, `GetEnvironmentVariableA`, `ExitProcess`, `GetTickCount`, `QueryPerformanceCounter`, `QueryPerformanceFrequency`, `GetLastError`, `SetLastError`, `GetCurrentThreadId` |
+| Files and metadata | `CreateFileW`, `ReadFile`, `SetFilePointerEx`, `SetEndOfFile`, `CloseHandle`, `GetFileAttributesW`, `DeleteFileW`, `GetFileInformationByHandle`, `GetFileSizeEx`, `GetFileType`, `LocalFileTimeToFileTime`, `SetFileAttributesW`, `SetFileTime`, `DosDateTimeToFileTime`, `MoveFileExW` |
+| Console | `GetStdHandle`, `WriteFile`, `FlushFileBuffers`, `GetConsoleMode`, `SetConsoleMode`, `GetConsoleScreenBufferInfo`, `SetConsoleTextAttribute`, `SetConsoleCtrlHandler` |
+| Directories and paths | `FindFirstFileW`, `FindNextFileW`, `FindClose`, `GetModuleFileNameW`, `CreateDirectoryW`, `GetFullPathNameW`, `RemoveDirectoryW`, `GetTempPathW` |
+| Process, timing, errors and threads | `GetCommandLineW`, `GetEnvironmentVariableA`, `GetEnvironmentVariableW`, `ExitProcess`, `GetTickCount`, `QueryPerformanceCounter`, `QueryPerformanceFrequency`, `GetLastError`, `SetLastError`, `FormatMessageW`, `GetCurrentThreadId` |
+| Running `die-update` | `CreateProcessW`, `GetCurrentProcess`, `DuplicateHandle`, `InitializeProcThreadAttributeList`, `UpdateProcThreadAttribute`, `DeleteProcThreadAttributeList`, `WaitForSingleObject`, `GetExitCodeProcess` |
+| Synchronization | `InitializeCriticalSectionAndSpinCount`, `EnterCriticalSection`, `LeaveCriticalSection`, `DeleteCriticalSection` |
 | Thread-local storage | `TlsAlloc`, `TlsGetValue`, `TlsSetValue`, `TlsFree` |
-| Dynamic loading | `LoadLibraryW`, `GetProcAddress`, `FreeLibrary` |
-| Strings | `lstrlenA`, `MultiByteToWideChar`, `WideCharToMultiByte` |
+| Dynamic loading | `LoadLibraryW`, `GetModuleHandleW`, `GetProcAddress`, `FreeLibrary` |
+| Strings | `lstrlenA`, `MultiByteToWideChar`, `WideCharToMultiByte`, `CompareStringOrdinal`, `LCMapStringEx` |
 | ARM64 CPU features | `IsProcessorFeaturePresent` |
+
+`app/cdie_spawn.c` (`--checkupdate`, `--update`) accounts for the
+**Running `die-update`** row plus `SetConsoleCtrlHandler` and
+`FormatMessageW`; `GetEnvironmentVariableW` serves it and
+`app/cdie_paths.c`, which read path-valued variables without the ANSI code
+page's losses.
 
 The file and directory calls are the **wide** forms, and the program is driven
 by `GetCommandLineW`, because a `CreateFileA` build cannot even name a file
@@ -561,9 +656,14 @@ see [LIMITATIONS.md](LIMITATIONS.md#runtime).
    path keeps the reference's Binary/COM fallback order. A .NET PE appears as
    `Binary`, `MSDOS`, `PE`, its actual `PE32`/`PE64` width, and `DOTNET`.
    The DIE callback retains that PE width and enables the CLI-assembly flag
-   (`XFT_CLI_ASSEMBLY`) for the DOTNET binding below.
+   (`XFT_CLI_ASSEMBLY`) for the DOTNET binding below. A ZIP is typed ZIP only
+   when it passes a port of `XZip::isValid` (every central entry agrees with
+   its local header and owns its bytes); otherwise it is scanned as Binary.
 3. **Parse** the format with xxfclib's native inspection readers and build the
-   memory map. Other inputs get a single flat `Data` region.
+   memory map. Other inputs get a single flat `Data` region. An MS-DOS image
+   is mapped as `XMSDOS` maps it: module base `0x10000000`, entry point at that
+   base plus CS:IP (wrapped at 1 MiB), so `getAddressOfEntryPoint()` returns
+   `0x10000020` for CS:IP 0000:0020, as DIE 3.10 does.
 4. **Create** a JavaScript context and install the API. The format object is
    bound as `Binary`, the format name (`PE`, `ELF`, …) and — for a .NET PE —
    `DOTNET`.
@@ -592,7 +692,7 @@ see [LIMITATIONS.md](LIMITATIONS.md#runtime).
 
 Three details decide whether the printed lines are identical to `diec`:
 
-* **Signature order.** Each database (main, extra, custom) is sorted
+* **Signature order.** Each database (main, custom) is sorted
   independently and appended after the previous one — the reference engine
   never re-sorts the combined list. Scripts that check
   `_isResultPresent(...)` before adding a record therefore see the same state.

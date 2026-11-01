@@ -30,6 +30,8 @@ set(CDIE_SOURCES
 
     ${CMAKE_CURRENT_LIST_DIR}/app/cdie_app.h
     ${CMAKE_CURRENT_LIST_DIR}/app/cdie_app.c
+    ${CMAKE_CURRENT_LIST_DIR}/app/cdie_paths.h
+    ${CMAKE_CURRENT_LIST_DIR}/app/cdie_paths.c
 )
 
 # The library targets (see lib/) reuse the whole engine but supply their own
@@ -69,8 +71,12 @@ if(CDIE_BUILD_GUI)
         endfunction()
         cdie_add_widgets()
     endif()
-    # Persistent Options: the xxfclib settings store. Its runtime (xx_rt,
-    # memory, strings) already comes with die_engine.
+endif()
+
+# Persistent Options for the GUI and die-update's settings: the xxfclib
+# settings store. Its runtime (xx_rt, memory, strings) already comes with
+# die_engine.
+if(CDIE_BUILD_GUI OR CDIE_BUILD_UPDATER)
     set(_cdie_settings_src "${xxfclib_SOURCE_DIR}/src")
     add_library(cdie_settings STATIC
         "${_cdie_settings_src}/settings/xx_settings.c"
@@ -93,6 +99,12 @@ if(CDIE_BUILD_GUI)
         endif()
     endif()
     target_link_libraries(cdie_settings PUBLIC xxfclib::die_engine)
+    if(MSVC AND CDIE_NO_CRT AND NOT BUILD_SHARED_LIBS)
+        set_property(TARGET cdie_settings PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded")
+    endif()
+endif()
+
+if(CDIE_BUILD_GUI)
     add_library(cdie_ui_translation STATIC app/cdie_translation.c)
     target_link_libraries(cdie_ui_translation PUBLIC xxwidgets::xxwidgets)
     target_include_directories(cdie_ui_translation PUBLIC "${CMAKE_CURRENT_LIST_DIR}")
@@ -142,6 +154,11 @@ endfunction()
 
 if(CDIE_BUILD_CONSOLE)
     add_subdirectory(console)
+endif()
+# After the console (it copies die-update beside diec) and before the GUI
+# (which links cdie_updater).
+if(CDIE_BUILD_UPDATER)
+    add_subdirectory(updater)
 endif()
 if(CDIE_BUILD_GUI)
     add_subdirectory(gui)

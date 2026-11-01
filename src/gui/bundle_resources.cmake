@@ -18,8 +18,15 @@ if(EXISTS "${CDISASM_DIR}/LICENSE")
         endif()
     endforeach()
 endif()
+# cdie has no extra database: a db_extra beside db is never bundled. file(COPY)
+# never deletes, so a build tree that bundled one before keeps it; package
+# from a clean build tree.
+if(IS_DIRECTORY "${RESOURCES_DIR}/db_extra")
+    message(WARNING "cdie: ${RESOURCES_DIR}/db_extra is left over from an earlier build and is not used; "
+                    "package from a clean build tree")
+endif()
 if(DATABASE_DIR AND NOT DATABASE_DIR STREQUAL "NONE")
-    foreach(database db db_extra db_custom)
+    foreach(database db db_custom)
         if(IS_DIRECTORY "${DATABASE_DIR}/${database}")
             file(COPY "${DATABASE_DIR}/${database}" DESTINATION "${RESOURCES_DIR}"
                 PATTERN ".vscode" EXCLUDE

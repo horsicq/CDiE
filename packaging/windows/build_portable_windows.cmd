@@ -17,7 +17,7 @@ rem                         compiles the focused die_engine archive more slowly.
 rem                         With Ninja the MSVC environment for the requested
 rem                         platform is set up automatically (vswhere +
 rem                         vcvarsall) unless cl.exe is already on PATH.
-rem   CDIE_DATABASE_DIR     directory holding db, db_extra and db_custom;
+rem   CDIE_DATABASE_DIR     directory holding db and db_custom;
 rem                         set to NONE to package the binary alone
 
 if "%~2"=="" (
@@ -62,6 +62,7 @@ set "WORK_ROOT=%TEMP%\cdie_%PACKAGE_SUFFIX%"
 set "BUILD_DIR=%WORK_ROOT%\build"
 set "APP_NAME=diec.exe"
 set "GUI_NAME=die.exe"
+set "UPDATER_NAME=die-update.exe"
 set "PACKAGE_BASENAME=cdie_%PACKAGE_SUFFIX%_portable"
 
 if not exist "%PROJECT_ROOT%\release_version.txt" (
@@ -92,9 +93,9 @@ if errorlevel 1 exit /b 1
 echo Configuring %PACKAGE_SUFFIX% build...
 if defined DB_ARG (
     echo Signature database: %CDIE_DATABASE_DIR%
-    cmake -S "%PROJECT_ROOT%" -B "%BUILD_DIR%" -G "%CMAKE_GENERATOR_NAME%" %GEN_ARGS% -DCDIE_BUILD_GUI=ON -DCDIE_BUILD_CONSOLE=ON -DCDIE_BUILD_TUI=OFF "%DB_ARG%"
+    cmake -S "%PROJECT_ROOT%" -B "%BUILD_DIR%" -G "%CMAKE_GENERATOR_NAME%" %GEN_ARGS% -DCDIE_BUILD_GUI=ON -DCDIE_BUILD_CONSOLE=ON -DCDIE_BUILD_TUI=OFF -DCDIE_BUILD_LIBRARY=OFF "%DB_ARG%"
 ) else (
-    cmake -S "%PROJECT_ROOT%" -B "%BUILD_DIR%" -G "%CMAKE_GENERATOR_NAME%" %GEN_ARGS% -DCDIE_BUILD_GUI=ON -DCDIE_BUILD_CONSOLE=ON -DCDIE_BUILD_TUI=OFF
+    cmake -S "%PROJECT_ROOT%" -B "%BUILD_DIR%" -G "%CMAKE_GENERATOR_NAME%" %GEN_ARGS% -DCDIE_BUILD_GUI=ON -DCDIE_BUILD_CONSOLE=ON -DCDIE_BUILD_TUI=OFF -DCDIE_BUILD_LIBRARY=OFF
 )
 if errorlevel 1 exit /b 1
 
@@ -105,9 +106,11 @@ if errorlevel 1 exit /b 1
 if defined GEN_IS_MULTI (
     set "APP_EXE=%BUILD_DIR%\src\console\Release\%APP_NAME%"
     set "GUI_EXE=%BUILD_DIR%\src\gui\Release\%GUI_NAME%"
+    set "UPDATER_EXE=%BUILD_DIR%\src\updater\Release\%UPDATER_NAME%"
 ) else (
     set "APP_EXE=%BUILD_DIR%\src\console\%APP_NAME%"
     set "GUI_EXE=%BUILD_DIR%\src\gui\%GUI_NAME%"
+    set "UPDATER_EXE=%BUILD_DIR%\src\updater\%UPDATER_NAME%"
 )
 set "CPACK_CONFIG=%BUILD_DIR%\CPackConfig.cmake"
 
@@ -145,6 +148,24 @@ for %%F in (cdie_gui.exe cdie.exe cdie_tui.exe diex.exe) do if exist "%PACKAGE_D
     echo Unexpected legacy frontend in package: %%F
     exit /b 1
 )
+for %%F in (die.dll die_static.lib) do if exist "%PACKAGE_DIR%\%%F" (
+    echo Unexpected library binary in package: %%F
+    exit /b 1
+)
+
+rem die-update is built when the xxnetlib and xxgithub sources are found;
+rem CMake leaves it out with a warning otherwise. A build that has it must
+rem ship it beside die.exe and diec.exe, where diec --update looks for it.
+if not exist "%UPDATER_EXE%" goto updater_not_built
+if not exist "%PACKAGE_DIR%\%UPDATER_NAME%" (
+    echo Missing packaged database updater: %UPDATER_NAME%
+    exit /b 1
+)
+goto updater_checked
+:updater_not_built
+echo warning: %UPDATER_NAME% was not built, so the package has no database updater.
+echo          Provide the xxnetlib and xxgithub sources to include it.
+:updater_checked
 
 rem A package that quietly lost its signatures -- a mistyped or unquoted
 rem CDIE_DATABASE_DIR fails the EXISTS test in CMakeLists.txt and only prints
@@ -154,7 +175,7 @@ if /i not "%CDIE_DATABASE_DIR%"=="NONE" (
     if not exist "%PACKAGE_DIR%\db\" (
         echo No signature database in the package:
         echo   %PACKAGE_DIR%\db
-        echo Set CDIE_DATABASE_DIR to a directory holding db, db_extra and db_custom,
+        echo Set CDIE_DATABASE_DIR to a directory holding db and db_custom,
         echo or to NONE to package the binary alone.
         exit /b 1
     )

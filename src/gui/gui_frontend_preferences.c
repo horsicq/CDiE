@@ -226,8 +226,10 @@ char *gui_frontend_stored_language(int memory_only)
 {
     int loaded = 0;
     xx_settings *store = gui_settings_open(memory_only, &loaded);
-    const xx_settings_value *value = loaded && store ? xx_settings_get(store, "View/Lang") : NULL;
+    /* cdie's own key; Detect It Easy's View/Lang names a .qm file (gui_settings.c). */
+    const xx_settings_value *value = loaded && store ? xx_settings_get(store, "cdie/Lang") : NULL;
     char *path = NULL;
+    if (!value && loaded && store) value = xx_settings_get(store, "View/Lang");
     if (value && value->type == XX_SETTINGS_VALUE_STRING && value->data.buffer.size &&
         value->data.buffer.size < GUI_PREFERENCE_PATH_MAX &&
         !memchr(value->data.buffer.data, 0, value->data.buffer.size)) {

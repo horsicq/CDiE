@@ -27,7 +27,7 @@ void gui_options_values_init(gui_options_values *values)
     values->file.save_last_directory = 1;
     values->file.save_recent_files = 1;
     values->file.save_backup = 1;
-    strcpy(values->databases.main_update_url, "https://github.com/horsicq/Detect-It-Easy/releases/tag/db");
+    strcpy(values->databases.main_update_url, "https://github.com/horsicq/Detect-It-Easy/releases/tag/current-database");
     strcpy(values->databases.peid_update_url, "https://github.com/horsicq/XPEID/releases/tag/peid");
     strcpy(values->databases.yara_update_url, "https://github.com/horsicq/Detect-It-Easy/releases/tag/db");
     strcpy(values->signatures.path, "$data/signatures");

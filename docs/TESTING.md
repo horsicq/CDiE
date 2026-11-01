@@ -20,10 +20,17 @@ ctest --test-dir build -C Debug --output-on-failure
 
 `cdie.compatibility` exercises console defaults, `-a` and clustered aliases,
 all four expansion modes, combinations, stored versus decoded archive offsets,
-one-level expansion, directory recursion, malformed ZIP CRCs, failures and
-JSON/XML/CSV/TSV/plaintext output. It also compiles the real GUI backend
-without a desktop toolkit and checks mode changes, separate format groups,
-parent-before-child tree ordering and cancellation.
+directory recursion, failures and JSON/XML/CSV/TSV/plaintext output. Its
+archive cases pin what `diec` 4.0.0 prints (see *Archive scanning tests*
+below). It also compiles the real GUI backend without a desktop toolkit and
+checks mode changes, separate format groups, parent-before-child tree ordering
+and cancellation.
+
+`cdie.database_tar` scans with a source database and its precompiled TAR and
+expects the same result. It also checks that `-E`/`--extradatabase` exit 4
+(lowercase `-e` is still entropy), that `--showdatabase` names only the main
+and custom databases in text, JSON and XML, and that a `db_extra` beside `db`
+is never loaded (the same rule in `db_custom` is the positive control).
 
 File Information coverage uses independently generated 32/64-bit PE and
 little-/big-endian ELF and Mach-O files. It verifies native header values,
@@ -69,30 +76,83 @@ a local tree containing tests/. GitHub Actions builds and packages releases
 and checks package contents, but does not run application tests.
 Large real-world corpus and decoder parity sweeps remain separate local work.
 
-### Private corpus comparison
+### Archive scanning tests
 
-For a repeatable comparison of the locally built console versions, use the
-developer harness in `private_tests/compare_console.py`:
+`--archivesscan` follows `diec` 4.0.0 built from the current Detect It Easy
+source, so use that build as the reference. DIE 3.10 has no
+`--archivesscan` (its `-r` expands archives), never checks a member's CRC and
+scans every fixture ZIP as Binary; where the two differ, 4.0.0 is followed.
+`cdie.compatibility` checks:
 
-```powershell
-python private_tests/compare_console.py --cdie F:\ownCloud_build\cdie\build\srct\src\console\diec.exe --diec F:\ownCloud_build\die\build\srct\src\console\diec.exe --database F:\ownCloud\prepare\qt5\_mylibs\Detect-It-Easy\db --corpus F:\out_iso\out_tmp2\PE32 --sample-per-directory 1 --batch-size 8 --timeout 120 --output private_tests/comparison-results
+* what expands: only ZIP, JAR, APK and IPA members; `image.gz` and
+  `image.bz2` stay unexpanded Binary, also with `-g`;
+* the member gate: without `-g` a member is scanned only when
+  `XScanEngine::isScanable` accepts it (an MZ of any length, TAR, ZIP, GZIP,
+  a PDF also behind a BOM, DEX), never a PNG, 7z, BZIP2, zlib, XZ or LHA
+  stream; an empty member or a directory needs `-g`;
+* nesting: an inner ZIP expands, an archive overlay expands with
+  `--overlayscan --archivesscan`, and a 600-level ZIP stops 20 archive levels
+  below the input (without that bound a few hundred levels overflowed the
+  stack);
+* the scan limit: four levels of 21 nested ZIPs ask for 204,204 member scans;
+  the scan stops at exactly 10,000 with `Last error: Archive member scan limit
+  reached (10000)` and exit code 0. The limit is cdie's own; `diec` has none;
+* damaged members, in default and aggressive mode: a bad CRC in a stored or
+  deflated member, an unscannable PNG included, prints `Last error: Invalid
+  CRC` after the detections, on stdout in text, JSON, XML, CSV and TSV, with
+  exit code 0. Two damaged members with a good one between them print two
+  lines, two adjacent ones print one, as `diec`'s single error string does.
+  The CRC covers the whole decoded stream, so a wrong one is reported whether
+  the declared size is smaller or larger, and a right one over another size
+  is skipped silently. A Deflate stream that does not decode and an encrypted
+  member are skipped silently (a Shrink, Reduce or Implode decoding error is
+  `Invalid CRC`, as in `diec`); a method XZip does not map prints
+  `Last error: Unknown compression method: Unknown`;
+* ZIP validity: a damaged local header and 21 entries sharing one blob make
+  the file Binary, as `XZip::isValid` decides, and a ZIP cut short is still
+  read from its local headers.
+
+Three tests drive the archive walker on fixtures that
+`tests/archive_storage/generate_fixtures.py` writes into the build tree.
+`archive_storage` checks member bytes, memory versus temporary-file storage
+around the buffer threshold, bounded source views, the source cursor and
+cleanup. `archive_failures` injects temporary-file open, write, short-write,
+seek, size and close faults, cancellation, rejected callbacks, damaged
+members and size/count limits: a temporary file that cannot be created keeps
+the member in memory (`diec` still scans it), other storage faults and
+cancellation fail the walk, damaged or oversized members are skipped and
+reported. It also feeds the
+head filter that decides whether a member can be scannable in 1-, 4- and
+7-byte pieces (a 6-byte XZ header, a 7-byte LHA header, a PDF marker at
+offset 900, a 2-byte `MZ`). `archive_integration` scans every fixture through
+the real DIE engine and compares the member offsets with extents that
+Python's own parsers derive. Every case of these three runs as an aggressive
+scan and as a default scan: a ZIP or LHA member that starts with `MZ` is
+passed on in both, any other member only by the aggressive scan, and the
+default scan still decodes it and verifies its CRC. (The walker passes GZIP
+and BZIP2 streams on unfiltered; the engine no longer expands them.)
+
+```bash
+ctest --test-dir build -C Debug -R "^archive_|cdie\.compatibility" --output-on-failure
 ```
 
-It uses `-b -d -u` for both tools, selects one file per directory recursively,
-and explicitly isolates extra/custom databases so only the specified main
-database is used. It snapshots both executables and records database hashes,
-file sizes, modification times, raw stdout/stderr, exit codes and diffs. Only
-CRLF is normalized; whitespace and diagnostic messages remain significant.
-Use `--files-from` with a UTF-8 newline-separated manifest for a fixed file
-selection, and `--resume` to continue an interrupted run with unchanged inputs.
-Timeouts are recorded as failures, never as equal empty outputs.
+### MS-DOS entry tests
 
-After rebuilding `cdie`, use a new output directory and
-`--reference-results private_tests/comparison-results` to reuse successful
-`diec` records. The harness verifies the reference executable, database,
-auxiliary database isolation, raw output hashes, and input size/mtime before
-reusing a record. Missing reference records are scanned normally. `--resume`
-requires both executables to remain unchanged.
+`die_engine_callbacks` pins the MS-DOS script map to what `diec` built from
+the current Detect It Easy source prints (Formats' `XMSDOS` maps the image at
+`0x10000000` and puts the entry point at that address plus CS:IP):
+`getEntryPointOffset`, `getAddressOfEntryPoint`, `compareEP`, `getImageBase`,
+the overlay helpers and the address conversions for a normal image, a file
+whose page count is zero, a header clipped by the file size, a zero header
+size and an entry point that wraps at 1 MiB. A second case checks
+`compareEP` with a four-byte `#` far pointer: a match and a mismatch, two-
+and one-byte pointers, a target at the end of the file and beyond it, a
+1 MiB wrap and a truncated pointer field. DIE 3.10 gives the same values
+except for the zero-page file, which 4.0 treats as an image filling the whole
+file (entry offset 96 and `compareEP` true, where 3.10 gives -1). xxfclib's
+own `test_die_msdos_ep` checks the library side.
+
+### Private tests and corpus comparison
 
 `private_tests/test_signature_errors.c` checks malformed signatures, cached
 comparisons, searches, and the unmatched quote in the database's ZIP marker.
@@ -141,6 +201,9 @@ database remains unchanged. For example:
 python private_tests/verify_pe_metadata_reference.py --diec F:\ownCloud_build\die\build-release\srct\src\console\diec.exe --cdie F:\ownCloud_build\cdie\build-release\srct\src\console\diec.exe --output private_tests/pe-metadata-oracle
 ```
 
+A corpus comparison with the shipped Detect It Easy console needs no harness;
+run both tools over the same files and compare their output:
+
 ```powershell
 param([string[]]$Files)
 
@@ -150,7 +213,7 @@ $cdie = "C:\path\to\this-port\diec.exe"
 $same = 0; $diff = 0
 foreach ($f in $Files) {
     $a = (& "$root\diec.exe" $f 2>&1 | Out-String).Trim()
-    $b = (& $cdie -D "$root\db" -E "$root\db_extra" -C "$root\db_custom" $f 2>&1 | Out-String).Trim()
+    $b = (& $cdie -D "$root\db" -C "$root\db_custom" $f 2>&1 | Out-String).Trim()
     if ($a -eq $b) { $same++ } else { $diff++; "DIFF: $f" }
 }
 "same=$same diff=$diff"
@@ -158,8 +221,11 @@ foreach ($f in $Files) {
 
 Four things will produce false results if you skip them:
 
-1. **Give `cdie` all three databases.** `diec` picks up `db`, `db_extra` and
-   `db_custom` from its own directory; `cdie` needs `-D`, `-E` and `-C`.
+1. **Give `cdie` both databases.** `diec` picks up `db` and `db_custom` from
+   its own directory; `cdie` needs `-D` and `-C`. Compare against a Detect It
+   Easy whose `db` holds the former extra rules (tagged `extra`); an older
+   one whose `diec` still loads a separate `db_extra` reports detections
+   `cdie` does not.
 2. **Avoid WOW64 redirection.** The shipped `diec.exe` is 32-bit, so it reads
    `C:\Windows\SysWOW64\x.dll` when you ask for
    `C:\Windows\System32\x.dll`. A 64-bit `cdie` reads the real System32 file.
@@ -206,6 +272,37 @@ Rounds of that sweep found two real bugs, both since fixed:
 * an access violation on an input where a signature script hands the engine
   an offset near `2^63`.
 
+### Archive and MS-DOS parity with `diec` 4.0.0
+
+These were measured in November 2026 against `diec` 4.0.0 built from the
+current Detect It Easy source (Qt 5.15.2, x86 Release) and released DIE 3.10.
+
+Archive scanning, on 59 generated archive fixtures with `--archivesscan`,
+with and without `-g`: the text output is identical in all 236 cases. In
+`-j`, `-x`, `-c` and `-t` all 590 cases agree on exit code, stderr and the
+`Last error` lines; the documents keep the shape differences listed in
+[LIMITATIONS.md](LIMITATIONS.md). With the full database, 15 of 15 real APKs
+scanned with `--archivesscan` print exactly what `diec` 4.0.0 prints (9 of
+15 before the CRC and member-gate changes). With the fixture database, a
+ZIP of 21 nested ZIPs three levels deep (9,723 member scans) takes `diec`
+188 s and cdie 5.5 s, with identical output.
+
+MS-DOS detection, after the `XMSDOS` fix that restored the 0x10000000 module
+address in the Qt source:
+
+| Set | DIE 3.10 | `diec` before | `diec` after | cdie |
+| --- | --- | --- | --- | --- |
+| first `.exe` of each MSDOS packer folder (34) | 29 | 2 | 29 | 29 |
+| MS-DOS and COM packer corpora (208) | 164 | 62 | 164 | 164 |
+| DOS compilers and tools with an MZ header (350) | 280 | 25 | 280 | 280 |
+
+The per-sample verdicts of the 34-sample set are identical in DIE 3.10, the
+fixed `diec` and cdie, and cdie's output is byte-identical to the fixed
+`diec` on all 208 packer files and all 350 compiler files. Before its
+`#` far-pointer fix cdie detected 246 of the 350 and printed only "EPACK" for
+EPACK, without "Borland Pascal". PE, NE and LE files with MZ headers print
+the same before and after, in default and in `-a -d -u` mode.
+
 ### Sweep the other output modes too
 
 The default text output is the acceptance criterion, so it is easy to test
@@ -215,7 +312,7 @@ over the flags as well:
 ```powershell
 foreach ($fl in @("-j","-x","-c","-t","-b","-p")) {
     $a = (& "$root\diec.exe" $fl $f | Out-String).Trim()
-    $b = (& $cdie -D "$root\db" -E "$root\db_extra" -C "$root\db_custom" $fl $f | Out-String).Trim()
+    $b = (& $cdie -D "$root\db" -C "$root\db_custom" $fl $f | Out-String).Trim()
     if ($a -ne $b) { "DIFF $fl $f" }
 }
 ```
@@ -618,21 +715,77 @@ may be stripped. Changed Windows GUI, adapter, reader, browser/modal compile wit
 MinGW; native desktop runtime/clipboard and Cocoa compilation require those hosts.
 
 
+## Dialog smoke tests
+
+Every dialog of the three GUIs is opened, checked and closed by a smoke run:
+`gui_win32` (`die --smoke-test`, Windows), `cdie.linux_dialogs` and
+`cdie.linux_settings` (GTK probes under `xvfb-run`; skipped with code 77
+without it) and `gui_cocoa` (macOS, needs a logged-in session). Unset
+`CDIE_TRANSLATION`: all matching is against English captions. On Windows,
+`CDIE_GUI_SMOKE_TRACE=1` prints each step and why a check was skipped;
+`CDIE_GTK_DRIVE_DUMP=1` prints every GTK dialog's widgets.
+
+The Windows run checks focus only while die.exe holds the foreground. If
+another program takes it during a step, the checks are skipped; if the
+foreground leaves when the step closes its dialog, the step fails, because
+that is a broken focus restore. A work area smaller than a dialog's layout
+(for example Options on a 768-pixel-high screen) is reported as a known
+issue, not failed. The scan-cancel step grows its zero-filled file up to
+64 MiB until the progress dialog shows (after one second), and reports the
+step as skipped if the scan is faster still. The panel's Databases combo
+must select the custom database alone, and Options > Scan must show 17 checkboxes,
+the Main database and Custom database folder rows, and no caption naming an
+extra database.
+
+xxwidgets has `xxwidgets_dialog_keys_gtk` (Enter with a focused button,
+dialog window type) and, in `xxwidgets_win32`, checks that a dialog closed
+while still modal returns activation to its owner and that a minimum larger
+than the screen is held to the work area. Known open issue: the GTK
+Extractor finds no object in the `overlay.exe` fixture even with All types;
+the probe reports it.
+
 ## Portable packaging and Options persistence
 
-`cdie.settings` checks typed INI Options persistence and malformed-value
-fallback. `cdie.settings_policy` runs from an isolated Unicode installation
-folder with an empty uppercase `PORTABLE` marker and a different working
-directory. It tests every exposed Options value in portable INI and an
-isolated native registry namespace, complementary value profiles, saved
-Defaults, preservation of unrelated keys, unsupported CPU feature masking,
-and a write/verify pair in separate processes. Signature folders are real
-minimal fixture databases. Three explicitly stored empty database paths
-restore the executable-local default folders even after custom folders were
-loaded in the same process.
+`cdie.settings` runs the Options store against Detect It Easy's own files. A
+die.ini written the way Qt 5's QSettings writes it (CRLF, `\x` escapes, lists,
+`@ByteArray`, Qt 6 font strings, `#aarrggbb` colors) loads into the expected
+values, including Detect It Easy's recent files; its stale
+`Die\Database\Extra` keys take no database slot (`$data/db` and
+`$data\db_custom` are the defaults). A save without changes
+leaves it byte-identical, and one change rewrites one line. A follow-up
+checks three things:
+- A save refused by the memory-only I/O policy and then undone leaves the
+  file unchanged.
+- Fonts are written with a family Qt resolves: `monospace` with style hint 7,
+  and a monospace default for the table and text views.
+- A `.po` language goes only to `cdie/Lang`, and `System` reaches `View/Lang`
+  too.
+
+`--native-migration` (an isolated HKCU key or `XDG_CONFIG_HOME`) copies an
+older `NTInfo/cdie` store once and marks both stores `cdie/Migrated`. It keeps
+Qt's registry types, and clearing the die store does not bring the old
+settings back. The old store's `Scan/Die/Database/Extra/Path` is neither
+migrated nor removed. Malformed values and wrong types are ignored, and an
+`Extra/Path` or `Extra/Enabled` value of earlier versions changes nothing.
+
+`cdie.settings_policy` runs from an isolated Unicode installation folder with
+an empty uppercase `PORTABLE` marker and a different working directory. It
+tests every exposed Options value in portable INI and an isolated native
+registry namespace, complementary value profiles, saved Defaults,
+preservation of unrelated keys, unsupported CPU feature masking, and a
+write/verify pair in separate processes. It also migrates an older `cdie.ini`
+into an existing die.ini without changing Detect It Easy's lines; its
+`Scan/Die/Database/Extra/*` keys are not carried over. The old file
+gains only `[cdie] Migrated`. Neither removing a migrated key nor deleting
+die.ini makes the copy run again. Signature folders are real
+minimal fixture databases. Two explicitly stored empty database paths (main
+and custom) restore the executable-local default folders even after other
+folders were loaded in the same process; a stale `Extra/Path` beside them is
+no third slot.
 
 On Windows, `cdie.windows_settings` drives the actual Options window through
-Scan, Fonts, Hex and Optimization edits. It verifies OK writes `cdie.ini`,
+Scan, Fonts, Hex and Optimization edits. It verifies OK writes only the
+changed options into `die.ini`, in Qt's plain forms,
 fresh processes restore every applied value, Cancel leaves the existing INI
 bytes and active values unchanged, and Default followed by OK saves defaults
 that survive another restart. The dedicated GUI smoke mode requires portable
@@ -644,6 +797,145 @@ itself persisted by Windows rather than an INI preference.
 that it produced a ZIP with an empty `PORTABLE` beside the main GUI executable,
 checks bundled signatures when enabled, extracts it, and verifies that the
 real settings opener selects the adjacent INI. It rejects accidentally
-packaged personal `cdie.ini` files. The focused xxfclib `tests/settings` suite
-also checks the public portable-status function, uppercase/lowercase markers,
-invalid paths, working-directory isolation, and typed INI/native save guards.
+packaged personal `die.ini` or `cdie.ini` files and any `db_extra` folder
+(configure with a `CDIE_DATABASE_DIR` that holds one to exercise that; CMake
+then prints `cdie: ignoring .../db_extra`). The focused xxfclib
+`tests/settings` suite also checks the public portable-status function,
+uppercase/lowercase markers, invalid paths, working-directory isolation,
+typed INI/native save guards, and QSettings sharing: line-by-line patches of
+Qt-written files, Qt lists read as string lists, a quote left open at the end
+of a file, `#` keys, a v1 header below a comment, and stricter reading
+(unterminated section, literal commas) for stores that are not
+Qt-compatible.
+
+## Database updates
+
+With `-DCDIE_BUILD_TESTS=ON`, `cdie.updater` is registered whenever
+`die-update` is built. It runs `tests/test_updater.py`, 59 cases (two of them
+Windows only) that drive
+`die-update` (and, when `diec` is built, `diec --checkupdate`/`--update`)
+against `tests/updater_server.py`: an
+offline HTTP server on 127.0.0.1 that answers like GitHub's release API, its
+release download redirects and its CDN, and also serves plain zip URLs.
+Nothing reaches the network. Every run passes `--noproxy` and either
+`--nosettings`, `--settings` or a portable copy; databases live in temporary
+folders; and `CDIE_USER_DATA_DIR` points the per-user folder at another one.
+The user's own database, settings and per-user copy are never read or
+written. The cases cover:
+
+* installation: a fresh install with check/update/check, a newer release
+  replacing `db` (a merge instead of a swap fails; the archive's `db_extra/`
+  is never installed), an update that touches nothing when current,
+  `--force`, `-E`/`--extradatabase` refused with exit code 4 and no request,
+  the JSON fields, text and `--quiet` output;
+* verification, each keeping the old database: MD5 and listed-size
+  mismatches, a truncated download, corrupt archives, an archive without
+  `db/` or without signatures, members that leave their folder (a
+  `db_extra/..` member is skipped, never written), absolute member names and
+  links inside the archive;
+* sources: a release without an `.md5` (asset identity), the rate-limited
+  API falling back to download URLs with and without an MD5, a missing
+  release or asset, `/releases/latest` with the API base derived from the
+  URL, a release download URL, plain zip URLs with and without `<url>.md5`,
+  a catch-all page in place of the `.md5`, and a listed `.md5` asset that
+  holds none;
+* settings: a portable `die.ini` (also with a stale `Extra/Path`, ignored and
+  kept), `--settings`, empty and legacy URLs meaning the default,
+  `--nosettings`, and a `die.ini` that the strict parser rejects;
+* arguments: invalid combinations, targets and sources, help and version; a
+  folder that is not a database, protected folders and a `db_extra` folder
+  refused as targets;
+* locking and recovery: a held lock (exit code 7), a failed rename of the old
+  `db` and a failed rename of the new one, each rolled back (Windows only),
+  crash recovery before a failed update and before a successful one, a
+  legacy stage holding `old-db_extra` restored, and a stale stage removed;
+* the per-user folder: a read-only default database is updated in
+  `CDIE_USER_DATA_DIR`, with no `db_extra` created there and the shipped one
+  untouched, and a portable installation never uses it. These skip when a
+  folder cannot be made read-only (as root, or without `icacls` on Windows);
+* `diec` forwarding: `--checkupdate`/`--update`, the exit code passed
+  through, `127` for a missing updater, the updater found beside `diec`, and
+  `-E`/`--extradatabase` refused by `diec` without starting `die-update`.
+
+`cdie.gui_update` is registered when the GUI is built as well. It runs
+`tests/test_gui_update.py`, which copies the GUI into a temporary portable
+installation with a fixture database, serves a zip from the same offline
+server, and runs `die --smoke-update <expected>` with `CDIE_UPDATE_URL`,
+`CDIE_UPDATE_NOPROXY` and a temporary `CDIE_USER_DATA_DIR`. It checks an
+install followed by "current", that a portable GUI leaves the per-user
+folder alone, that the installation's `db_extra` from an earlier version stays
+byte-identical (no `die-update.ini` written into it) and no other `db_extra`
+appears, and that a failed (MD5 mismatch) update keeps the database and
+leaves no stage behind. On Linux without a display it runs under `xvfb-run`
+when CMake found it, and skips otherwise.
+
+```bash
+ctest --test-dir build -C Debug -R "cdie\.(updater|gui_update)" --output-on-failure
+python3 tests/test_updater.py --updater build/src/updater/die-update --diec build/src/console/diec
+python3 tests/test_gui_update.py --gui build/src/gui/die
+```
+
+Both scripts accept unittest test names after the options, for example
+`InstallTests.test_force_reinstalls_a_current_database`. `die-update` also
+has options meant for these tests and left out of its help: `--api-base
+<url>` (the GitHub API address), `--noproxy`, `--nouserfolder` (never fall
+back to the per-user folder) and `--timeout <ms>`.
+
+### The GUI smoke switch by hand
+
+`die --smoke-update installed|current|failed` presses **Update database**
+once without a progress dialog, prints `smoke-update: <result> <status text>`
+on stderr and exits 0 only when the result is the expected one. It updates
+the database the GUI would use and reads the update URL from the GUI's own
+settings, so run it on a portable copy with a test database and point it at
+a local source. `db.zip` must hold `db/` at its top (other folders, such as
+`db_extra/`, are ignored); a `db.zip.md5` beside it is optional:
+
+```bash
+mkdir -p /tmp/cdie-gui && cp build/src/gui/die /tmp/cdie-gui/ && touch /tmp/cdie-gui/PORTABLE
+cp -r /path/to/test/db /tmp/cdie-gui/
+(cd /path/to/release && python3 -m http.server 8000 --bind 127.0.0.1) &
+export CDIE_UPDATE_URL=http://127.0.0.1:8000/db.zip CDIE_UPDATE_NOPROXY=1 CDIE_USER_DATA_DIR=/tmp/cdie-user
+/tmp/cdie-gui/die --smoke-update installed    # then: --smoke-update current
+```
+
+On macOS run `die.app/Contents/MacOS/die` from a copy of the bundle with
+`PORTABLE` beside that executable. On Windows `die.exe` is a GUI program, so
+let PowerShell wait for it and capture stderr:
+
+```powershell
+$env:CDIE_UPDATE_URL = "http://127.0.0.1:8000/db.zip"; $env:CDIE_UPDATE_NOPROXY = "1"
+$env:CDIE_USER_DATA_DIR = "$env:TEMP\cdie-user"
+$p = Start-Process C:\tmp\cdie-gui\die.exe -ArgumentList "--smoke-update","installed" -Wait -PassThru -RedirectStandardError smoke.txt
+$p.ExitCode; Get-Content smoke.txt
+```
+
+### Library tests
+
+The library code added for the updater has its own tests, built in each
+library's own tree (cdie adds the libraries without their tests):
+
+* xxfclib `test_fs_tree`: `xx_fs_make_dir` (exclusive, no parents),
+  `xx_fs_rename` (never replaces a file or folder), `xx_fs_remove_tree`
+  (read-only entries, a link or junction inside the tree or as the root
+  removed without touching its target, missing paths) and
+  `xx_fs_current_dir`;
+* xxfclib `test_zip_unpack_path`: extracting a zip into a folder the way
+  `die-update` unpacks `db.zip` (every member written byte for byte, empty
+  folders, no stray files, no overwriting on a second pass). It guards the
+  fix for extraction to a path, which never read the local header and so
+  failed every file member silently;
+* xxgithub `test_github` (CTest name `xxgithub`): the release URL parser
+  (tag, download, latest and GitHub Enterprise URLs, percent-decoding, and
+  the malformed forms it must refuse), `xx_github_release_download_url` and
+  `xx_github_release_find_asset`.
+
+```bash
+cmake -S ../_mylibs/xxfclib -B build-xxfclib -DXXFC_BUILD_FS_TESTS=ON
+cmake --build build-xxfclib --target test_fs_tree test_zip_unpack_path
+ctest --test-dir build-xxfclib -R "test_fs_tree|test_zip_unpack_path" --output-on-failure
+
+cmake -S ../_mylibs/xxgithub -B build-xxgithub
+cmake --build build-xxgithub
+ctest --test-dir build-xxgithub -R xxgithub --output-on-failure
+```

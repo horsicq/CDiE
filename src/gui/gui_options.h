@@ -53,7 +53,9 @@ void gui_preferences_get(gui_options_values *values);
 void gui_preferences_set(const gui_options_values *values);
 
 /* Shows Options on *page and records the last selected category. Forms edit
- * a private copy. OK validates every category before the final backend commit;
+ * a private copy. OK validates every category before the backend commit, which
+ * runs with the Scan page's apply (the last page's without one), so a database
+ * folder that is missing or does not load is reported on the Scan page;
  * Cancel/Escape/close preserve values and database/optimization state.
  * databases_reloaded reports a successfully committed database change. */
 xxwidgets_status gui_options_dialog(xxwidgets_widget *owner, const gui_options_host *host, gui_options_page_id *page,

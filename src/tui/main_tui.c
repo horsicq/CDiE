@@ -31,7 +31,7 @@ enum { ACTION_NONE, ACTION_SCAN, ACTION_REPORT, ACTION_PATH, ACTION_QUIT, ACTION
 enum { MIN_COLUMNS = 64, MIN_ROWS = 25 };
 
 typedef struct tui_options {
-    const char *file, *main_db, *extra_db, *custom_db;
+    const char *file, *main_db, *custom_db;
     int smoke, monochrome;
 } tui_options;
 
@@ -63,8 +63,8 @@ static const char help_text[] =
     "A scan runs on a worker. After one second its progress dialog offers Cancel.\n"
     "Flags, database checks and include/exclude tags apply to the next scan.\n"
     "Main database is always used. Empty include tags allow every signature.\n"
-    "Database folders default to db, db_extra, db_custom beside the executable\n"
-    "or in the current directory. Override them with -D, -E and -C at startup.\n"
+    "Database folders default to db and db_custom beside the executable\n"
+    "or in the current directory. Override them with -D and -C at startup.\n"
     "Use a terminal of at least 64 columns and 25 rows.");
 
 static void print_help(void)
@@ -72,7 +72,6 @@ static void print_help(void)
     printf("%s terminal interface\n\n"
         "Usage: cdie_tui [options] [file]\n"
         "  -D, --database PATH        Main signatures folder\n"
-        "  -E, --extradatabase PATH   Extra signatures folder\n"
         "  -C, --customdatabase PATH  Custom signatures folder\n"
         "      --translation FILE     Load a UTF-8 PO translation catalog\n"
         "      --no-color             Monochrome terminal output\n"
@@ -97,8 +96,13 @@ static int parse_options(int argc, char **argv, tui_options *options)
         }
         if (!positional && !strcmp(arg, "--no-color")) { options->monochrome = 1; continue; }
         if (!positional && !strcmp(arg, "--smoke-test")) { options->smoke = 1; continue; }
+        if (!positional && (!strcmp(arg, "-E") || !strcmp(arg, "--extradatabase"))) {
+            /* The extra database is gone. Refused, as by diec, rather than
+             * quietly scanning with other rules; its path is not a file. */
+            fprintf(stderr, "cdie_tui: %s was removed: cdie uses only the main (-D) and custom (-C) databases\n", arg);
+            return -1;
+        }
         if (!positional && (!strcmp(arg, "-D") || !strcmp(arg, "--database"))) destination = &options->main_db;
-        else if (!positional && (!strcmp(arg, "-E") || !strcmp(arg, "--extradatabase"))) destination = &options->extra_db;
         else if (!positional && (!strcmp(arg, "-C") || !strcmp(arg, "--customdatabase"))) destination = &options->custom_db;
         if (destination) {
             if (++i >= argc || !argv[i][0]) {
@@ -373,7 +377,7 @@ static int scan(tui_app *ui, int smoke)
     gui_backend_set_flags(flags & XXWIDGETS_SCAN_DEEP, flags & XXWIDGETS_SCAN_HEURISTIC,
         flags & XXWIDGETS_SCAN_VERBOSE, flags & XXWIDGETS_SCAN_AGGRESSIVE,
         flags & XXWIDGETS_SCAN_HIDE_UNKNOWN, flags & XXWIDGETS_SCAN_FORMAT);
-    gui_backend_set_databases(databases & XXWIDGETS_SCAN_DATABASE_EXTRA, databases & XXWIDGETS_SCAN_DATABASE_CUSTOM);
+    gui_backend_set_databases((databases & XXWIDGETS_SCAN_DATABASE_CUSTOM) != 0);
     set_status(ui, CDIE_TR("Scanning..."));
     ui->busy = 1;
     ok = gui_tree_scan(smoke ? NULL : ui->window, ui->panel, path, (int)selected.val.u64, &type, &cancelled);
@@ -489,13 +493,13 @@ static int tui_run_options(int argc, char **argv)
     ui.options_page = GUI_OPTIONS_SCAN;
     ui.settings = gui_settings_open(options.smoke, &settings_read);
     ui.stored.scan.options.flags = XXWIDGETS_SCAN_DEEP | XXWIDGETS_SCAN_HEURISTIC | XXWIDGETS_SCAN_VERBOSE | XXWIDGETS_SCAN_FORMAT;
-    ui.stored.scan.options.databases = XXWIDGETS_SCAN_DATABASE_EXTRA | XXWIDGETS_SCAN_DATABASE_CUSTOM;
+    ui.stored.scan.options.databases = XXWIDGETS_SCAN_DATABASE_CUSTOM;
     (void)xxwidgets_font_options_init(&ui.stored.fonts);
     (void)xxwidgets_hex_options_init(&ui.stored.hex);
     settings_databases = gui_settings_load(ui.settings, &ui.stored, &ui.options_page);
     loaded = gui_backend_signature_count() > 0 || loaded;
-    if (options.main_db || options.extra_db || options.custom_db)
-        loaded = gui_backend_set_db_paths(options.main_db, options.extra_db, options.custom_db);
+    if (options.main_db || options.custom_db)
+        loaded = gui_backend_set_db_paths(options.main_db, options.custom_db);
     if (!loaded) {
         fprintf(stderr, "cdie_tui: cannot load main signatures from %s. Use -D PATH.\n",
             options.main_db ? options.main_db : gui_backend_main_db_path());

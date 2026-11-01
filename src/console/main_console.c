@@ -33,6 +33,8 @@
 #include "../app/cdie_file_info.h"
 #include "../app/cdie_entropy.h"
 #include "../app/cdie_hash.h"
+#include "../app/cdie_paths.h"
+#include "../app/cdie_spawn.h"
 #include "../app/cdie_strings.h"
 
 static int g_bStdoutFailed = 0;
@@ -161,40 +163,40 @@ static void print_help(void)
     cdie_printf("Options:\n");
     cdie_printf("  -h, --help                Displays this help.\n");
     cdie_printf("  -v, --version             Displays version information.\n");
-    cdie_printf("  -r, --recursivescan       Scan directories recursively.\n");
+    cdie_printf("  -r, --recursivescan       Scan directories recursively, with resources and overlays.\n");
     cdie_printf("  -a, --alltypes            Scan applicable parent file types.\n");
-    cdie_printf("      --overlayscan         Scan trailing overlays.\n");
-    cdie_printf("      --resourcesscan       Scan PE/ELF resource payloads.\n");
-    cdie_printf("      --archivesscan        Scan supported archive members (one level).\n");
+    cdie_printf("  -O, --overlayscan         Scan trailing overlays.\n");
+    cdie_printf("  -R, --resourcesscan       Scan PE/ELF resource payloads.\n");
+    cdie_printf("  -A, --archivesscan        Scan ZIP/JAR/APK/IPA members and nested archives.\n");
     cdie_printf("  -d, --deepscan            Deep scan.\n");
     cdie_printf("  -u, --heuristicscan       Heuristic scan.\n");
-    cdie_printf("  -g, --aggressivecscan     Aggressive scan.\n");
+    cdie_printf("  -g, --aggressivescan      Aggressive scan.\n");
     cdie_printf("  -b, --verbose             Verbose output.\n");
     cdie_printf("  -f, --format              Format the result strings (the default).\n");
     cdie_printf("      --noformat            Do not format the result strings.\n");
     cdie_printf("      --color, --nocolor    Enable/disable terminal colors (default: on).\n");
 #if defined(_M_IX86) || (defined(_M_X64) && !defined(_M_ARM64EC)) || defined(__i386__) || \
     (defined(__x86_64__) && !defined(_M_ARM64EC))
-    cdie_printf("      --sse2, --nosse2       Enable/disable SSE2 acceleration.\n");
-    cdie_printf("      --sse42, --nosse42     Enable/disable SSE4.2 acceleration.\n");
-    cdie_printf("      --avx2, --noavx2       Enable/disable AVX2 acceleration.\n");
-    cdie_printf("      --aes, --noaes         Enable/disable AES-NI acceleration.\n");
-    cdie_printf("      --sha, --nosha         Enable/disable SHA-NI for SHA-1/SHA-256.\n");
+    cdie_printf("      --sse2, --nosse2      Enable/disable SSE2 acceleration.\n");
+    cdie_printf("      --sse42, --nosse42    Enable/disable SSE4.2 acceleration.\n");
+    cdie_printf("      --avx2, --noavx2      Enable/disable AVX2 acceleration.\n");
+    cdie_printf("      --aes, --noaes        Enable/disable AES-NI acceleration.\n");
+    cdie_printf("      --sha, --nosha        Enable/disable SHA-NI for SHA-1/SHA-256.\n");
     cdie_printf("      --vpclmulqdq, --novpclmulqdq\n");
-    cdie_printf("                           Enable/disable VPCLMULQDQ for CRC64.\n");
+    cdie_printf("                            Enable/disable VPCLMULQDQ for CRC64.\n");
 #elif defined(_M_ARM) || defined(_M_ARM64) || defined(_M_ARM64EC) || defined(__arm__) || defined(__aarch64__)
-    cdie_printf("      --neon, --noneon       Enable/disable Arm NEON acceleration.\n");
+    cdie_printf("      --neon, --noneon      Enable/disable Arm NEON acceleration.\n");
     cdie_printf("      --armcrc32, --noarmcrc32\n");
-    cdie_printf("                           Enable/disable Arm CRC32 acceleration.\n");
+    cdie_printf("                            Enable/disable Arm CRC32 acceleration.\n");
     cdie_printf("      --armcrypto, --noarmcrypto\n");
-    cdie_printf("                           Enable/disable Arm AES/SHA acceleration.\n");
+    cdie_printf("                            Enable/disable Arm AES/SHA acceleration.\n");
     cdie_printf("      --armdotprod, --noarmdotprod\n");
     cdie_printf("      --armpmull, --noarmpmull\n");
-    cdie_printf("                           Enable/disable Arm dot-product acceleration.\n");
+    cdie_printf("                            Enable/disable Arm dot-product acceleration.\n");
 #endif
 #if defined(_M_IX86) || defined(_M_X64) || defined(_M_ARM) || defined(_M_ARM64) || defined(_M_ARM64EC) || \
     defined(__i386__) || defined(__x86_64__) || defined(__arm__) || defined(__aarch64__)
-    cdie_printf("                           Default: on when supported; unsupported keys are ignored.\n");
+    cdie_printf("                            Default: on when supported; unsupported keys are ignored.\n");
 #endif
     cdie_printf("  -U, --hideunknown         Hide unknown results.\n");
     cdie_printf("  -M, --messages            Show engine messages.\n");
@@ -204,8 +206,8 @@ static void print_help(void)
     cdie_printf("  -c, --csv                 Result as CSV.\n");
     cdie_printf("  -t, --tsv                 Result as TSV.\n");
     cdie_printf("  -p, --plaintext           Result as plain text.\n");
+    cdie_printf("      --format <layout>     text, json, xml, csv or tsv (as Qt diec).\n");
     cdie_printf("  -D, --database <path>     Main database path.\n");
-    cdie_printf("  -E, --extradatabase <p>   Extra database path.\n");
     cdie_printf("  -C, --customdatabase <p>  Custom database path.\n");
     cdie_printf("      --includetags <list>  Run signatures matching any ';'-separated tag.\n");
     cdie_printf("      --excludetags <list>  Skip signatures matching any ';'-separated tag.\n");
@@ -221,6 +223,9 @@ static void print_help(void)
     cdie_printf("  -w, --showstructs         List DataStructs (target optional).\n");
     cdie_printf("      --createtar <path>    Create TAR archive from database.\n");
     cdie_printf("      --createprecompiledtar <p> Create precompiled bytecode TAR archive.\n");
+    cdie_printf("      --checkupdate         Check for a database update (exit code 1: available).\n");
+    cdie_printf("      --update              Download and install a database update.\n");
+    cdie_printf("                            Both run die-update, passing -D and -j on.\n");
     cdie_printf("\n");
     cdie_printf("Target:\n");
     cdie_printf("  target                    The file or directory to open.\n");
@@ -250,6 +255,15 @@ static void print_structured_information(cdie_output_format outputFormat,
     }
 }
 
+/* -E/--extradatabase named the extra database, which cdie no longer has (the
+ * main and custom databases remain, as in Detect It Easy). The option is
+ * refused rather than ignored, so a script that relied on it fails instead of
+ * quietly scanning with other rules. */
+static void report_removed_option(const char *pOption)
+{
+    xx_rt_fprintf(xx_rt_stderr(), "%s was removed: cdie uses only the main (-D) and custom (-C) databases\n", pOption);
+}
+
 /* Frees the cdie_strdup'd elements and then the list itself. xx_list_t stores
  * elements by value, so a list of strings holds char* and each slot has to be
  * dereferenced through. */
@@ -274,7 +288,19 @@ static const char *string_at(const xx_list_t *pList, size_t i)
 static char *resolve_database_path(const char *pPath, const char *pDefaultName)
 {
     if (pPath && pPath[0]) {
-        return cdie_strdup(pPath);
+        return cdie_path_native(pPath);
+    }
+
+    {
+        /* The copy die-update installs for this user when the shipped folder
+         * cannot be written (never in a portable installation). */
+        char *pUser = cdie_user_database_dir(pDefaultName);
+
+        if (pUser) {
+            char *pNative = cdie_path_native(pUser);
+            xx_rt_free(pUser);
+            return pNative;
+        }
     }
 
     {
@@ -285,7 +311,9 @@ static char *resolve_database_path(const char *pPath, const char *pDefaultName)
         xx_rt_free(pAppDir);
 
         if (xx_fs_is_dir(pCandidate) || xx_fs_is_file(pCandidate)) {
-            return pCandidate;
+            char *pNative = cdie_path_native(pCandidate);
+            xx_rt_free(pCandidate);
+            return pNative;
         }
 
         {
@@ -293,7 +321,7 @@ static char *resolve_database_path(const char *pPath, const char *pDefaultName)
             xx_rt_snprintf(sTar, sizeof(sTar), "%s.tar", pCandidate);
             if (xx_fs_is_file(sTar)) {
                 xx_rt_free(pCandidate);
-                return cdie_strdup(sTar);
+                return cdie_path_native(sTar);
             }
         }
 
@@ -301,18 +329,56 @@ static char *resolve_database_path(const char *pPath, const char *pDefaultName)
     }
 
     if (xx_fs_is_dir(pDefaultName) || xx_fs_is_file(pDefaultName)) {
-        return cdie_strdup(pDefaultName);
+        return cdie_path_native(pDefaultName);
     }
 
     {
         char sTar[512];
         xx_rt_snprintf(sTar, sizeof(sTar), "%s.tar", pDefaultName);
         if (xx_fs_is_file(sTar)) {
-            return cdie_strdup(sTar);
+            return cdie_path_native(sTar);
         }
     }
 
-    return cdie_strdup(pDefaultName);
+    return cdie_path_native(pDefaultName);
+}
+
+/* --checkupdate and --update hand over to die-update beside this executable
+ * (CDIE_UPDATER, a full path, overrides that for the tests). Its exit code is
+ * diec's: 0 up to date or updated, 1 an update is available, 2 and up an
+ * error, CR_CANNOTRUNUPDATER when it cannot be started. */
+static int run_updater(int bCheck, const char *pDatabase, int bJson)
+{
+    const char *apArgs[6];
+    char sError[512];
+    char *pUpdater = cdie_spawn_updater_path();
+    int nArgs = 0;
+    int nExitCode = CR_CANNOTRUNUPDATER;
+
+    if (!pUpdater || !xx_fs_is_file(pUpdater)) {
+        xx_rt_fprintf(xx_rt_stderr(), "Cannot find the database updater: %s\n", pUpdater ? pUpdater : "die-update");
+        xx_rt_free(pUpdater);
+        return CR_CANNOTRUNUPDATER;
+    }
+
+    apArgs[nArgs++] = pUpdater;
+    if (bCheck) apArgs[nArgs++] = "--check";
+    if (pDatabase && pDatabase[0]) {
+        apArgs[nArgs++] = "--database";
+        apArgs[nArgs++] = pDatabase;
+    }
+    if (bJson) apArgs[nArgs++] = "--json";
+    apArgs[nArgs] = NULL;
+
+    /* The updater writes to the same streams, after anything still buffered. */
+    if (xx_rt_fflush(xx_rt_stdout()) != 0) g_bStdoutFailed = 1;
+    xx_rt_fflush(xx_rt_stderr());
+    if (!cdie_spawn_wait(pUpdater, apArgs, &nExitCode, sError, sizeof(sError))) {
+        xx_rt_fprintf(xx_rt_stderr(), "Cannot run %s: %s\n", pUpdater, sError);
+        nExitCode = CR_CANNOTRUNUPDATER;
+    }
+    xx_rt_free(pUpdater);
+    return nExitCode;
 }
 
 static void show_database(DBase *pDb, xx_scan_options *pOptions,
@@ -329,22 +395,17 @@ static void show_database(DBase *pDb, xx_scan_options *pOptions,
     if (outputFormat == CDIE_OUTPUT_JSON) {
         cdie_printf("  \"database\": {\"main\":");
         print_json_string(pOptions->main_database_path);
-        cdie_printf(",\"extra\":");
-        print_json_string(pOptions->extra_database_path);
         cdie_printf(",\"custom\":");
         print_json_string(pOptions->custom_database_path);
         cdie_printf(",\"signatures\":[");
     } else if (outputFormat == CDIE_OUTPUT_XML) {
         cdie_printf("  <database main=\"");
         print_xml_string(pOptions->main_database_path);
-        cdie_printf("\" extra=\"");
-        print_xml_string(pOptions->extra_database_path);
         cdie_printf("\" custom=\"");
         print_xml_string(pOptions->custom_database_path);
         cdie_printf("\">\n");
     } else {
         cdie_printf("Main database: %s\n", pOptions->main_database_path ? pOptions->main_database_path : "");
-        cdie_printf("Extra database: %s\n", pOptions->extra_database_path ? pOptions->extra_database_path : "");
         cdie_printf("Custom database: %s\n", pOptions->custom_database_path ? pOptions->custom_database_path : "");
     }
 
@@ -450,6 +511,7 @@ int x_main(int argc, char *argv[])
     int bShowHelp = 0;
     int bShowVersion = 0;
     int bShowInfo = 0, bShowStructs = 0, bEntropy = 0, bHash = 0, bStrings = 0, bStringsConfig = 0;
+    int bCheckUpdate = 0, bUpdate = 0;
     cdie_strings_options stringsOptions = cdie_strings_defaults();
     int bDatabaseLoaded = 0;
     int bEndOfOptions = 0;
@@ -507,6 +569,25 @@ int x_main(int argc, char *argv[])
                 options.aggressive_scan = 1;
             } else if (xx_rt_strcmp(pArg, "--verbose") == 0) {
                 options.verbose = 1;
+            } else if ((xx_rt_strcmp(pArg, "--format") == 0) && (i + 1 < argc) &&
+                       (!xx_rt_strcmp(argv[i + 1], "text") || !xx_rt_strcmp(argv[i + 1], "json") || !xx_rt_strcmp(argv[i + 1], "xml") ||
+                        !xx_rt_strcmp(argv[i + 1], "csv") || !xx_rt_strcmp(argv[i + 1], "tsv"))) {
+                /* Qt diec's --format <layout>: text keeps the default output. */
+                const char *pLayout = argv[++i];
+                cdie_output_format requested = !xx_rt_strcmp(pLayout, "json") ? CDIE_OUTPUT_JSON :
+                                               !xx_rt_strcmp(pLayout, "xml") ? CDIE_OUTPUT_XML :
+                                               !xx_rt_strcmp(pLayout, "csv") ? CDIE_OUTPUT_CSV :
+                                               !xx_rt_strcmp(pLayout, "tsv") ? CDIE_OUTPUT_TSV : CDIE_OUTPUT_TEXT;
+                if (requested == CDIE_OUTPUT_TEXT) {
+                    options.format_result = 1;
+                } else if (select_output_format(&outputFormat, requested, pArg)) {
+                    options.result_as_json = requested == CDIE_OUTPUT_JSON;
+                    options.result_as_xml = requested == CDIE_OUTPUT_XML;
+                    options.result_as_csv = requested == CDIE_OUTPUT_CSV;
+                    options.result_as_tsv = requested == CDIE_OUTPUT_TSV;
+                } else {
+                    nResult = CR_INVALIDPARAMETER;
+                }
             } else if (xx_rt_strcmp(pArg, "--format") == 0) {
                 options.format_result = 1;
             } else if (xx_rt_strcmp(pArg, "--noformat") == 0) {
@@ -587,9 +668,11 @@ int x_main(int argc, char *argv[])
             } else if ((xx_rt_strcmp(pArg, "--database") == 0) && (i + 1 < argc)) {
                 xx_rt_free(options.main_database_path);
                 options.main_database_path = cdie_strdup(argv[++i]);
-            } else if ((xx_rt_strcmp(pArg, "--extradatabase") == 0) && (i + 1 < argc)) {
-                xx_rt_free(options.extra_database_path);
-                options.extra_database_path = cdie_strdup(argv[++i]);
+            } else if (xx_rt_strcmp(pArg, "--extradatabase") == 0) {
+                /* Its path is consumed, so it is not taken for a target. */
+                report_removed_option(pArg);
+                if (i + 1 < argc) ++i;
+                nResult = CR_INVALIDPARAMETER;
             } else if ((xx_rt_strcmp(pArg, "--customdatabase") == 0) && (i + 1 < argc)) {
                 xx_rt_free(options.custom_database_path);
                 options.custom_database_path = cdie_strdup(argv[++i]);
@@ -603,6 +686,10 @@ int x_main(int argc, char *argv[])
                 pCreateTarPath = argv[++i];
             } else if ((xx_rt_strcmp(pArg, "--createprecompiledtar") == 0) && (i + 1 < argc)) {
                 pCreateBcTarPath = argv[++i];
+            } else if (xx_rt_strcmp(pArg, "--checkupdate") == 0) {
+                bCheckUpdate = 1;
+            } else if (xx_rt_strcmp(pArg, "--update") == 0) {
+                bUpdate = 1;
             } else {
                 xx_rt_fprintf(xx_rt_stderr(), "Unknown option: %s\n", pArg);
                 nResult = CR_INVALIDPARAMETER;
@@ -628,6 +715,9 @@ int x_main(int argc, char *argv[])
                             break;
 
                         case 'r': options.recursive_scan = 1; break;
+                        case 'A': options.archives_scan = 1; break;
+                        case 'O': options.overlay_scan = 1; break;
+                        case 'R': options.resources_scan = 1; break;
                         case 'a': options.all_types_scan = 1; break;
                         case 'd': options.deep_scan = 1; break;
                         case 'u': options.heuristic_scan = 1; break;
@@ -695,20 +785,14 @@ int x_main(int argc, char *argv[])
                         }
 
                         case 'E': {
-                            const char *pVal = NULL;
+                            /* -E<path> or -E <path>: the path is consumed. */
                             if (pArg[k + 1] != '\0') {
-                                pVal = &pArg[k + 1];
                                 k = xx_rt_strlen(pArg) - 1;
                             } else if (i + 1 < argc) {
-                                pVal = argv[++i];
+                                ++i;
                             }
-                            if (pVal) {
-                                xx_rt_free(options.extra_database_path);
-                                options.extra_database_path = cdie_strdup(pVal);
-                            } else {
-                                xx_rt_fprintf(xx_rt_stderr(), "Option -E requires an argument\n");
-                                nResult = CR_INVALIDPARAMETER;
-                            }
+                            report_removed_option("-E");
+                            nResult = CR_INVALIDPARAMETER;
                             break;
                         }
 
@@ -756,6 +840,13 @@ int x_main(int argc, char *argv[])
         return cdie_finish_result(nResult);
     }
 
+    /* As in XScanEngine::scanProcess, a recursive scan also scans the
+     * resources and the overlay of every file it walks. */
+    if (options.recursive_scan) {
+        options.resources_scan = 1;
+        options.overlay_scan = 1;
+    }
+
     if (bShowHelp || bShowVersion) {
         if (bShowHelp && bShowVersion) {
             xx_rt_fprintf(xx_rt_stderr(), "--help and --version are mutually exclusive\n");
@@ -767,6 +858,29 @@ int x_main(int argc, char *argv[])
             print_help();
         } else {
             cdie_printf("%s %s\n", X_APPLICATIONDISPLAYNAME, X_APPLICATIONVERSION);
+        }
+        xx_scan_options_free(&options);
+        free_string_vector(&vecTargets);
+        free_string_vector(&vecFiles);
+        return cdie_finish_result(nResult);
+    }
+
+    /* Database update: a mode of its own, like --createtar. The database is
+     * not loaded; die-update reads the one it replaces. */
+    if (bCheckUpdate || bUpdate) {
+        if (bCheckUpdate && bUpdate) {
+            xx_rt_fprintf(xx_rt_stderr(), "--checkupdate and --update are mutually exclusive\n");
+            nResult = CR_INVALIDPARAMETER;
+        } else if (xx_list_count(&vecTargets) || bStrings || bStringsConfig || bHash || bEntropy || bShowInfo ||
+                   bShowStructs || pStruct || bShowDatabase || pCreateTarPath || pCreateBcTarPath) {
+            xx_rt_fprintf(xx_rt_stderr(), "--checkupdate and --update take no target and no other mode\n");
+            nResult = CR_INVALIDPARAMETER;
+        } else if ((outputFormat != CDIE_OUTPUT_TEXT) && (outputFormat != CDIE_OUTPUT_PLAIN) &&
+                   (outputFormat != CDIE_OUTPUT_JSON)) {
+            xx_rt_fprintf(xx_rt_stderr(), "--checkupdate and --update report as text or JSON only\n");
+            nResult = CR_INVALIDPARAMETER;
+        } else {
+            nResult = run_updater(bCheckUpdate, options.main_database_path, outputFormat == CDIE_OUTPUT_JSON);
         }
         xx_scan_options_free(&options);
         free_string_vector(&vecTargets);
@@ -798,15 +912,14 @@ int x_main(int argc, char *argv[])
     }
 
     {
+        /* Only the main and custom databases: an extra database folder left
+         * by an earlier version is never looked up or loaded. */
         char *pMain = resolve_database_path(options.main_database_path, "db");
-        char *pExtra = resolve_database_path(options.extra_database_path, "db_extra");
         char *pCustom = resolve_database_path(options.custom_database_path, "db_custom");
 
         xx_rt_free(options.main_database_path);
-        xx_rt_free(options.extra_database_path);
         xx_rt_free(options.custom_database_path);
         options.main_database_path = pMain;
-        options.extra_database_path = pExtra;
         options.custom_database_path = pCustom;
     }
 
@@ -872,10 +985,6 @@ int x_main(int argc, char *argv[])
     }
 
     bDatabaseLoaded = db_load(&db, options.main_database_path, DB_MAIN);
-
-    if (options.use_extra_database) {
-        db_load(&db, options.extra_database_path, DB_EXTRA);
-    }
 
     if (options.use_custom_database) {
         db_load(&db, options.custom_database_path, DB_CUSTOM);
@@ -989,6 +1098,11 @@ int x_main(int argc, char *argv[])
                 xx_terminal_finish(&terminal);
             }
         } else {
+            /* diec's XML document has no final newline of its own. */
+            if (pOutput && !bStructuredWrapper && (outputFormat == CDIE_OUTPUT_XML)) {
+                size_t nLength = xx_rt_strlen(pOutput);
+                if (nLength && (pOutput[nLength - 1] == '\n')) pOutput[nLength - 1] = '\0';
+            }
             cdie_printf("%s", pOutput ? pOutput :
                          (outputFormat == CDIE_OUTPUT_JSON ? "{}" : ""));
         }
@@ -999,7 +1113,9 @@ int x_main(int argc, char *argv[])
             cdie_printf("    </file>\n");
         }
 
-        if ((options.result_as_json || options.result_as_xml) && !bStructuredWrapper) {
+        /* diec prints each structured document with printf("%s\n"). */
+        if ((options.result_as_json || options.result_as_xml || options.result_as_csv || options.result_as_tsv ||
+             options.result_as_plain_text) && !bStructuredWrapper) {
             cdie_printf("\n");
         }
 
@@ -1008,10 +1124,13 @@ int x_main(int argc, char *argv[])
         {
             int j = 0;
 
-            /* diec reports script/progress errors after the detections on
-             * stdout, regardless of --messages, and still exits successfully. */
+            /* diec reports script/progress errors (and the "Last error" of a
+             * damaged archive member) after the detections on stdout, in
+             * every output mode, regardless of --messages, and still exits
+             * successfully. Only cdie's multi-file JSON/XML wrapper keeps them
+             * on stderr, outside its single document. */
             for (j = 0; j < result.nErrorCount; j++) {
-                if ((outputFormat == CDIE_OUTPUT_JSON) || (outputFormat == CDIE_OUTPUT_XML)) {
+                if (bStructuredWrapper && ((outputFormat == CDIE_OUTPUT_JSON) || (outputFormat == CDIE_OUTPUT_XML))) {
                     xx_rt_fprintf(xx_rt_stderr(), "%s\n", result.ppErrors[j]);
                 } else {
                     cdie_printf("%s\n", result.ppErrors[j]);

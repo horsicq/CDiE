@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 hors<horsicq@gmail.com>. SPDX-License-Identifier: MIT */
 #include "app/cdie_translation.h"
 #include "gui_imports.h"
+#include "gui_error.h"
 #include <xxfclib/rt/xx_rt.h>
 #include <xxfclib/threads/xx_threads.h>
 #include <xxwidgets/xxwidgets_process.h>
@@ -91,7 +92,7 @@ xxwidgets_status gui_imports_show(xxwidgets_widget *owner, const char *path)
     else if (status == XXWIDGETS_OK && job.ok)
         status = show_imports(owner, path, job.data);
     else if (status == XXWIDGETS_OK && !job.work.is_stop)
-        status = xxwidgets_text_dialog(owner, CDIE_TR("Imports"), job.error ? job.error : "Cannot read Imports");
+        status = gui_error_show_file(owner, CDIE_TR("Imports"), CDIE_N_("Cannot read the imports of %s."), path, job.error);
     cdie_imports_free(job.data);
     xx_rt_free(job.error);
     return status;

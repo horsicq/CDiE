@@ -4,6 +4,116 @@
 
     Initial release.
 
+    * Added die-update, the signature database updater: "die-update" installs
+      a newer database, "--check" only reports (exit codes 0 current/installed,
+      1 available, 2 network, 3 folder, 4 parameter, 5 verification,
+      6 cancelled, 7 busy). Reads Detect It Easy's die.ini or native NTInfo/die
+      settings; the default source is the current-database release (db.zip +
+      db.zip.md5). Downloads are verified by size, MD5 and per-member CRC,
+      the new database is loaded once, then swapped in by rename with
+      rollback under a lock. db/die-update.ini records what was installed.
+      Only db/ is installed from db.zip; other folders in it (db_extra/) are
+      ignored, and an existing db_extra folder is never loaded, replaced or
+      deleted.
+
+    * A read-only default database (installed package, AppImage, macOS
+      bundle) is updated into the per-user folder (%LOCALAPPDATA%\NTInfo\cdie,
+      ~/.local/share/NTInfo/cdie, ~/Library/Application Support/NTInfo/cdie;
+      CDIE_USER_DATA_DIR overrides), which diec and the GUIs now search first
+      unless the installation is portable.
+
+    * Added diec --checkupdate and --update, which run die-update from diec's
+      folder with -D and -j passed on and return its exit code (127 when it
+      cannot be started). diec still imports KERNEL32.dll only.
+
+    * Two signature databases, as in Detect It Easy: main (-D, always used)
+      and custom (-C, on by default). The former extra rules are part of db,
+      tagged extra (--excludetags extra skips them). diec, die-update and
+      cdie_tui refuse -E/--extradatabase with exit code 4; --showdatabase and
+      die-update --json report no extra database. Options > Scan has the main
+      and custom folders only, the Databases combo and the directory scan's
+      Options offer only Custom database, and stored
+      Scan/Die/Database/Extra/* settings are neither read, written nor
+      deleted. Packages no longer carry db_extra. A db_extra folder from an
+      earlier build is no longer used (never loaded, updated or deleted):
+      delete it or move your own .sg files to db_custom. Until Detect It Easy
+      publishes the merged db, the current-database db.zip still holds those
+      rules only under db_extra/, which die-update does not install.
+      xxwidgets keeps its API: XXWIDGETS_SCAN_DATABASE_EXTRA is deprecated
+      (setters ignore it, getters never return it, no extra control is
+      created) and the default is CUSTOM; xxfclib's DB_EXTRA and
+      use_extra_database are deprecated.
+
+    * Added Update database (Ctrl+U/Cmd+U) to the Windows, GTK and macOS GUIs:
+      a cancellable in-process update that reloads the databases and reports
+      in the status bar. The Options > Scan update URL now defaults to the
+      current-database release. Added die --smoke-update for tests.
+
+    * xxfclib: added xx_fs_make_dir, xx_fs_rename (never replaces),
+      xx_fs_remove_tree (never follows links or junctions) and
+      xx_fs_current_dir. Fixed ZIP extraction to a folder, which failed every
+      file member silently, and POSIX extraction of ZIP directories stored
+      with modes such as 0600. xxgithub: added release URL parsing,
+      xx_github_release_download_url and xx_github_release_find_asset.
+      xxnetlib: XXNETLIB_XXFCLIB_TARGET selects the xxfclib archive it links.
+
+    * The GUI keeps its Options in Detect It Easy's own store (die.ini when
+      portable, else NTInfo/die; biz.ntinfo.die on macOS), shared with
+      die-update and the Qt program: plain Qt value forms, only changed
+      options are written and Detect It Easy's lines keep every byte. The
+      language is cdie/Lang (View/Lang only becomes System or English), fonts
+      always name a family Qt can resolve, #aarrggbb colors are read blended
+      over white, and Detect It Easy's recent files are shown until cdie has
+      its own. Settings from cdie.ini / NTInfo/cdie are copied once; both
+      stores are marked cdie/Migrated.
+
+    * Dialogs: every dialog of the Windows, GTK and macOS GUIs is opened,
+      checked and closed by the smoke tests (gui_win32, the new
+      cdie.linux_dialogs, gui_cocoa). Fixed: dragging a tool dialog below its
+      minimum closed it with an error; on Windows Escape/Enter on an open
+      dropdown acted on the whole dialog, Enter never reached the focused
+      field (Disasm Offset+Enter now acts as Go), dialogs could open larger
+      than the screen, and closing About, text dialogs, Options, Strings or
+      the Extractor handed the foreground to another program; a failed page
+      action or a rejected font no longer closes Options and loses its
+      edits; the GTK font chooser read past its title table; the signature
+      editor's confirm dialogs could not open; the Extractor opens its file
+      with progress and Cancel; Update database shows a failure dialog and
+      translated stages; a missing main database folder keeps Options on the
+      Scan page. Text dialogs (Log, "?", errors) are resizable, labels show
+      '&' literally, path labels keep the file name, more strings are
+      translated, and on GTK Enter on a focused button presses that button.
+      On Windows the dialogs' grid follows the Controls font, so a larger
+      font is no longer clipped, up to the size at which the Options dialog
+      still fits the screen (beyond it text is clipped but every button stays
+      reachable); windows get their size and place back when the font
+      shrinks again.
+
+    * xxfclib settings: INI saves patch only the changed lines of an existing
+      file; header-less files are read and written in the QSettings dialect
+      (xx_settings_set_qt_compatible); registry key lookup ignores ASCII case.
+
+    * Packaging: die-update.exe in the Windows portable ZIP, die-update in the
+      .deb, AppImage and die.app, and CDIE_INSTALL_LAYOUT=PORTABLE|FHS.
+      Added tests cdie.updater (59 offline cases), cdie.gui_update and the
+      library tests test_fs_tree, test_zip_unpack_path and test_github.
+
+    * macOS: build_macos.sh builds arm64 and x64 packages (zip + pkg each,
+      separate build trees; MACOS_ARCHITECTURES picks them or one universal
+      pair), checks their architectures with lipo, and targets macOS 11.0
+      (arm64) / 10.14 (x86_64) instead of the build machine's; die.app's
+      Info.plist names that version as LSMinimumSystemVersion (a direct CMake
+      build without a deployment target gets the same defaults). It needs no
+      certificates or passwords: a missing, incomplete or unusable identity
+      or notarization credential is skipped with a notice (ad hoc seal,
+      unsigned pkg, no notarization; MACOS_ADHOC_SIGN=0 skips the seal), and
+      only a Developer ID signed app or pkg is sent for notarization. CI
+      builds and publishes both architectures from the Apple silicon runner
+      and seals die.app in the portable ZIPs ad hoc as well.
+      xxfclib picks its per-source SIMD/ARM flags from the target
+      architectures (CMAKE_OSX_ARCHITECTURES), not the host, so x86_64 and
+      universal builds on Apple silicon compile.
+
     * Every table in the GUI and TUI has a filter under each column title
       (Imports, Exports, Resources, Symbols, Memory Map, Strings, ...). Strings
       is now a #/Offset/Address/Region/Size/Type/String table: each string
@@ -84,6 +194,33 @@
     * Exposed all-types, overlay, resource and archive-member scans in the
       console and native GUI options; TUI F2 opens the expansion controls.
       Enabled native resource streams and retained format groups in the GUI.
+    * Archive member scans (--archivesscan) now match diec 4.0.0. Only ZIP,
+      JAR, APK and IPA are expanded (GZIP, BZIP2, LHA and Mach-O Fat no
+      longer are). Nested archives, and archive overlays and resources,
+      expand down to 20 levels. Without -g only scannable members
+      (executables, DEX, PDF, TAR, archives) are scanned, at most 21 per
+      archive. Every member reached is CRC-checked, stored ones included: a
+      damaged member is skipped and reported after the detections as
+      "Last error: Invalid CRC" (a ZIP method diec does not map as "Last
+      error: Unknown compression method: Unknown"), also in -j/-x/-c/-t,
+      with exit code 0, instead of failing the scan. A ZIP is typed ZIP only
+      when it passes XZip::isValid, and a ZIP without end records is read
+      from its local headers. Members that can never be scanned are decoded
+      for their CRC only, without buffering. New cdie safety limit, which
+      diec does not have: at most 10,000 archive member scans per input
+      (100,000 with -g), reported as "Last error: Archive member scan limit
+      reached (10000)". The GUI option is now "Scan archive members".
+    * MS-DOS files are mapped at 0x10000000, as Formats' XMSDOS and DIE 3.10
+      map them: getAddressOfEntryPoint is 0x10000000 + CS:IP, and the
+      native entry offset and compareEP resolve into the image. A four-byte
+      '#' pointer in an MS-DOS signature is followed as a real-mode far
+      pointer, as XBinary does; Borland Pascal and other DOS compiler rules
+      use one. The same mapping was restored in the Qt source
+      (XMSDOS::getModuleAddress returned 0, so its diec detected 2 of 34 DOS
+      packer samples; now 29, as DIE 3.10 and cdie).
+    * xxfclib: DahuaZIP members after the first, InfTool ZIP records and
+      XFileUnpacker's ZIP-family member properties now resolve the lazily
+      read ZIP data offset instead of reporting -1 (test_zip_lazy_offsets).
 
     * Added PE.validateAmd64Unwind, a native implementation of the generic
       heuristic's AMD64 exception-table checks. The database retains its
@@ -206,8 +343,8 @@
       !%, _%, $$, ##, ++), memory maps, RVA/VA translation.
     * Script API: ~200 Binary/PE/MSDOS methods plus the global helpers
       (_setResult, _isResultPresent, _removeResult, includeScript, ...).
-    * Loads the stock DIE database unchanged, including the main, extra and
-      custom databases with the original ordering rules.
+    * Loads the stock DIE database unchanged, including the main and custom
+      databases with the original ordering rules.
     * Output formats: text, JSON, XML, CSV, TSV, all byte-identical to diec.
       The structured formats reproduce DiE's shapes exactly: the JSON nests
       the records under a file-part entry with QJsonObject's alphabetical key
@@ -245,7 +382,7 @@
       Options / About / Exit. It reuses the engine (cdie_scan_file +
       cdie_format_text) so its output is byte-identical to the console for the
       same flags, converts UTF-8 to UTF-16 at the control boundary, and accepts
-      dropped files. Options edits the main / extra / custom database folders and
+      dropped files. Options edits the main / custom database folders and
       reloads live. Built CRT-free like the console (its own x_gui_entry_point,
       subsystem WINDOWS, importing KERNEL32 plus USER32/GDI32/COMDLG32/COMCTL32/
       SHELL32/OLE32; a WinMain + CRT fallback on 32-bit), with a common-controls

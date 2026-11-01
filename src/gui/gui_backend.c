@@ -48,12 +48,22 @@
 #include <xxfclib/threads/xx_threads.h>
 
 #include "../app/cdie_app.h"
+#include "../app/cdie_paths.h"
 
 
 static xx_scan_options g_options;
 static DBase g_db;
 static int g_bInited = 0;
 static int g_bMainLoaded = 0;
+/* Per GUI_DB_* slot: the loaded path came from the default lookup rather
+ * than from the caller. Kept, not re-derived, because the lookup's answer
+ * changes once an update creates the per-user copy. */
+static int g_bDbDefault[GUI_DB_COUNT] = {1, 1};
+/* Each slot's default folder name, for the lookup (cdie_paths.h). */
+static const char *const g_dbNames[GUI_DB_COUNT] = {"db", "db_custom"};
+/* xxwidgets' XXWIDGETS_SCAN_DATABASE_CUSTOM (1u << 1); the engine half does
+ * not include xxwidgets. Its deprecated EXTRA bit (1u << 0) is ignored. */
+#define GUI_SCAN_DATABASE_CUSTOM (1u << 1)
 static char *g_pIncludeTags = NULL;
 static char *g_pExcludeTags = NULL;
 static char *g_info_path = NULL;
@@ -125,33 +135,14 @@ int gui_backend_set_scan_preferences(const gui_backend_scan_preferences *prefere
     return 1;
 }
 
-/* Mirrors main_console.c's resolve_database_path with no explicit path: use
- * "<exe-dir>/<name>" when it exists, else the bare relative name. */
+/* Mirrors main_console.c's resolve_database_path with no explicit path (see
+ * cdie_paths.h): the per-user copy an update wrote, "<exe-dir>/<name>", the
+ * bundle's Resources on macOS, else the bare relative name. */
 static char *gui_resolve_db(const char *pDefaultName)
 {
-    char *pAppDir = cdie_app_dir();
-    char *pCandidate = xx_fs_path_join(pAppDir, pDefaultName);
+    char *pFound = cdie_find_database_dir(pDefaultName);
 
-    if (xx_fs_is_dir(pCandidate)) {
-        xx_rt_free(pAppDir);
-        return pCandidate;
-    }
-
-    xx_rt_free(pCandidate);
-#if defined(__APPLE__)
-    /* Finder launches bundles independently of the current working directory. */
-    char *pResources = xx_fs_path_join(pAppDir, "../Resources");
-    pCandidate = xx_fs_path_join(pResources, pDefaultName);
-    xx_rt_free(pResources);
-    if (xx_fs_is_dir(pCandidate)) {
-        xx_rt_free(pAppDir);
-        return pCandidate;
-    }
-    xx_rt_free(pCandidate);
-#endif
-    xx_rt_free(pAppDir);
-
-    return cdie_strdup(pDefaultName);
+    return pFound ? pFound : cdie_strdup(pDefaultName);
 }
 
 int gui_backend_init(void)
@@ -164,7 +155,7 @@ int gui_backend_init(void)
     xx_rt_memset(&g_db, 0, sizeof(g_db));
 
     /* GUI defaults follow the Detect It Easy GUI: deep + heuristic + verbose on.
-     * xx_scan_options_init has already set show type/version/info, use extra/custom
+     * xx_scan_options_init has already set show type/version/info, use custom
      * and sort - the settings that make the output match the console. */
     g_options.deep_scan = 1;
     g_options.heuristic_scan = 1;
@@ -176,15 +167,15 @@ int gui_backend_init(void)
     g_cache.hits = g_cache.misses = 0;
     ++g_database_generation;
 
-    g_options.main_database_path = gui_resolve_db("db");
-    g_options.extra_database_path = gui_resolve_db("db_extra");
-    g_options.custom_database_path = gui_resolve_db("db_custom");
+    g_options.main_database_path = gui_resolve_db(g_dbNames[GUI_DB_MAIN]);
+    g_options.custom_database_path = gui_resolve_db(g_dbNames[GUI_DB_CUSTOM]);
+    g_bDbDefault[GUI_DB_MAIN] = g_bDbDefault[GUI_DB_CUSTOM] = 1;
 
-    /* Load all three once. The "Databases" toggles gate which of them run at
-     * scan time (via use_extra_database / use_custom_database), so a toggle needs
-     * no reload. A missing db_extra / db_custom directory simply loads nothing. */
+    /* Load both once. The "Databases" toggle gates whether the custom one runs
+     * at scan time (via use_custom_database), so a toggle needs no reload. A
+     * missing db_custom directory simply loads nothing; the extra database
+     * folder of earlier versions is never loaded. */
     g_bMainLoaded = db_load(&g_db, g_options.main_database_path, DB_MAIN);
-    db_load(&g_db, g_options.extra_database_path, DB_EXTRA);
     db_load(&g_db, g_options.custom_database_path, DB_CUSTOM);
     db_sort(&g_db);
 
@@ -198,106 +189,134 @@ const char *gui_backend_main_db_path(void)
     return g_options.main_database_path ? g_options.main_database_path : "";
 }
 
-const char *gui_backend_extra_db_path(void)
-{
-    return g_options.extra_database_path ? g_options.extra_database_path : "";
-}
-
 const char *gui_backend_custom_db_path(void)
 {
     return g_options.custom_database_path ? g_options.custom_database_path : "";
 }
 
-int gui_backend_set_db_paths(const char *pMain, const char *pExtra, const char *pCustom)
+int gui_backend_set_db_paths(const char *pMain, const char *pCustom)
 {
     char *pNewMain;
-    char *pNewExtra;
     char *pNewCustom;
     DBase newDb;
+    /* Decided now: the arguments may be the backend's own strings, freed below. */
+    int bDefaultMain = (pMain == NULL) || (pMain[0] == 0);
+    int bDefaultCustom = (pCustom == NULL) || (pCustom[0] == 0);
 
     if (!g_bInited) {
         return 0;
     }
 
-    pNewMain = ((pMain != NULL) && (pMain[0] != 0)) ? cdie_strdup(pMain) : gui_resolve_db("db");
-    pNewExtra = ((pExtra != NULL) && (pExtra[0] != 0)) ? cdie_strdup(pExtra) : gui_resolve_db("db_extra");
-    pNewCustom = ((pCustom != NULL) && (pCustom[0] != 0)) ? cdie_strdup(pCustom) : gui_resolve_db("db_custom");
+    pNewMain = !bDefaultMain ? cdie_strdup(pMain) : gui_resolve_db(g_dbNames[GUI_DB_MAIN]);
+    pNewCustom = !bDefaultCustom ? cdie_strdup(pCustom) : gui_resolve_db(g_dbNames[GUI_DB_CUSTOM]);
     xx_rt_memset(&newDb, 0, sizeof(newDb));
 
-    if (!pNewMain || !pNewExtra || !pNewCustom || !db_load(&newDb, pNewMain, DB_MAIN)) {
+    if (!pNewMain || !pNewCustom || !db_load(&newDb, pNewMain, DB_MAIN)) {
         db_free(&newDb);
         xx_rt_free(pNewMain);
-        xx_rt_free(pNewExtra);
         xx_rt_free(pNewCustom);
         return 0;
     }
 
-    db_load(&newDb, pNewExtra, DB_EXTRA);
     db_load(&newDb, pNewCustom, DB_CUSTOM);
     db_sort(&newDb);
     db_free(&g_db);
     xx_rt_free(g_options.main_database_path);
-    xx_rt_free(g_options.extra_database_path);
     xx_rt_free(g_options.custom_database_path);
     g_db = newDb;
     g_options.main_database_path = pNewMain;
-    g_options.extra_database_path = pNewExtra;
     g_options.custom_database_path = pNewCustom;
+    g_bDbDefault[GUI_DB_MAIN] = bDefaultMain;
+    g_bDbDefault[GUI_DB_CUSTOM] = bDefaultCustom;
     g_bMainLoaded = 1;
     ++g_database_generation;
     gui_backend_clear_cache();
     return 1;
 }
 
-int gui_backend_apply_configuration(const gui_backend_scan_preferences *preferences,
-    const char *main_path, const char *extra_path, const char *custom_path,
-    char *error, size_t error_capacity)
+static gui_backend_configuration_failure g_configuration_failure;
+static int g_configuration_slot = -1;
+
+static int gui_configuration_failed(gui_backend_configuration_failure failure, int nSlot)
 {
-    const char *paths[3] = {main_path, extra_path, custom_path};
-    static const char *const names[3] = {"main", "extra", "custom"};
-    if (error && error_capacity) error[0] = 0;
-    if (!g_bInited || !valid_scan_preferences(preferences)) {
-        if (error && error_capacity) xx_rt_snprintf(error, error_capacity, "Invalid scan options or unavailable scan engine.");
-        return 0;
-    }
-    const char *current[3] = {gui_backend_main_db_path(), gui_backend_extra_db_path(), gui_backend_custom_db_path()};
-    for (size_t i = 0; i < 3; ++i) if (paths[i] && paths[i][0] && xx_rt_strcmp(paths[i], current[i]) &&
-        !xx_fs_is_dir(paths[i]) && !xx_fs_is_file(paths[i])) {
-        if (error && error_capacity) xx_rt_snprintf(error, error_capacity, "The %s database folder does not exist.", names[i]);
-        return 0;
-    }
-    if (!gui_backend_db_paths_current(main_path, extra_path, custom_path) &&
-        !gui_backend_set_db_paths(main_path, extra_path, custom_path)) {
-        if (error && error_capacity) xx_rt_snprintf(error, error_capacity, "Cannot load the selected signature databases; the main database must contain signatures.");
-        return 0;
-    }
-    return gui_backend_set_scan_preferences(preferences);
+    g_configuration_failure = failure;
+    g_configuration_slot = nSlot;
+    return 0;
 }
 
-static int gui_same_db_path(const char *pPath, const char *pDefaultName, const char *pCurrent)
+gui_backend_configuration_failure gui_backend_configuration_failed(int *slot)
 {
-    char *pResolved = ((pPath != NULL) && (pPath[0] != 0)) ? cdie_strdup(pPath) : gui_resolve_db(pDefaultName);
-    const char *pLeft = pResolved, *pRight = pCurrent ? pCurrent : "";
-    int bSame;
-    if (!pResolved) return 0;
-    while (*pLeft && *pLeft == *pRight) { ++pLeft; ++pRight; }
-    bSame = *pLeft == *pRight;
-    xx_rt_free(pResolved);
-    return bSame;
+    if (slot) *slot = g_configuration_slot;
+    return g_configuration_failure;
+}
+
+int gui_backend_apply_configuration(const gui_backend_scan_preferences *preferences,
+    const char *main_path, const char *custom_path,
+    char *error, size_t error_capacity)
+{
+    const char *paths[GUI_DB_COUNT] = {main_path, custom_path};
+    static const char *const names[GUI_DB_COUNT] = {"main", "custom"};
+    if (error && error_capacity) error[0] = 0;
+    (void)gui_configuration_failed(GUI_BACKEND_CONFIGURATION_OK, -1);
+    if (!g_bInited || !valid_scan_preferences(preferences)) {
+        if (error && error_capacity) xx_rt_snprintf(error, error_capacity, "Invalid scan options or unavailable scan engine.");
+        return gui_configuration_failed(GUI_BACKEND_CONFIGURATION_OPTIONS, -1);
+    }
+    const char *current[GUI_DB_COUNT] = {gui_backend_main_db_path(), gui_backend_custom_db_path()};
+    for (size_t i = 0; i < GUI_DB_COUNT; ++i) if (paths[i] && paths[i][0] && xx_rt_strcmp(paths[i], current[i]) &&
+        !xx_fs_is_dir(paths[i]) && !xx_fs_is_file(paths[i])) {
+        if (error && error_capacity) xx_rt_snprintf(error, error_capacity, "The %s database folder does not exist: %s", names[i], paths[i]);
+        return gui_configuration_failed(GUI_BACKEND_CONFIGURATION_MISSING, (int)i);
+    }
+    if (!gui_backend_db_paths_current(main_path, custom_path) &&
+        !gui_backend_set_db_paths(main_path, custom_path)) {
+        if (error && error_capacity) xx_rt_snprintf(error, error_capacity, "Cannot load signatures from %s; the main database must contain signatures.",
+            main_path && main_path[0] ? main_path : "the default main database folder");
+        return gui_configuration_failed(GUI_BACKEND_CONFIGURATION_LOAD, GUI_DB_MAIN);
+    }
+    if (!gui_backend_set_scan_preferences(preferences)) return gui_configuration_failed(GUI_BACKEND_CONFIGURATION_OPTIONS, -1);
+    return 1;
+}
+
+static const char *gui_loaded_db_path(int nIndex)
+{
+    const char *pPath = nIndex == GUI_DB_MAIN ? g_options.main_database_path : g_options.custom_database_path;
+    return pPath ? pPath : "";
+}
+
+/* An empty request matches a default slot, a path matches the same path
+ * chosen explicitly: either way, applying it would change nothing. */
+static int gui_slot_current(int nIndex, const char *pPath)
+{
+    if ((pPath == NULL) || (pPath[0] == 0)) return g_bDbDefault[nIndex];
+    return !g_bDbDefault[nIndex] && !xx_rt_strcmp(pPath, gui_loaded_db_path(nIndex));
 }
 
 int gui_backend_db_path_is_default(int nIndex)
 {
-    static const char *const names[3] = {"db", "db_extra", "db_custom"};
-    const char *current = nIndex == 0 ? g_options.main_database_path : nIndex == 1 ? g_options.extra_database_path : g_options.custom_database_path;
-    return g_bInited && nIndex >= 0 && nIndex < 3 && gui_same_db_path("", names[nIndex], current);
+    return g_bInited && nIndex >= 0 && nIndex < GUI_DB_COUNT && g_bDbDefault[nIndex];
 }
 
-int gui_backend_db_paths_current(const char *pMain, const char *pExtra, const char *pCustom)
+int gui_backend_db_path_moved(int nIndex)
 {
-    return g_bInited && gui_same_db_path(pMain, "db", g_options.main_database_path) &&
-           gui_same_db_path(pExtra, "db_extra", g_options.extra_database_path) &&
-           gui_same_db_path(pCustom, "db_custom", g_options.custom_database_path);
+    char *pResolved;
+    int bMoved;
+    if (!gui_backend_db_path_is_default(nIndex)) return 0;
+    pResolved = gui_resolve_db(g_dbNames[nIndex]);
+    if (!pResolved) return 0;
+    bMoved = xx_rt_strcmp(pResolved, gui_loaded_db_path(nIndex)) != 0;
+    xx_rt_free(pResolved);
+    return bMoved;
+}
+
+uint64_t gui_backend_database_generation(void)
+{
+    return g_database_generation;
+}
+
+int gui_backend_db_paths_current(const char *pMain, const char *pCustom)
+{
+    return g_bInited && gui_slot_current(GUI_DB_MAIN, pMain) && gui_slot_current(GUI_DB_CUSTOM, pCustom);
 }
 
 int gui_backend_signature_count(void)
@@ -366,10 +385,9 @@ void gui_backend_set_flags(int bDeep, int bHeuristic, int bVerbose, int bAggress
     g_options.format_result = bFormat ? 1 : 0;
 }
 
-void gui_backend_set_databases(int bUseExtra, int bUseCustom)
+void gui_backend_set_databases(int bUseCustom)
 {
-    if (g_options.use_extra_database != (bUseExtra != 0) || g_options.use_custom_database != (bUseCustom != 0)) options_changed();
-    g_options.use_extra_database = bUseExtra ? 1 : 0;
+    if (g_options.use_custom_database != (bUseCustom != 0)) options_changed();
     g_options.use_custom_database = bUseCustom ? 1 : 0;
 }
 
@@ -998,8 +1016,7 @@ int gui_backend_scan_detections(const char *path, unsigned int flags, unsigned i
     options.verbose = (flags & 4u) != 0;
     options.aggressive_scan = (flags & 8u) != 0;
     options.hide_unknown = (flags & 16u) != 0;
-    options.use_extra_database = (databases & 1u) != 0;
-    options.use_custom_database = (databases & 2u) != 0;
+    options.use_custom_database = (databases & GUI_SCAN_DATABASE_CUSTOM) != 0;
     if (!scan_configured(path, XFT_UNKNOWN, &options, &result, NULL)) {
         xx_scan_result_free(&result);
         return 0;

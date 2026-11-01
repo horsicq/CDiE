@@ -14,6 +14,8 @@ jobs:
       cdisasm: ${{ steps.revisions.outputs.cdisasm }}
       xxwidgets: ${{ steps.revisions.outputs.xxwidgets }}
       detect_it_easy: ${{ steps.revisions.outputs.detect_it_easy }}
+      xxnetlib: ${{ steps.revisions.outputs.xxnetlib }}
+      xxgithub: ${{ steps.revisions.outputs.xxgithub }}
     steps:
       - name: Resolve dependency revisions
         id: revisions
@@ -34,6 +36,28 @@ jobs:
               });
               core.setOutput(output, commit.sha);
               core.info(`${repo}: ${commit.sha}`);
+            }
+            // die-update and the GUI's Update database need xxnetlib and
+            // xxgithub. While they are not published (or the token cannot
+            // read them) the output stays empty, the checkouts below are
+            // skipped and CMake builds the packages without the updater.
+            const optional = {
+              xxnetlib: 'xxnetlib',
+              xxgithub: 'xxgithub',
+            };
+            for (const [output, repo] of Object.entries(optional)) {
+              try {
+                const { data: repository } = await github.rest.repos.get({ owner: 'horsicq', repo });
+                const { data: commit } = await github.rest.repos.getCommit({
+                  owner: 'horsicq', repo, ref: repository.default_branch,
+                });
+                core.setOutput(output, commit.sha);
+                core.info(`${repo}: ${commit.sha}`);
+              } catch (error) {
+                if (error.status !== 404) throw error;
+                core.setOutput(output, '');
+                core.warning(`${repo} is not available: the packages are built without die-update`);
+              }
             }
 
   ubuntu:
@@ -77,6 +101,24 @@ jobs:
           path: cdie/dep/Detect-It-Easy
           token: ${{ secrets.CDIE_DEPS_TOKEN || github.token }}
           persist-credentials: false
+      - name: Check out xxnetlib
+        if: needs.resolve-deps.outputs.xxnetlib != ''
+        uses: actions/checkout@v4
+        with:
+          repository: horsicq/xxnetlib
+          ref: ${{ needs.resolve-deps.outputs.xxnetlib }}
+          path: cdie/dep/xxnetlib
+          token: ${{ secrets.CDIE_DEPS_TOKEN || github.token }}
+          persist-credentials: false
+      - name: Check out xxgithub
+        if: needs.resolve-deps.outputs.xxgithub != ''
+        uses: actions/checkout@v4
+        with:
+          repository: horsicq/xxgithub
+          ref: ${{ needs.resolve-deps.outputs.xxgithub }}
+          path: cdie/dep/xxgithub
+          token: ${{ secrets.CDIE_DEPS_TOKEN || github.token }}
+          persist-credentials: false
       - name: Install build tools
         run: |
           sudo apt-get update
@@ -94,6 +136,8 @@ jobs:
         run: cmake --build build --parallel 2
       - name: Package Ubuntu
         working-directory: cdie
+        env:
+          WITH_UPDATER: ${{ needs.resolve-deps.outputs.xxnetlib != '' && needs.resolve-deps.outputs.xxgithub != '' }}
         run: |
           version=$(head -n 1 release_version.txt)
           cpack --config build/CPackConfig.cmake -G ZIP -B release \
@@ -105,6 +149,9 @@ jobs:
           grep -Eq '(^|/)bin/diec$' "$inventory"
           grep -Eq '(^|/)bin/die$' "$inventory"
           grep -Eq '(^|/)bin/db/.+[^/]$' "$inventory"
+          if [ "$WITH_UPDATER" = true ]; then
+            grep -Eq '(^|/)bin/die-update$' "$inventory"
+          fi
           if grep -Eq '(^|/)(cdie_tui|cdie_gui|cdie)$' "$inventory"; then
             echo 'Unexpected legacy frontend in Ubuntu package' >&2
             exit 1
@@ -116,9 +163,13 @@ jobs:
           path: cdie/release/cdie_ubuntu24_amd64_*.zip
           if-no-files-found: error
 
-  macos:
+  # The .deb and the AppImage come from the oldest supported Ubuntu: glibc
+  # (and, for the .deb, the dpkg-shlibdeps version floors) set the oldest
+  # system each one runs on. A .deb built here also installs on 24.04 and
+  # newer, whose t64 libraries Provide the pre-t64 names it depends on.
+  linux-packages:
     needs: resolve-deps
-    runs-on: macos-15
+    runs-on: ubuntu-22.04
     steps:
       - name: Check out cdie
         uses: actions/checkout@v4
@@ -157,41 +208,414 @@ jobs:
           path: cdie/dep/Detect-It-Easy
           token: ${{ secrets.CDIE_DEPS_TOKEN || github.token }}
           persist-credentials: false
+      - name: Check out xxnetlib
+        if: needs.resolve-deps.outputs.xxnetlib != ''
+        uses: actions/checkout@v4
+        with:
+          repository: horsicq/xxnetlib
+          ref: ${{ needs.resolve-deps.outputs.xxnetlib }}
+          path: cdie/dep/xxnetlib
+          token: ${{ secrets.CDIE_DEPS_TOKEN || github.token }}
+          persist-credentials: false
+      - name: Check out xxgithub
+        if: needs.resolve-deps.outputs.xxgithub != ''
+        uses: actions/checkout@v4
+        with:
+          repository: horsicq/xxgithub
+          ref: ${{ needs.resolve-deps.outputs.xxgithub }}
+          path: cdie/dep/xxgithub
+          token: ${{ secrets.CDIE_DEPS_TOKEN || github.token }}
+          persist-credentials: false
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config libgtk-3-dev dpkg-dev file
+      # One FHS build tree (CDIE_BUILD_DIR) serves both packages.
+      - name: Build Debian package
+        working-directory: cdie
+        env:
+          CDIE_DATABASE_DIR: ${{ github.workspace }}/cdie/dep/Detect-It-Easy
+          CDIE_BUILD_DIR: ${{ runner.temp }}/cdie-fhs
+          CDIE_RELEASE_DIR: ${{ github.workspace }}/cdie/release
+        run: |
+          test -d dep/Detect-It-Easy/db
+          bash packaging/debian/build_deb.sh \
+            -DXXFCLIB_DIR="$PWD/dep/xxfclib" \
+            -DXXFC_CDISASM_DIR="$PWD/dep/cdisasm"
+      - name: Verify Debian package
+        working-directory: cdie
+        env:
+          WITH_UPDATER: ${{ needs.resolve-deps.outputs.xxnetlib != '' && needs.resolve-deps.outputs.xxgithub != '' }}
+        run: |
+          version=$(head -n 1 release_version.txt)
+          package="release/cdie_${version}_amd64.deb"
+          test -s "$package"
+          dpkg-deb -I "$package"
+          dpkg-deb -f "$package" Depends | grep -q 'libgtk-3-0'
+          dpkg-deb -f "$package" Conflicts | grep -q 'detectiteasy'
+          root=$(mktemp -d)
+          dpkg-deb -x "$package" "$root"
+          # The bin/ links are relative, so they resolve inside the extracted
+          # tree, and the programs find the databases beside their real path.
+          "$root/usr/bin/diec" --version
+          "$root/usr/bin/diec" "$root/usr/lib/cdie/diec"
+          test -s "$root/usr/share/icons/hicolor/256x256/apps/io.github.horsicq.cdie.png"
+          test -s "$root/usr/share/metainfo/io.github.horsicq.cdie.metainfo.xml"
+          if [ "$WITH_UPDATER" = true ]; then
+            dpkg-deb -f "$package" Depends | grep -q 'libcurl'
+            "$root/usr/bin/die-update" --version
+          fi
+      - name: Build AppImage
+        working-directory: cdie
+        env:
+          CDIE_DATABASE_DIR: ${{ github.workspace }}/cdie/dep/Detect-It-Easy
+          CDIE_BUILD_DIR: ${{ runner.temp }}/cdie-fhs
+          CDIE_RELEASE_DIR: ${{ github.workspace }}/cdie/release
+        run: |
+          bash packaging/appimage/build_appimage.sh \
+            -DXXFCLIB_DIR="$PWD/dep/xxfclib" \
+            -DXXFC_CDISASM_DIR="$PWD/dep/cdisasm"
+      - name: Verify AppImage
+        working-directory: cdie
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
+          WITH_UPDATER: ${{ needs.resolve-deps.outputs.xxnetlib != '' && needs.resolve-deps.outputs.xxgithub != '' }}
+        run: |
+          version=$(head -n 1 release_version.txt)
+          image="$PWD/release/cdie_${version}_x86_64.AppImage"
+          test -x "$image"
+          work=$(mktemp -d)
+          cd "$work"
+          "$image" diec --version
+          "$image" diec "$image"
+          if [ "$WITH_UPDATER" = true ]; then
+            "$image" die-update --version
+          fi
+      - name: Save Debian package
+        uses: actions/upload-artifact@v4
+        with:
+          name: cdie-linux-deb
+          path: cdie/release/cdie_*_amd64.deb
+          if-no-files-found: error
+      - name: Save AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: cdie-linux-appimage
+          path: cdie/release/cdie_*_x86_64.AppImage
+          if-no-files-found: error
+
+  # Both macOS architectures come from this Apple silicon runner: arm64
+  # natively and x86_64 cross-compiled, in two build trees. One checkout and
+  # one Xcode SDK serve both packages, and nothing depends on GitHub's Intel
+  # images, which are being retired. The x86_64 programs also run here when
+  # the runner has Rosetta; without it they are only checked with lipo.
+  macos:
+    needs: resolve-deps
+    runs-on: macos-15
+    env:
+      # Read by the Configure step and by packaging/macos/build_macos.sh, so
+      # the portable ZIPs and the app packages target the same macOS. 10.14
+      # is the oldest macOS the x86_64 GUI supports (see build_macos.sh).
+      MACOS_DEPLOYMENT_TARGET_ARM64: '11.0'
+      MACOS_DEPLOYMENT_TARGET_X86_64: '10.14'
+    steps:
+      - name: Check out cdie
+        uses: actions/checkout@v4
+        with:
+          path: cdie
+          persist-credentials: false
+      - name: Check out xxfclib
+        uses: actions/checkout@v4
+        with:
+          repository: horsicq/xxfclib
+          ref: ${{ needs.resolve-deps.outputs.xxfclib }}
+          path: cdie/dep/xxfclib
+          token: ${{ secrets.CDIE_DEPS_TOKEN || github.token }}
+          persist-credentials: false
+      - name: Check out cdisasm
+        uses: actions/checkout@v4
+        with:
+          repository: horsicq/cdisasm
+          ref: ${{ needs.resolve-deps.outputs.cdisasm }}
+          path: cdie/dep/cdisasm
+          token: ${{ secrets.CDIE_DEPS_TOKEN || github.token }}
+          persist-credentials: false
+      - name: Check out xxwidgets
+        uses: actions/checkout@v4
+        with:
+          repository: horsicq/xxwidgets
+          ref: ${{ needs.resolve-deps.outputs.xxwidgets }}
+          path: cdie/dep/xxwidgets
+          token: ${{ secrets.CDIE_DEPS_TOKEN || github.token }}
+          persist-credentials: false
+      - name: Check out signature database
+        uses: actions/checkout@v4
+        with:
+          repository: horsicq/Detect-It-Easy
+          ref: ${{ needs.resolve-deps.outputs.detect_it_easy }}
+          path: cdie/dep/Detect-It-Easy
+          token: ${{ secrets.CDIE_DEPS_TOKEN || github.token }}
+          persist-credentials: false
+      - name: Check out xxnetlib
+        if: needs.resolve-deps.outputs.xxnetlib != ''
+        uses: actions/checkout@v4
+        with:
+          repository: horsicq/xxnetlib
+          ref: ${{ needs.resolve-deps.outputs.xxnetlib }}
+          path: cdie/dep/xxnetlib
+          token: ${{ secrets.CDIE_DEPS_TOKEN || github.token }}
+          persist-credentials: false
+      - name: Check out xxgithub
+        if: needs.resolve-deps.outputs.xxgithub != ''
+        uses: actions/checkout@v4
+        with:
+          repository: horsicq/xxgithub
+          ref: ${{ needs.resolve-deps.outputs.xxgithub }}
+          path: cdie/dep/xxgithub
+          token: ${{ secrets.CDIE_DEPS_TOKEN || github.token }}
+          persist-credentials: false
+      # build/arm64 and build/x64 are the trees build_macos.sh reuses below
+      # (CDIE_BUILD_DIR=build), so the app packages are not compiled twice.
       - name: Configure
         working-directory: cdie
         run: |
           test "$(uname -m)" = arm64
           test -d dep/Detect-It-Easy/db
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-            -DXXFCLIB_DIR="$PWD/dep/xxfclib" \
-            -DXXFC_CDISASM_DIR="$PWD/dep/cdisasm" \
-            -DCDIE_DATABASE_DIR="$PWD/dep/Detect-It-Easy"
+          # The x64 tree is cross-compiled on this arm64 runner. Only an
+          # xxfclib whose ISA flags follow the target architecture gives its
+          # x86 SIMD sources -mavx2 instead of ARM -march flags.
+          if [ ! -f dep/xxfclib/cmake/xxfclib_target_arch.cmake ]; then
+            echo "::error::dep/xxfclib has no cmake/xxfclib_target_arch.cmake: publish xxfclib before cdie, the x86_64 build cross-compiled on the arm64 runner needs it"
+            exit 1
+          fi
+          for label in arm64 x64; do
+            if [ "$label" = arm64 ]; then
+              arch=arm64
+              target="$MACOS_DEPLOYMENT_TARGET_ARM64"
+            else
+              arch=x86_64
+              target="$MACOS_DEPLOYMENT_TARGET_X86_64"
+            fi
+            cmake -S . -B "build/$label" -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_OSX_ARCHITECTURES="$arch" \
+              -DCMAKE_OSX_DEPLOYMENT_TARGET="$target" \
+              -DXXFCLIB_DIR="$PWD/dep/xxfclib" \
+              -DXXFC_CDISASM_DIR="$PWD/dep/cdisasm" \
+              -DCDIE_DATABASE_DIR="$PWD/dep/Detect-It-Easy"
+          done
       - name: Build
         working-directory: cdie
-        run: cmake --build build --parallel 2
+        run: |
+          cmake --build build/arm64 --parallel 2
+          cmake --build build/x64 --parallel 2
       - name: Package and verify macOS
         working-directory: cdie
+        env:
+          WITH_UPDATER: ${{ needs.resolve-deps.outputs.xxnetlib != '' && needs.resolve-deps.outputs.xxgithub != '' }}
         run: |
           version=$(head -n 1 release_version.txt)
-          cpack --config build/CPackConfig.cmake -G ZIP -B release
-          archive="release/cdie_mac_arm64_portable_${version}.zip"
-          test -s "$archive"
+          for label in arm64 x64; do
+            if [ "$label" = arm64 ]; then expected=arm64; else expected=x86_64; fi
+            cpack --config "build/$label/CPackConfig.cmake" -G ZIP -B release
+            archive="release/cdie_mac_${label}_portable_${version}.zip"
+            test -s "$archive"
 
-          extract_dir=$(mktemp -d)
-          unzip -q "$archive" -d "$extract_dir"
-          package_dir="$extract_dir/cdie_mac_arm64_portable_${version}"
-          test -x "$package_dir/die.app/Contents/MacOS/die"
-          plutil -lint "$package_dir/die.app/Contents/Info.plist"
-          test -n "$(find "$package_dir/die.app/Contents/Resources/db" -type f -print -quit)"
-          for excluded in diec diex cdie cdie_tui cdie_gui.app; do
-            test ! -e "$package_dir/$excluded"
+            extract_dir=$(mktemp -d)
+            unzip -q "$archive" -d "$extract_dir"
+            package_dir="$extract_dir/cdie_mac_${label}_portable_${version}"
+            test -x "$package_dir/die.app/Contents/MacOS/die"
+            plutil -lint "$package_dir/die.app/Contents/Info.plist"
+            test -n "$(find "$package_dir/die.app/Contents/Resources/db" -type f -print -quit)"
+            programs=die
+            # die-update lives inside die.app, never at the package root.
+            if [ "$WITH_UPDATER" = true ]; then
+              test -x "$package_dir/die.app/Contents/MacOS/die-update"
+              programs="die die-update"
+            fi
+            for program in $programs; do
+              archs=$(lipo -archs "$package_dir/die.app/Contents/MacOS/$program")
+              echo "$label $program: $archs"
+              test "$archs" = "$expected"
+            done
+            for excluded in diec diex cdie cdie_tui cdie_gui.app die-update; do
+              test ! -e "$package_dir/$excluded"
+            done
+
+            # cpack zips die.app with nothing but the linker's signatures, and
+            # a downloaded bundle without a valid seal may be reported as
+            # damaged. Seal it ad hoc, as build_macos.sh does by default
+            # (MACOS_ADHOC_SIGN=1; no certificate involved), zip the same
+            # top folder again and check the seal survives the zip.
+            test -z "$(unzip -Z -1 "$archive" | grep -v "^cdie_mac_${label}_portable_${version}/" || true)"
+            xattr -cr "$package_dir/die.app"
+            for helper in "$package_dir"/die.app/Contents/MacOS/*; do
+              if [ -f "$helper" ] && [ "$(basename "$helper")" != die ]; then
+                codesign --force --sign - "$helper"
+              fi
+            done
+            codesign --force --sign - --deep "$package_dir/die.app"
+            rm -f "$archive"
+            ditto -c -k --norsrc --keepParent "$package_dir" "$archive"
+            test -z "$(unzip -Z -1 "$archive" | grep -E '^__MACOSX/|(^|/)\._' || true)"
+            check_dir=$(mktemp -d)
+            unzip -q "$archive" -d "$check_dir"
+            codesign --verify --deep --strict "$check_dir/cdie_mac_${label}_portable_${version}/die.app"
           done
 
-      - name: Save macOS package
+      - name: Save macOS arm64 package
         uses: actions/upload-artifact@v4
         with:
           name: cdie-macos-arm64
           path: cdie/release/cdie_mac_arm64_portable_*.zip
+          if-no-files-found: error
+
+      - name: Save macOS x64 package
+        uses: actions/upload-artifact@v4
+        with:
+          name: cdie-macos-x64
+          path: cdie/release/cdie_mac_x64_portable_*.zip
+          if-no-files-found: error
+
+      # Optional Developer ID signing and notarization. Without these secrets
+      # (the normal case) the import is skipped, the X_PRIVATE_* variables
+      # below are empty, and build_macos.sh seals die.app ad hoc, leaves the
+      # .pkg unsigned and skips notarization, with notices. A certificate
+      # that cannot be imported only produces a warning.
+      - name: Check for signing secrets
+        id: signing
+        env:
+          CERTIFICATES_P12: ${{ secrets.CDIE_MACOS_CERTIFICATES_P12 }}
+        run: |
+          if [ -n "$CERTIFICATES_P12" ]; then
+            echo "import=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "import=false" >> "$GITHUB_OUTPUT"
+            echo "No CDIE_MACOS_CERTIFICATES_P12 secret: the macOS packages are not signed with a Developer ID"
+          fi
+      - name: Import signing certificates
+        if: steps.signing.outputs.import == 'true'
+        env:
+          CERTIFICATES_P12: ${{ secrets.CDIE_MACOS_CERTIFICATES_P12 }}
+          CERTIFICATES_PASSWORD: ${{ secrets.CDIE_MACOS_CERTIFICATES_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/cdie-signing.keychain-db"
+          p12="$RUNNER_TEMP/cdie-signing.p12"
+          keychain_password=$(uuidgen)
+          echo "::add-mask::$keychain_password"
+          if printf '%s' "$CERTIFICATES_P12" | base64 --decode > "$p12" &&
+             security create-keychain -p "$keychain_password" "$keychain" &&
+             security set-keychain-settings -lut 21600 "$keychain" &&
+             security unlock-keychain -p "$keychain_password" "$keychain" &&
+             security import "$p12" -k "$keychain" -P "$CERTIFICATES_PASSWORD" \
+               -T /usr/bin/codesign -T /usr/bin/pkgbuild -T /usr/bin/productbuild &&
+             security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" > /dev/null &&
+             security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"'); then
+            echo "X_PRIVATE_KEYCHAIN_PATH=$keychain" >> "$GITHUB_ENV"
+          else
+            echo "::warning::The signing certificates could not be imported; the macOS packages are built without Developer ID signatures"
+          fi
+          rm -f "$p12"
+
+      # die.app alone, zipped with ditto, and a .pkg installing it into
+      # /Applications, for arm64 and x64. Without a Developer ID die.app is
+      # sealed ad hoc (codesign --sign -) and the .pkg is unsigned.
+      - name: Build macOS app zips and installers
+        working-directory: cdie
+        env:
+          CDIE_DATABASE_DIR: ${{ github.workspace }}/cdie/dep/Detect-It-Easy
+          CDIE_BUILD_DIR: ${{ github.workspace }}/cdie/build
+          CDIE_RELEASE_DIR: ${{ github.workspace }}/cdie/release
+          X_PRIVATE_CERT_APP: ${{ secrets.CDIE_MACOS_CERT_APP }}
+          X_PRIVATE_CERT_INSTALL: ${{ secrets.CDIE_MACOS_CERT_INSTALL }}
+          X_PRIVATE_NOTARIZE_LOGIN: ${{ secrets.CDIE_MACOS_NOTARIZE_LOGIN }}
+          X_PRIVATE_NOTARIZE_PWD: ${{ secrets.CDIE_MACOS_NOTARIZE_PWD }}
+          X_PRIVATE_NOTARIZE_TEAMID: ${{ secrets.CDIE_MACOS_NOTARIZE_TEAMID }}
+        run: bash packaging/macos/build_macos.sh
+
+      - name: Verify macOS app zips and installers
+        working-directory: cdie
+        env:
+          WITH_UPDATER: ${{ needs.resolve-deps.outputs.xxnetlib != '' && needs.resolve-deps.outputs.xxgithub != '' }}
+        run: |
+          version=$(head -n 1 release_version.txt)
+          rosetta=false
+          if arch -x86_64 /usr/bin/true 2> /dev/null; then
+            rosetta=true
+          else
+            echo "::notice::Rosetta is not available on this runner: the x86_64 programs are checked with lipo but not run"
+          fi
+          for label in arm64 x64; do
+            if [ "$label" = arm64 ]; then expected=arm64; else expected=x86_64; fi
+            archive="release/cdie_mac_${label}_${version}.zip"
+            installer="release/cdie_mac_${label}_${version}.pkg"
+            test -s "$archive"
+            test -s "$installer"
+            # Nothing but die.app at the top of the zip.
+            test -z "$(unzip -Z -1 "$archive" | grep -v '^die\.app/' || true)"
+            programs=die
+            if [ "$WITH_UPDATER" = true ]; then
+              unzip -Z -1 "$archive" | grep -qx 'die.app/Contents/MacOS/die-update'
+              programs="die die-update"
+            fi
+            extract_dir=$(mktemp -d)
+            unzip -q "$archive" -d "$extract_dir"
+            app="$extract_dir/die.app"
+            # The ad hoc seal build_macos.sh gives die.app without a Developer
+            # ID (MACOS_ADHOC_SIGN=1), or the Developer ID signature.
+            codesign --verify --deep --strict "$app"
+            for program in $programs; do
+              archs=$(lipo -archs "$app/Contents/MacOS/$program")
+              echo "$label $program: $archs"
+              test "$archs" = "$expected"
+            done
+            run=
+            if [ "$label" = x64 ]; then
+              if [ "$rosetta" != true ]; then
+                run=skip
+              else
+                run="arch -x86_64"
+              fi
+            fi
+            if [ "$run" != skip ]; then
+              # die checks its arguments before it opens any window: exit
+              # status 2 with this message means it loaded and started.
+              status=0
+              output=$($run "$app/Contents/MacOS/die" --smoke-update launch-check 2>&1) || status=$?
+              echo "$label die: exit $status, $output"
+              test "$status" -eq 2
+              echo "$output" | grep -q 'requires installed, current or failed'
+              if [ "$WITH_UPDATER" = true ]; then
+                $run "$app/Contents/MacOS/die-update" --version
+              fi
+            fi
+            expanded="$(mktemp -d)/pkg"
+            pkgutil --expand "$installer" "$expanded"
+            grep -q 'install-location="/Applications"' "$expanded"/*.pkg/PackageInfo
+          done
+
+      - name: Remove signing keychain
+        if: always() && steps.signing.outputs.import == 'true'
+        run: |
+          if [ -n "${X_PRIVATE_KEYCHAIN_PATH:-}" ]; then
+            security delete-keychain "$X_PRIVATE_KEYCHAIN_PATH" || true
+          fi
+
+      - name: Save macOS arm64 app zip and installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: cdie-macos-arm64-app
+          path: |
+            cdie/release/cdie_mac_arm64_[0-9]*.zip
+            cdie/release/cdie_mac_arm64_*.pkg
+          if-no-files-found: error
+
+      - name: Save macOS x64 app zip and installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: cdie-macos-x64-app
+          path: |
+            cdie/release/cdie_mac_x64_[0-9]*.zip
+            cdie/release/cdie_mac_x64_*.pkg
           if-no-files-found: error
 
   windows:
@@ -235,6 +659,24 @@ jobs:
           path: cdie/dep/Detect-It-Easy
           token: ${{ secrets.CDIE_DEPS_TOKEN || github.token }}
           persist-credentials: false
+      - name: Check out xxnetlib
+        if: needs.resolve-deps.outputs.xxnetlib != ''
+        uses: actions/checkout@v4
+        with:
+          repository: horsicq/xxnetlib
+          ref: ${{ needs.resolve-deps.outputs.xxnetlib }}
+          path: cdie/dep/xxnetlib
+          token: ${{ secrets.CDIE_DEPS_TOKEN || github.token }}
+          persist-credentials: false
+      - name: Check out xxgithub
+        if: needs.resolve-deps.outputs.xxgithub != ''
+        uses: actions/checkout@v4
+        with:
+          repository: horsicq/xxgithub
+          ref: ${{ needs.resolve-deps.outputs.xxgithub }}
+          path: cdie/dep/xxgithub
+          token: ${{ secrets.CDIE_DEPS_TOKEN || github.token }}
+          persist-credentials: false
       - name: Build and package Windows
         shell: cmd
         working-directory: cdie
@@ -244,13 +686,17 @@ jobs:
       - name: Verify Windows package
         shell: pwsh
         working-directory: cdie
+        env:
+          WITH_UPDATER: ${{ needs.resolve-deps.outputs.xxnetlib != '' && needs.resolve-deps.outputs.xxgithub != '' }}
         run: |
           $packages = @(Get-ChildItem release -Filter 'cdie_win_x64_portable_*.zip')
           if ($packages.Count -ne 1) { throw "Expected one Windows ZIP, found $($packages.Count)" }
           $archive = [System.IO.Compression.ZipFile]::OpenRead($packages[0].FullName)
           try {
             $entries = @($archive.Entries | ForEach-Object { $_.FullName })
-            foreach ($application in @('die.exe', 'diec.exe')) {
+            $applications = @('die.exe', 'diec.exe')
+            if ($env:WITH_UPDATER -eq 'true') { $applications += 'die-update.exe' }
+            foreach ($application in $applications) {
               $escapedName = [regex]::Escape($application)
               if (-not ($entries | Where-Object { $_ -match "(^|/)$escapedName`$" })) {
                 throw "Windows package is missing $application"
@@ -278,7 +724,7 @@ jobs:
 
   publish-beta:
     if: github.ref == 'refs/heads/master'
-    needs: [resolve-deps, ubuntu, macos, windows]
+    needs: [resolve-deps, ubuntu, linux-packages, macos, windows]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -296,10 +742,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          test "$(find release-assets -maxdepth 1 -type f -name '*.zip' | wc -l)" -eq 3
+          test "$(find release-assets -maxdepth 1 -type f -name '*.zip' | wc -l)" -eq 6
           test "$(find release-assets -maxdepth 1 -type f -name 'cdie_ubuntu24_amd64_*.zip' | wc -l)" -eq 1
           test "$(find release-assets -maxdepth 1 -type f -name 'cdie_mac_arm64_portable_*.zip' | wc -l)" -eq 1
+          test "$(find release-assets -maxdepth 1 -type f -name 'cdie_mac_x64_portable_*.zip' | wc -l)" -eq 1
+          test "$(find release-assets -maxdepth 1 -type f -name 'cdie_mac_arm64_[0-9]*.zip' | wc -l)" -eq 1
+          test "$(find release-assets -maxdepth 1 -type f -name 'cdie_mac_x64_[0-9]*.zip' | wc -l)" -eq 1
           test "$(find release-assets -maxdepth 1 -type f -name 'cdie_win_x64_portable_*.zip' | wc -l)" -eq 1
+          test "$(find release-assets -maxdepth 1 -type f -name '*.pkg' | wc -l)" -eq 2
+          test "$(find release-assets -maxdepth 1 -type f -name 'cdie_mac_arm64_*.pkg' | wc -l)" -eq 1
+          test "$(find release-assets -maxdepth 1 -type f -name 'cdie_mac_x64_*.pkg' | wc -l)" -eq 1
+          test "$(find release-assets -maxdepth 1 -type f -name '*.deb' | wc -l)" -eq 1
+          test "$(find release-assets -maxdepth 1 -type f -name 'cdie_*_amd64.deb' | wc -l)" -eq 1
+          test "$(find release-assets -maxdepth 1 -type f -name '*.AppImage' | wc -l)" -eq 1
+          test "$(find release-assets -maxdepth 1 -type f -name 'cdie_*_x86_64.AppImage' | wc -l)" -eq 1
           latest=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/master" --jq .object.sha)
           test "$latest" = "$GITHUB_SHA"
       - name: Point Beta tag at packaged commit
@@ -330,10 +786,16 @@ jobs:
           prerelease: true
           make_latest: false
           fail_on_unmatched_files: true
-          files: release-assets/*.zip
+          files: |
+            release-assets/*.zip
+            release-assets/*.pkg
+            release-assets/*.deb
+            release-assets/*.AppImage
           body: |
             cdie commit: ${{ github.sha }}
             xxfclib: ${{ needs.resolve-deps.outputs.xxfclib }}
             cdisasm: ${{ needs.resolve-deps.outputs.cdisasm }}
             xxwidgets: ${{ needs.resolve-deps.outputs.xxwidgets }}
             Detect-It-Easy: ${{ needs.resolve-deps.outputs.detect_it_easy }}
+            xxnetlib: ${{ needs.resolve-deps.outputs.xxnetlib || 'not available (no die-update)' }}
+            xxgithub: ${{ needs.resolve-deps.outputs.xxgithub || 'not available (no die-update)' }}

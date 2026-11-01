@@ -23,7 +23,7 @@ each item lists what a script sees instead.
 | ZIP / JAR / APK / NPM / IPA | central-directory record-name list for `isArchiveRecordPresent` / `isArchiveRecordPresentExp`; `META-INF/MANIFEST.MF` decompressed for `getManifestRecord`; and `package/package.json` for `getPackageJsonRecord` (top-level string fields) |
 | `Util` 64-bit arithmetic | `div64`, `divu64`, `shlu64`, `shru64` are implemented (the database uses them because JS numbers are doubles) |
 | NE, LE/LX, CFBF, RAR, JavaClass, Amiga | **detected** by magic so the file type line is right, but no dedicated parser: their database directories run against the generic `Binary` API (plus `MSDOS.isNE/isLE/isLX` for the NE/LE/LX family) |
-| Archive member scanning | `--archivesscan` enables one level of ZIP-family, LHA, GZIP and BZIP2 member scans plus Mach-O Fat slices. Nested recursion and RAR/CAB member expansion are not exposed by this scan path. |
+| Archive member scanning | `--archivesscan` expands ZIP, JAR, APK and IPA members as Detect It Easy 4.0.0 does, nested archives included (down to 20 archive levels). Detect It Easy's engine also expands 7z, RAR, CAB and ISO 9660 containers when its build can read them; cdie does not expand them yet. GZIP, BZIP2, LHA and Mach-O Fat files are scanned but not expanded, as in Detect It Easy. A ZIP without end records (a stream or a cut-short file) is read from its local headers for Store and Deflate members only. As a deliberate safety limit that Detect It Easy does not have, one input scans at most 10,000 archive members, all nesting levels together (100,000 with `-g`); reaching it stops the expansion and adds `Last error: Archive member scan limit reached (10000)`, with exit code 0. Without it, four levels of ZIPs that each hold 21 ZIPs (204,204 member scans) would take about 25 minutes with the full database; with it, the scan stops after a minute or so. |
 | `--verbose` "Operation system" line | reproduced for PE, DEX (`Android(9.0)[Dalvik, 32-bit]`), Mach-O (`macOS(13.0.0)[X86_64, 64-bit]`), NE (`Windows[286, 16SEG]`) and ELF (`Ubuntu Linux(22.04.3, ABI: 3.2.0)[AMD64, 64-bit]`, `Unix[MIPS, 32-bit]` — OSABI/interpreter/`.comment` distro/GNU-note ABI/e_machine arch). The exotic ELF distro/note branches are ported from the reference but validated only on the available samples (Unix, Ubuntu, GNU-note) |
 | PDF streams | not decompressed — key/value queries read the plaintext object dictionaries, which is where the database looks; `/Filter` is reported, but stream contents are not searched |
 | UTF-8 / UTF-16 text detection | `isUTF8Text()`, `isUnicodeText()` and `getHeaderString()` are implemented in xxfclib; the previous stub limitation no longer applies. |
@@ -356,7 +356,31 @@ different letter, that spelling still works as an alias.
 `-a` / `--alltypes` runs applicable parent-format passes and retains separate
 result groups. `--overlayscan`, `--resourcesscan` and `--archivesscan` expose
 the engine's bounded child scans. Native GUI Scan options and TUI F2 expose
-the same modes. These modes do not enable recursive scanning of nested members.
+the same modes. As in Detect It Easy, a child's own overlay and resources are
+not scanned, but with `--archivesscan` an overlay, resource or archive member
+that is itself an archive is expanded, down to 20 archive levels.
 
-`--recursivescan` is implemented for walking directories on disk. Scanning
+Archive members follow Detect It Easy 4.0.0: every member the walk reaches is
+CRC-checked, stored ones included, and one that fails is not scanned. The
+error is printed after the detections as `Last error: Invalid CRC` (or
+`Last error: Unknown compression method: Unknown` for a ZIP method Detect It
+Easy does not map, even one cdie could decode), on stdout in every output
+mode, and the exit code stays 0. Detect It Easy keeps a single error string,
+so the line belongs to the next scan that finishes, and an error overwritten
+before then is not printed. A ZIP whose entries disagree with their local
+headers, overlap or share data is scanned as Binary, as `XZip::isValid`
+requires.
+
+The structured formats still differ from `diec` 4.0.0 in two ways. `diec`
+nests the record of an overlay, resource or archive-member scan inside its
+parent's values (JSON) or in an element named after the child's heading
+(XML); cdie lists children flat, with their `archive_member` and
+`offsetbasis` fields, in `<file-part>` elements. CSV and TSV write the type of
+an unknown result in lower case (`unknown`, as older `diec` versions do) where
+`diec` 4.0.0 writes `Unknown`. Text output, the acceptance criterion, matches.
+
+`--recursivescan` is implemented for walking directories on disk and, as in
+`diec` 4.0.0, also turns on resource and overlay scanning. Scanning
 *inside* archives is a different feature and is covered above.
+`-W`/`--firstwrapperonly` and `-F`/`--filetype` are not ported yet: the engine
+rejects a first-wrapper-only scan, and no type-name parser exists.

@@ -38,34 +38,54 @@
 extern "C" {
 #endif
 
-/* Resolves db/db_extra/db_custom next to the executable, then in the macOS
- * bundle's Resources directory. Loads all three once and sorts them, regardless
- * of the toggles, because the "Databases" toggles gate which databases actually
- * contribute at scan time - so changing them never needs a reload. Returns 1
+/* The database slots, as Detect It Easy has them: the main database, always
+ * used, and the optional custom one. The extra database folder of earlier
+ * versions is never loaded. */
+enum { GUI_DB_MAIN = 0, GUI_DB_CUSTOM = 1, GUI_DB_COUNT = 2 };
+
+/* Resolves db/db_custom next to the executable, then in the macOS bundle's
+ * Resources directory. Loads both once and sorts them, regardless of the
+ * toggle, because the "Databases" toggle gates whether the custom database
+ * contributes at scan time - so changing it never needs a reload. Returns 1
  * when the main database yielded at least one signature, else 0. */
 int gui_backend_init(void);
 
-/* The resolved main / extra / custom database paths (UTF-8), for the Options
- * dialog and the "not found" message. Owned by the backend; valid until
+/* The resolved main / custom database paths (UTF-8), for the Options dialog
+ * and the "not found" message. Owned by the backend; valid until
  * gui_backend_shutdown or the next gui_backend_set_db_paths; do not free. */
 const char *gui_backend_main_db_path(void);
-const char *gui_backend_extra_db_path(void);
 const char *gui_backend_custom_db_path(void);
 
-/* Replaces the three database paths (UTF-8; a NULL or empty entry re-resolves
- * that slot's default next to the executable) and reloads all three. Returns 1
+/* Replaces the two database paths (UTF-8; a NULL or empty entry re-resolves
+ * that slot's default, as gui_backend_init does) and reloads both. Returns 1
  * when the main database loaded at least one signature, else 0. Failure leaves
  * the previous paths and loaded database intact. */
-int gui_backend_set_db_paths(const char *pMain, const char *pExtra, const char *pCustom);
+int gui_backend_set_db_paths(const char *pMain, const char *pCustom);
 
-/* 1 when the paths, resolved as gui_backend_set_db_paths would, equal the
- * loaded ones, so applying them needs no reload. */
-int gui_backend_db_paths_current(const char *pMain, const char *pExtra, const char *pCustom);
+/* 1 when applying the paths would change nothing, so they need no reload: an
+ * empty entry matches a slot on its default folder, any other entry the same
+ * folder chosen explicitly. An empty entry matches a default slot even when
+ * the default lookup would now find another folder (see
+ * gui_backend_db_path_moved). */
+int gui_backend_db_paths_current(const char *pMain, const char *pCustom);
 
-/* 1 when database nIndex (0 main, 1 extra, 2 custom) is the default folder. */
+/* 1 when database nIndex (a GUI_DB_* slot) was loaded from the default lookup
+ * (gui_backend_init, or a NULL / empty entry given to gui_backend_set_db_paths)
+ * rather than from a chosen folder. It stays 1 when the lookup would now
+ * answer differently, e.g. after an update created the per-user copy. */
 int gui_backend_db_path_is_default(int nIndex);
 
-/* Total number of signatures loaded across the three databases. */
+/* 1 when database nIndex is on its default folder but the default lookup now
+ * finds another one (an update wrote the per-user copy since it was loaded);
+ * gui_backend_set_db_paths with an empty entry for that slot switches to it. */
+int gui_backend_db_path_moved(int nIndex);
+
+/* Changes whenever the loaded databases are replaced (gui_backend_init or a
+ * successful gui_backend_set_db_paths), so a frontend can tell that its tags
+ * and results belong to the previous databases. */
+uint64_t gui_backend_database_generation(void);
+
+/* Total number of signatures loaded across both databases. */
 int gui_backend_signature_count(void);
 
 /* Returns the unique tags used by loaded signatures, sorted and joined with
@@ -86,8 +106,9 @@ const char *gui_backend_app_title(void);
 /* Sets the scan-flag toggles (non-zero = on). */
 void gui_backend_set_flags(int bDeep, int bHeuristic, int bVerbose, int bAggressive, int bHideUnknown, int bFormat);
 
-/* Selects which databases contribute (the main database is always used). */
-void gui_backend_set_databases(int bUseExtra, int bUseCustom);
+/* Selects whether the custom database contributes (the main database is
+ * always used). */
+void gui_backend_set_databases(int bUseCustom);
 
 enum {
     GUI_SCAN_ALL_TYPES = 1u << 0,
@@ -119,8 +140,19 @@ int gui_backend_set_scan_preferences(const gui_backend_scan_preferences *prefere
  * preferences. Empty folders select executable-local defaults. Failure leaves
  * the complete previous configuration intact. Call between scans. */
 int gui_backend_apply_configuration(const gui_backend_scan_preferences *preferences,
-    const char *main_path, const char *extra_path, const char *custom_path,
+    const char *main_path, const char *custom_path,
     char *error, size_t error_capacity);
+/* Why the last gui_backend_apply_configuration failed (OK after a success), so
+ * a frontend can say it in its own language; error above is English. slot (may
+ * be NULL) receives the database (a GUI_DB_* slot) for MISSING and LOAD, else
+ * -1. */
+typedef enum gui_backend_configuration_failure {
+    GUI_BACKEND_CONFIGURATION_OK = 0,
+    GUI_BACKEND_CONFIGURATION_OPTIONS, /* invalid scan options or an unavailable engine */
+    GUI_BACKEND_CONFIGURATION_MISSING, /* a chosen database folder does not exist */
+    GUI_BACKEND_CONFIGURATION_LOAD     /* the main database yields no signatures */
+} gui_backend_configuration_failure;
+gui_backend_configuration_failure gui_backend_configuration_failed(int *slot);
 /* The optional one-entry result cache verifies the complete input with a
  * bounded BLAKE2sp digest, path, type selector, options and database generation.
  * It never caches failures/cancellation. Counters are useful for diagnostics. */
@@ -219,8 +251,9 @@ typedef struct gui_backend_scan_info {
 int gui_backend_scan_tree(const char *path, int type_id, gui_backend_tree_fn callback,
     void *user, char **report, char **type_name, gui_backend_scan_info *info, xx_pd_struct *progress);
 /* Detections of one file for a directory scan, with these flags and optional
- * databases (xxwidgets scan option bits) instead of the current ones. Safe on
- * a worker thread while nothing changes the databases. */
+ * databases (xxwidgets scan option bits; only XXWIDGETS_SCAN_DATABASE_CUSTOM
+ * counts) instead of the current ones. Safe on a worker thread while nothing
+ * changes the databases. */
 typedef void (*gui_backend_detection_fn)(const char *type, const char *name, const char *version, const char *info, void *user);
 int gui_backend_scan_detections(const char *path, unsigned int flags, unsigned int databases,
     gui_backend_detection_fn callback, void *user);

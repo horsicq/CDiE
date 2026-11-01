@@ -3,7 +3,7 @@ rem Convenience launcher: scans a target with the Detect It Easy databases.
 rem
 rem   run_cdie.cmd <target> [extra cdie options]
 rem
-rem Set CDIE_DB_ROOT to the directory that holds db, db_extra and db_custom.
+rem Set CDIE_DB_ROOT to the directory that holds db and db_custom.
 
 setlocal
 
@@ -22,6 +22,6 @@ if not exist "%CDIE_EXE%" (
     exit /b 1
 )
 
-"%CDIE_EXE%" -D "%CDIE_DB_ROOT%\db" -E "%CDIE_DB_ROOT%\db_extra" -C "%CDIE_DB_ROOT%\db_custom" %*
+"%CDIE_EXE%" -D "%CDIE_DB_ROOT%\db" -C "%CDIE_DB_ROOT%\db_custom" %*
 
 endlocal
