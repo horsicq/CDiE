@@ -393,8 +393,10 @@ static void do_scan(void)
         WCHAR text[512];
         WCHAR *type_name = xx_str_utf8_to_unicode(type && type[0] ? type : "Unknown type");
         size_t count = xxwidgets_scan_panel_count(g_panel);
-        cdie_translation_swprintf(text, sizeof(text)/sizeof(text[0]), CDIE_N_(L"Scan complete (%s). %u result%s. Use > for the full engine output."),
-                  type_name ? type_name : L"Unknown type", (unsigned int)count, count == 1 ? L"" : L"s");
+        cdie_translation_swprintf_utf8(text, sizeof(text)/sizeof(text[0]),
+                  cdie_translation_ngettext("Scan complete (%s). %u result. Use > for the full engine output.",
+                                            "Scan complete (%s). %u results. Use > for the full engine output.", count),
+                  type_name ? type_name : L"Unknown type", (unsigned int)count);
         set_status_wide(text);
         if (type_name) xx_str_wfree(type_name);
     } else {

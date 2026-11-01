@@ -75,4 +75,17 @@ char *cdie_user_database_dir(const char *pName);
  */
 char *cdie_find_database_dir(const char *pName);
 
+/**
+ * @brief The folder of the bundled translation catalogs (*.po), or NULL when
+ *        no such folder exists. The first existing directory of:
+ *
+ *   <executable dir>/translations                 Windows, the build tree and
+ *                                                 the Linux FHS lib/cdie tree
+ *   <executable dir>/../Resources/translations    macOS application bundle
+ *   <executable dir>/../share/cdie/translations   Linux portable/install tree
+ *
+ * Release with xx_rt_free.
+ */
+char *cdie_translations_dir(void);
+
 #endif /* CDIE_PATHS_H */

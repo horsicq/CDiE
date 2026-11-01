@@ -246,3 +246,32 @@ char *cdie_find_database_dir(const char *pName)
     }
     return NULL;
 }
+
+char *cdie_translations_dir(void)
+{
+    static const char *const aCandidates[] = {
+        "translations",
+#if defined(__APPLE__)
+        "../Resources/translations",
+#elif !defined(_WIN32)
+        "../share/cdie/translations",
+#endif
+    };
+    char *pAppDir = cdie_app_dir();
+    size_t i;
+
+    if (!pAppDir) {
+        return NULL;
+    }
+    for (i = 0; i < sizeof(aCandidates) / sizeof(aCandidates[0]); ++i) {
+        char *pCandidate = cdie_paths_join(pAppDir, aCandidates[i]);
+
+        if (pCandidate && xx_fs_is_dir(pCandidate)) {
+            xx_rt_free(pAppDir);
+            return pCandidate;
+        }
+        xx_rt_free(pCandidate);
+    }
+    xx_rt_free(pAppDir);
+    return NULL;
+}

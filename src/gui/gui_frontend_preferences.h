@@ -14,6 +14,12 @@ char *gui_frontend_executable_directory(void); /* free() by caller */
  * owns this installation. A negative return means the instance lock failed. */
 int gui_frontend_instance_start(xxwidgets_widget *window, const char *startup_file);
 void gui_frontend_instance_close(void);
+/* POSIX: a later launch of this installation that found the instance lock
+ * sends its absolute file path over a per-user AF_UNIX socket beside the lock
+ * (mode 0600). Call from the main loop: returns 1 and a malloc'd UTF-8 path
+ * (free() by caller) when one arrived, else 0 with *path_out = NULL. Never
+ * blocks. Always 0 on Windows, where WM_COPYDATA carries the path. */
+int gui_frontend_instance_poll(xxwidgets_widget *window, char **path_out);
 #define GUI_FRONTEND_COPYDATA_ID 0x43444945u
 /* Windows user PATH: inspect/apply the exact application-directory component.
  * No process is launched and unrelated PATH components are preserved. */

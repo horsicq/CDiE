@@ -15,6 +15,9 @@ const char *cdie_translation_gettext(const char *text);
 /* Preserve the exact ordered printf conversion specifications. Invalid formats,
  * added/missing arguments, positional reordering and %n fall back to English. */
 const char *cdie_translation_format(const char *format);
+/* The catalog's plural form for n, checked like cdie_translation_format
+ * against the English form the count selects; falls back to that form. */
+const char *cdie_translation_ngettext(const char *singular, const char *plural, unsigned long long n);
 /* Bounded UTF-8 formatting; a truncated final character is removed. */
 #if defined(__MINGW32__)
 __attribute__((format(gnu_printf, 3, 4)))
@@ -28,6 +31,9 @@ int cdie_translation_snprintf(char *buffer, size_t capacity, const char *format,
 int cdie_translation_arguments(int *argc, char **argv, const char **path);
 #ifdef _WIN32
 int cdie_translation_swprintf(wchar_t *buffer, size_t capacity, const wchar_t *format, ...);
+/* Same, for a UTF-8 format already selected (cdie_translation_ngettext);
+ * no further catalog lookup. */
+int cdie_translation_swprintf_utf8(wchar_t *buffer, size_t capacity, const char *format, ...);
 #endif
 #define CDIE_TR(text) cdie_translation_gettext(text)
 #define CDIE_FMT(text) cdie_translation_format(text)

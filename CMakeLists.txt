@@ -704,10 +704,11 @@ if(CDIE_XGETTEXT_EXECUTABLE AND TARGET cdie_ui_translation)
     add_custom_target(cdie_update_translations
         COMMAND "${CDIE_XGETTEXT_EXECUTABLE}" --from-code=UTF-8
             --keyword=CDIE_TR --keyword=CDIE_N_ --keyword=CDIE_FMT
-            --keyword=cdie_ns_tr --keyword=cdie_ns_fmt
+            --keyword=cdie_ns_tr --keyword=cdie_ns_fmt --keyword=cdie_translation_ngettext:1,2
             --keyword=XXW_TR:2 --keyword=XXW_N_ --keyword=xxwidgets_app_gettext:2
             --keyword=xxwidgets_app_ngettext:2,3 --flag=CDIE_FMT:1:c-format --flag=cdie_translation_snprintf:3:c-format
             --flag=cdie_translation_swprintf:3:c-format --flag=CDIE_N_:1:pass-c-format
+            --flag=cdie_translation_ngettext:1:c-format --flag=cdie_translation_ngettext:2:c-format
             --flag=cdie_ns_fmt:1:objc-format
             --sort-output --package-name=cdie --package-version=${CDIE_VERSION}
             --output=translations/cdie.pot ${_cdie_translation_inputs}

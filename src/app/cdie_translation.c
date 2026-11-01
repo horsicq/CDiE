@@ -90,14 +90,12 @@ static int next_conversion(const char **cursor, const char **start, size_t *leng
     *cursor = p;
     return 0;
 }
-const char *cdie_translation_format(const char *format)
+/* The translation when its conversions match the English format exactly. */
+static const char *checked_format(const char *format, const char *translated)
 {
-    const char *translated, *a, *b, *sa = NULL, *sb = NULL;
-    if (!format)
-        return "";
-    translated = CDIE_TR(format);
-    a = format;
-    b = translated;
+    const char *a = format, *b = translated, *sa = NULL, *sb = NULL;
+    if (!translated)
+        return format;
     for (;;) {
         size_t na = 0, nb = 0;
         int ra = next_conversion(&a, &sa, &na), rb = next_conversion(&b, &sb, &nb);
@@ -108,6 +106,20 @@ const char *cdie_translation_format(const char *format)
         if (na != nb || memcmp(sa, sb, na))
             return format;
     }
+}
+const char *cdie_translation_format(const char *format)
+{
+    if (!format)
+        return "";
+    return checked_format(format, CDIE_TR(format));
+}
+const char *cdie_translation_ngettext(const char *singular, const char *plural, unsigned long long n)
+{
+    const char *english;
+    if (!singular || !plural)
+        return singular ? singular : plural ? plural : "";
+    english = n == 1 ? singular : plural;
+    return checked_format(english, xxwidgets_app_ngettext(translation_app, singular, plural, n));
 }
 int cdie_translation_snprintf(char *buffer, size_t capacity, const char *format, ...)
 {
@@ -172,26 +184,48 @@ int cdie_translation_arguments(int *argc, char **argv, const char **path)
 #include <strsafe.h>
 #include <windows.h>
 #include <xxfclib/strings/xx_string.h>
+/* Bounded wide formatting; a truncated final surrogate pair is removed. */
+static int format_wide(wchar_t *buffer, size_t capacity, const wchar_t *format, va_list args)
+{
+    HRESULT result = StringCchVPrintfW(buffer, capacity, format, args);
+    size_t end = wcslen(buffer);
+    if (end && buffer[end - 1] >= 0xd800 && buffer[end - 1] <= 0xdbff)
+        buffer[end - 1] = 0;
+    return SUCCEEDED(result) ? lstrlenW(buffer) : -1;
+}
 int cdie_translation_swprintf(wchar_t *buffer, size_t capacity, const wchar_t *format, ...)
 {
     char *source;
     wchar_t *wide;
     va_list args;
-    HRESULT result;
+    int length;
     if (!buffer || !capacity || !format)
         return -1;
     source = xx_str_unicode_to_utf8(format);
     wide = source ? xx_str_utf8_to_unicode(CDIE_FMT(source)) : NULL;
     va_start(args, format);
-    result = StringCchVPrintfW(buffer, capacity, wide ? wide : format, args);
+    length = format_wide(buffer, capacity, wide ? wide : format, args);
     va_end(args);
     xx_str_free(source);
     xx_str_wfree(wide);
-    {
-        size_t end = wcslen(buffer);
-        if (end && buffer[end - 1] >= 0xd800 && buffer[end - 1] <= 0xdbff)
-            buffer[end - 1] = 0;
+    return length;
+}
+int cdie_translation_swprintf_utf8(wchar_t *buffer, size_t capacity, const char *format, ...)
+{
+    wchar_t *wide;
+    va_list args;
+    int length;
+    if (!buffer || !capacity || !format)
+        return -1;
+    wide = xx_str_utf8_to_unicode(format);
+    if (!wide) {
+        buffer[0] = 0;
+        return -1;
     }
-    return SUCCEEDED(result) ? lstrlenW(buffer) : -1;
+    va_start(args, format);
+    length = format_wide(buffer, capacity, wide, args);
+    va_end(args);
+    xx_str_wfree(wide);
+    return length;
 }
 #endif

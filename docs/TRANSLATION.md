@@ -54,7 +54,10 @@ data. Only the UI's Automatic sentinel is translated; its numeric value stays
 zero. Cocoa menu/accessibility labels use equivalent NSString helpers.
 
 Formatted messages use `CDIE_FMT` or `cdie_translation_snprintf`; the Windows
-helper bounds UTF-16 formatting. Preserve the exact ordered printf conversion
+helper bounds UTF-16 formatting. A message whose wording depends on a count
+uses `cdie_translation_ngettext(singular, plural, n)` (never an English suffix
+such as `%s`), which picks the catalog's `msgstr[n]` form, and on Windows
+`cdie_translation_swprintf_utf8` to format the selected form. Preserve the exact ordered printf conversion
 specifications, including widths, precisions and length modifiers. Adding,
 removing or changing conversions, `%n`, or positional reordering causes the
 runtime to use the original English format. UTF-8 truncation removes an

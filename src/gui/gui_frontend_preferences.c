@@ -37,10 +37,23 @@ static wchar_t instance_name[96];
 #include <sys/file.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <errno.h>
+#include <time.h>
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
 #endif
 static int instance_file = -1;
+/* Single application: the first copy listens beside its lock; later copies
+ * send their file path there (see gui_frontend_instance_poll). */
+static int instance_listener = -1;
+static int instance_client = -1;
+static char instance_socket_path[sizeof(((struct sockaddr_un *)0)->sun_path)];
+static char instance_message[GUI_PREFERENCE_PATH_MAX];
+static size_t instance_received;
+static int instance_oversized;
+static time_t instance_client_since;
 #endif
 
 static int frontend_preferences_applied;
@@ -260,6 +273,117 @@ static BOOL CALLBACK find_instance(HWND window, LPARAM parameter)
     if (GetPropW(window, instance_name)) { *found = window; return FALSE; }
     return TRUE;
 }
+#else
+static void instance_set_flags(int fd, int nonblocking)
+{
+    int flags = fcntl(fd, F_GETFD);
+    if (flags >= 0) (void)fcntl(fd, F_SETFD, flags | FD_CLOEXEC);
+    if (nonblocking) { flags = fcntl(fd, F_GETFL); if (flags >= 0) (void)fcntl(fd, F_SETFL, flags | O_NONBLOCK); }
+}
+
+/* Only a socket this account created counts: /tmp is shared, and another
+ * account must neither receive our file names nor have its entry removed. */
+static int instance_socket_ours(const char *path)
+{
+    struct stat info;
+    return lstat(path, &info) == 0 && S_ISSOCK(info.st_mode) && info.st_uid == getuid() &&
+           !(info.st_mode & (S_IRWXG | S_IRWXO));
+}
+
+/* Called with the lock held, so an existing socket of ours is stale. Bound,
+ * restricted to the owner, and only then listening: nobody can connect while
+ * the mode is still the umask's. A failure leaves forwarding off, not the GUI. */
+static void instance_listen(const char *path)
+{
+    struct sockaddr_un address;
+    struct stat info;
+    int fd;
+    memset(&address, 0, sizeof(address));
+    address.sun_family = AF_UNIX;
+    if (strlen(path) >= sizeof(address.sun_path)) return;
+    strcpy(address.sun_path, path);
+    if (lstat(path, &info) == 0) {
+        if (!S_ISSOCK(info.st_mode) || info.st_uid != getuid() || unlink(path) != 0) return;
+    }
+    fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0) return;
+    instance_set_flags(fd, 1);
+    if (bind(fd, (struct sockaddr *)&address, sizeof(address)) != 0) { close(fd); return; }
+    if (chmod(path, 0600) != 0 || listen(fd, 8) != 0) { close(fd); unlink(path); return; }
+    instance_listener = fd;
+    strcpy(instance_socket_path, path);
+}
+
+/* The running copy may still be between its lock and its listen; wait for it
+ * as Windows waits on the mutex. The path is buffered by the kernel, so the
+ * running copy receives it when its main loop next polls, even if a dialog
+ * is open now. */
+static int instance_forward(const char *path, const char *startup_file)
+{
+    struct sockaddr_un address;
+    char *absolute = NULL;
+    size_t length;
+    int fd = -1, attempt, sent = 0;
+    if (!startup_file || !*startup_file) return 0;
+    if (strlen(path) >= sizeof(address.sun_path)) return -1;
+    if (startup_file[0] == '/') {
+        length = strlen(startup_file) + 1;
+        absolute = malloc(length);
+        if (absolute) memcpy(absolute, startup_file, length);
+    } else if (!(absolute = realpath(startup_file, NULL))) {
+        char directory[GUI_PREFERENCE_PATH_MAX];
+        if (getcwd(directory, sizeof(directory))) {
+            length = strlen(directory) + strlen(startup_file) + 2;
+            absolute = malloc(length);
+            if (absolute) snprintf(absolute, length, "%s/%s", directory, startup_file);
+        }
+    }
+    if (!absolute || strlen(absolute) >= GUI_PREFERENCE_PATH_MAX) { free(absolute); return -1; }
+    memset(&address, 0, sizeof(address));
+    address.sun_family = AF_UNIX;
+    strcpy(address.sun_path, path);
+    for (attempt = 0; attempt < 60 && fd < 0; ++attempt) {
+        if (attempt) { struct timespec delay = {0, 50000000L}; nanosleep(&delay, NULL); }
+        if (!instance_socket_ours(path)) continue;
+        fd = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (fd < 0) break;
+        instance_set_flags(fd, 0);
+#ifdef SO_NOSIGPIPE
+        { int on = 1; (void)setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof(on)); }
+#endif
+        if (connect(fd, (struct sockaddr *)&address, sizeof(address)) != 0) { close(fd); fd = -1; }
+    }
+    if (fd >= 0) {
+        const char *at = absolute;
+        size_t left = strlen(absolute) + 1;
+        int flags = 0;
+#ifdef MSG_NOSIGNAL
+        flags = MSG_NOSIGNAL;
+#endif
+        while (left) {
+            ssize_t n = send(fd, at, left, flags);
+            if (n < 0 && errno == EINTR) continue;
+            if (n <= 0) break;
+            at += n; left -= (size_t)n;
+        }
+        sent = !left;
+        close(fd);
+    }
+    free(absolute);
+    return sent ? 0 : -1;
+}
+
+static int instance_utf8_valid(const unsigned char *text)
+{
+    while (*text) {
+        unsigned char c = *text;
+        int more = c < 0x80 ? 0 : (c & 0xE0) == 0xC0 && c >= 0xC2 ? 1 : (c & 0xF0) == 0xE0 ? 2 : (c & 0xF8) == 0xF0 && c <= 0xF4 ? 3 : -1;
+        if (more < 0) return 0;
+        ++text;
+        while (more--) { if ((*text & 0xC0) != 0x80) return 0; ++text; }
+    }
+    return 1;
+}
 #endif
 int gui_frontend_instance_start(xxwidgets_widget *window, const char *startup_file)
 {
@@ -317,19 +441,74 @@ int gui_frontend_instance_start(xxwidgets_widget *window, const char *startup_fi
     }
 #else
     {
-        char path[128];
+        char path[128], socket_path[128];
         int flags = O_CREAT | O_RDWR;
-        (void)window; (void)startup_file;
+        (void)window;
 #ifdef O_NOFOLLOW
         flags |= O_NOFOLLOW;
 #endif
+#ifdef O_CLOEXEC
+        /* A child (xdg-open, a browser) must not keep the lock after exit. */
+        flags |= O_CLOEXEC;
+#endif
         snprintf(path, sizeof(path), "/tmp/cdie-%lu-%016llx.lock", (unsigned long)getuid(), (unsigned long long)hash);
+        snprintf(socket_path, sizeof(socket_path), "/tmp/cdie-%lu-%016llx.sock", (unsigned long)getuid(), (unsigned long long)hash);
         instance_file = open(path, flags, 0600);
         if (instance_file < 0) return -1;
-        if (flock(instance_file, LOCK_EX | LOCK_NB) != 0) { close(instance_file); instance_file = -1; return 0; }
+        if (flock(instance_file, LOCK_EX | LOCK_NB) != 0) {
+            close(instance_file); instance_file = -1;
+            return instance_forward(socket_path, startup_file);
+        }
+        instance_listen(socket_path);
     }
 #endif
     return 1;
+}
+
+int gui_frontend_instance_poll(xxwidgets_widget *window, char **path_out)
+{
+    (void)window;
+    if (!path_out) return 0;
+    *path_out = NULL;
+#ifdef _WIN32
+    return 0;
+#else
+    for (;;) {
+        int done = 0;
+        if (instance_client < 0) {
+            if (instance_listener < 0) return 0;
+            instance_client = accept(instance_listener, NULL, NULL);
+            if (instance_client < 0) return 0;
+            instance_set_flags(instance_client, 1);
+            instance_received = 0; instance_oversized = 0;
+            instance_client_since = time(NULL);
+        }
+        while (!done) {
+            char chunk[512];
+            ssize_t n = read(instance_client, chunk, sizeof(chunk));
+            if (n > 0) {
+                const char *end = memchr(chunk, 0, (size_t)n);
+                size_t take = end ? (size_t)(end - chunk) : (size_t)n;
+                if (instance_received + take >= sizeof(instance_message)) instance_oversized = 1;
+                else { memcpy(instance_message + instance_received, chunk, take); instance_received += take; }
+                done = end != NULL;
+            } else if (n == 0) done = 1;
+            else if (errno == EINTR) continue;
+            else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                /* A sender that stalls is dropped rather than waited for. */
+                if (time(NULL) - instance_client_since <= 2) return 0;
+                instance_oversized = 1; done = 1;
+            } else { instance_oversized = 1; done = 1; }
+        }
+        close(instance_client); instance_client = -1;
+        instance_message[instance_received] = 0;
+        if (!instance_oversized && instance_received &&
+            instance_utf8_valid((const unsigned char *)instance_message)) {
+            *path_out = malloc(instance_received + 1);
+            if (*path_out) { memcpy(*path_out, instance_message, instance_received + 1); return 1; }
+        }
+    }
+#endif
 }
 void gui_frontend_instance_close(void)
 {
@@ -341,6 +520,15 @@ void gui_frontend_instance_close(void)
     if (instance_mutex) CloseHandle(instance_mutex);
     instance_mutex = NULL;
 #else
+    if (instance_client >= 0) close(instance_client);
+    instance_client = -1;
+    if (instance_listener >= 0) {
+        /* Before the lock goes: the next owner binds only after taking it. */
+        close(instance_listener);
+        if (instance_socket_ours(instance_socket_path)) unlink(instance_socket_path);
+    }
+    instance_listener = -1;
+    instance_socket_path[0] = 0;
     if (instance_file >= 0) close(instance_file);
     instance_file = -1;
 #endif

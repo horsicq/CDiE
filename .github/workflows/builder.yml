@@ -583,7 +583,8 @@ jobs:
               output=$($run "$app/Contents/MacOS/die" --smoke-update launch-check 2>&1) || status=$?
               echo "$label die: exit $status, $output"
               test "$status" -eq 2
-              echo "$output" | grep -q 'requires installed, current or failed'
+              # Older builds list three modes, current ones six.
+              echo "$output" | grep -Eq 'requires installed, current(,| or) failed'
               if [ "$WITH_UPDATER" = true ]; then
                 $run "$app/Contents/MacOS/die-update" --version
               fi
