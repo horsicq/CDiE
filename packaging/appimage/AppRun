@@ -1,0 +1,44 @@
+#!/bin/sh
+# AppRun for the cdie AppImage.
+#
+#   cdie.AppImage [file]                  the GUI (die)
+#   cdie.AppImage diec [options] <file>   the command-line scanner
+#   cdie.AppImage die-update [options]    the signature database updater
+#   cdie.AppImage die [file]              the GUI, explicitly
+#
+# A symlink to the AppImage named diec or die-update runs that program too
+# (the AppImage runtime passes the name it was started as in ARGV0).
+#
+# The programs find their databases beside their real path (usr/lib/cdie in
+# the image). An AppImage is always a read-only installation, even when the
+# runtime extracts it into a temporary folder that it deletes on exit
+# (APPIMAGE_EXTRACT_AND_RUN), so CDIE_READONLY_INSTALL makes die-update (and
+# Update database in the GUI) install updates into the user's data folder
+# (~/.local/share/NTInfo/cdie), which the programs prefer.
+# libcurl (for https) and GTK 3 come from the host system.
+
+# AppRun sits at the AppDir root: its own location, never an APPDIR inherited
+# from another AppImage, is the tree to run.
+HERE="$(dirname "$(readlink -f "$0")")"
+PROGRAMS="${HERE}/usr/lib/cdie"
+
+export CDIE_READONLY_INSTALL=1
+
+case "$(basename "${ARGV0:-$0}")" in
+    diec | die-update)
+        exec "${PROGRAMS}/$(basename "${ARGV0:-$0}")" "$@"
+        ;;
+esac
+
+case "${1:-}" in
+    diec | die-update)
+        program="$1"
+        shift
+        exec "${PROGRAMS}/${program}" "$@"
+        ;;
+    die)
+        shift
+        ;;
+esac
+
+exec "${PROGRAMS}/die" "$@"

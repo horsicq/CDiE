@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=Detect It Easy (cdie)
+GenericName=File Type Identifier
+Comment=Identify compilers, packers, protectors and file types
+Exec=die %f
+Icon=io.github.horsicq.cdie
+StartupWMClass=die
+Categories=Development;
+Keywords=detect;packer;compiler;protector;PE;ELF;Mach-O;APK;
+Terminal=false

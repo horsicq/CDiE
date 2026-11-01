@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright (c) 2026 hors <horsicq@gmail.com> -->
+<component type="desktop-application">
+  <id>io.github.horsicq.cdie</id>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Detect It Easy (cdie)</name>
+  <summary>Identify compilers, packers, protectors and file types</summary>
+  <developer id="io.github.horsicq">
+    <name>hors</name>
+  </developer>
+  <description>
+    <p>
+      This is cdie, the C port of Detect It Easy. It runs the Detect It Easy
+      signature database to identify the file type, compiler, linker, packer,
+      protector and installer of PE, ELF, Mach-O, DEX, APK and other files.
+    </p>
+    <p>
+      Besides the scan result it shows file information, entropy, hashes,
+      strings, imports, exports, resources, symbols, the memory map, a hex
+      view and a disassembler. The command-line scanner diec prints the same
+      results, and die-update keeps the signature database current.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.horsicq.cdie.desktop</launchable>
+  <url type="homepage">https://github.com/horsicq/Detect-It-Easy</url>
+  <url type="bugtracker">https://github.com/horsicq/Detect-It-Easy/issues</url>
+  <provides>
+    <binary>die</binary>
+    <binary>diec</binary>
+    <binary>die-update</binary>
+  </provides>
+  <categories>
+    <category>Development</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+</component>
