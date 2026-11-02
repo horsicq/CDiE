@@ -84,8 +84,8 @@ endif()
 # emulation and file formats. The older ASM-only switch remains available for
 # callers that use the focused dependency check.
 set(XXFC_CDISASM_ENABLE_MIPS OFF)
-# Signature scripts expect architecture-wide decoding. The base-only cdisasm
-# profile rejects system and SIMD instructions that Qt DIE can disassemble.
+# Qt DIE's reduced XCapstone profile still decodes system and selected scalar
+# extension instructions that a base-only cdisasm build rejects.
 set(XXFC_CDISASM_ENABLE_EXTRA ON)
 option(CDIE_BUILD_PRIVATE_RADARE2_TESTS
     "Build all private Radare2-derived compatibility tests" OFF)
