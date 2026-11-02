@@ -1,0 +1,291 @@
+name: Make release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (must match release_version.txt; empty uses the file)'
+        required: false
+        type: string
+      prerelease:
+        description: Mark this version as a prerelease
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cdie-make-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      release_id: ${{ steps.release.outputs.release_id }}
+    steps:
+      - name: Check out release commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Validate version and prepare draft
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+          RELEASE_COMMIT: ${{ github.sha }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+
+          def fail(message):
+              raise SystemExit(f"::error::{message}")
+
+          def api(endpoint, *, method="GET", body=None):
+              command = ["gh", "api", "--method", method, endpoint]
+              if body is not None:
+                  command += ["--input", "-"]
+              result = subprocess.run(command, check=True, text=True, capture_output=True,
+                                      input=json.dumps(body) if body is not None else None)
+              return json.loads(result.stdout)
+
+          version = Path("release_version.txt").read_text().strip()
+          if not re.fullmatch(r"[0-9]+\.[0-9]+(?:\.[0-9]+)?", version):
+              fail("release_version.txt must contain a numeric version such as 4.0.0.")
+          requested = os.environ["REQUESTED_VERSION"].strip()
+          if requested and requested != version:
+              fail(f"Requested version {requested!r} does not match release_version.txt ({version}).")
+          commit = os.environ["RELEASE_COMMIT"]
+          repo = os.environ["GH_REPO"]
+
+          # Resolve lightweight and annotated tags through the authenticated API.
+          # An existing tag is never moved to make a release build succeed.
+          refs = api(f"repos/{repo}/git/matching-refs/tags/{version}")
+          reference = next((ref for ref in refs if ref["ref"] == f"refs/tags/{version}"), None)
+          if reference:
+              target = reference["object"]
+              for _ in range(16):
+                  if target["type"] != "tag":
+                      break
+                  target = api(f"repos/{repo}/git/tags/{target['sha']}")["object"]
+              if target["type"] != "commit" or target["sha"] != commit:
+                  fail(f"Tag {version} already points to another commit; it will not be moved.")
+
+          # Listing releases includes unpublished drafts; API failures stop here.
+          pages = json.loads(subprocess.check_output([
+              "gh", "api", "--paginate", "--slurp",
+              f"repos/{repo}/releases?per_page=100",
+          ], text=True))
+          existing = next((release for page in pages for release in page
+                           if release["tag_name"] == version), None)
+          if existing:
+              if not existing["draft"]:
+                  fail(f"Release {version} is already published; it will not be overwritten.")
+              if existing["target_commitish"] != commit:
+                  fail(f"Draft {version} belongs to another commit; use a new version or remove that draft.")
+              release = existing
+              print(f"Resuming draft {version} for {commit}.")
+          else:
+              release = api(f"repos/{repo}/releases", method="POST", body={
+                  "tag_name": version,
+                  "target_commitish": commit,
+                  "name": version,
+                  "draft": True,
+                  "prerelease": os.environ["PRERELEASE"] == "true",
+                  "body": "Packages are being built. This release stays a draft until every build and verification succeeds.",
+              })
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"tag={version}\nrelease_id={release['id']}\n")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write(f"Building release **{version}** from `{commit}`.\n\n")
+              summary.write("The release stays a draft until all ten packages pass verification.\n")
+          PY
+
+  build:
+    needs: prepare
+    permissions:
+      contents: write
+    uses: ./.github/workflows/builder.yml
+    with:
+      release_build: true
+    secrets:
+      CDIE_DEPS_TOKEN: ${{ secrets.CDIE_DEPS_TOKEN }}
+
+  # Keep Apple builds separate from builder.yml and reuse the exact dependency
+  # revisions that produced the Windows/Linux packages.
+  build-apple:
+    needs: [prepare, build]
+    permissions:
+      contents: write
+    uses: ./.github/workflows/builder_apple.yml
+    with:
+      dependency_revisions: ${{ toJSON(needs.build.outputs) }}
+      upload_release: false
+    secrets:
+      CDIE_DEPS_TOKEN: ${{ secrets.CDIE_DEPS_TOKEN }}
+      APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_NOTARY_KEY_P8: ${{ secrets.APPLE_NOTARY_KEY_P8 }}
+      APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+      APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_INSTALLER_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_INSTALLER_CERTIFICATE_P12_BASE64 }}
+      APPLE_INSTALLER_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_INSTALLER_CERTIFICATE_PASSWORD }}
+      APPLE_INSTALLER_SIGNING_IDENTITY: ${{ secrets.APPLE_INSTALLER_SIGNING_IDENTITY }}
+
+  publish:
+    needs: [prepare, build, build-apple]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: cdie-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Verify packages and publish completed release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
+          RELEASE_COMMIT: ${{ github.sha }}
+          PRERELEASE: ${{ inputs.prerelease }}
+          DEP_XXFCLIB: ${{ needs.build.outputs.xxfclib }}
+          DEP_CDISASM: ${{ needs.build.outputs.cdisasm }}
+          DEP_XXWIDGETS: ${{ needs.build.outputs.xxwidgets }}
+          DEP_DETECT_IT_EASY: ${{ needs.build.outputs.detect_it_easy }}
+          DEP_XXNETLIB: ${{ needs.build.outputs.xxnetlib }}
+          DEP_XXGITHUB: ${{ needs.build.outputs.xxgithub }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+
+          def fail(message):
+              raise SystemExit(f"::error::{message}")
+
+          def api(endpoint, *, method="GET", body=None):
+              command = ["gh", "api", "--method", method, endpoint]
+              if body is not None:
+                  command += ["--input", "-"]
+              result = subprocess.run(command, check=True, text=True, capture_output=True,
+                                      input=json.dumps(body) if body is not None else None)
+              return json.loads(result.stdout)
+
+          version = os.environ["RELEASE_TAG"]
+          commit = os.environ["RELEASE_COMMIT"]
+          repo = os.environ["GH_REPO"]
+          endpoint = f"repos/{repo}/releases/{os.environ['RELEASE_ID']}"
+          expected = {
+              f"cdie_ubuntu24_amd64_{version}.zip": "Ubuntu 24.04 portable (x86_64)",
+              f"cdie_{version}_amd64.deb": "Debian package (x86_64)",
+              f"cdie_{version}_x86_64.AppImage": "Linux AppImage (x86_64)",
+              f"cdie_win_x64_portable_{version}.zip": "Windows portable (x86_64)",
+          }
+          for label, architecture in (("arm64", "Apple silicon"), ("x64", "Intel")):
+              expected.update({
+                  f"cdie_mac_{label}_portable_{version}.zip": f"macOS portable ({architecture})",
+                  f"cdie_mac_{label}_{version}.zip": f"macOS application ({architecture})",
+                  f"cdie_mac_{label}_{version}.pkg": f"macOS installer ({architecture})",
+              })
+          directory = Path("release-assets")
+          files = {path.name: path for path in directory.iterdir()}
+          if set(files) != set(expected):
+              fail(f"Release packages differ from the expected ten assets. "
+                   f"Missing: {sorted(set(expected) - set(files))}; "
+                   f"unexpected: {sorted(set(files) - set(expected))}.")
+          if any(not path.is_file() or path.is_symlink() or path.stat().st_size == 0
+                 for path in files.values()):
+              fail("Every release asset must be a nonempty regular file.")
+
+          dependencies = {
+              "xxfclib": os.environ["DEP_XXFCLIB"],
+              "cdisasm": os.environ["DEP_CDISASM"],
+              "xxwidgets": os.environ["DEP_XXWIDGETS"],
+              "Detect-It-Easy": os.environ["DEP_DETECT_IT_EASY"],
+              "xxnetlib": os.environ["DEP_XXNETLIB"],
+              "xxgithub": os.environ["DEP_XXGITHUB"],
+          }
+          for name, revision in dependencies.items():
+              if not revision and name in ("xxnetlib", "xxgithub"):
+                  continue
+              if not re.fullmatch(r"[0-9a-fA-F]{40}", revision):
+                  fail(f"Missing or invalid pinned revision for {name}.")
+
+          def verify_draft():
+              release = api(endpoint)
+              if (not release["draft"] or release["tag_name"] != version
+                      or release["target_commitish"] != commit):
+                  fail("The release is no longer the expected draft for this commit.")
+              refs = api(f"repos/{repo}/git/matching-refs/tags/{version}")
+              reference = next((ref for ref in refs if ref["ref"] == f"refs/tags/{version}"), None)
+              if reference:
+                  target = reference["object"]
+                  for _ in range(16):
+                      if target["type"] != "tag":
+                          break
+                      target = api(f"repos/{repo}/git/tags/{target['sha']}")["object"]
+                  if target["type"] != "commit" or target["sha"] != commit:
+                      fail("The version tag now points to another commit; refusing to publish.")
+              if any(asset["name"] not in expected for asset in release["assets"]):
+                  fail("The draft contains unexpected assets; refusing to overwrite or publish it.")
+              return release
+
+          verify_draft()
+          subprocess.run(["gh", "release", "upload", version, "--repo", repo, "--clobber",
+                          *(str(files[name]) for name in sorted(expected))], check=True)
+          release = verify_draft()
+          assets = release["assets"]
+          if len(assets) != len(expected) or {asset["name"] for asset in assets} != set(expected):
+              fail("The uploaded draft does not contain exactly the ten expected packages.")
+          for asset in assets:
+              if asset["state"] != "uploaded" or asset["size"] != files[asset["name"]].stat().st_size:
+                  fail(f"Upload verification failed for {asset['name']}.")
+
+          server = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
+          notes = [
+              f"Built from [`{commit}`]({server}/{repo}/commit/{commit}).",
+              f"[Changelog]({server}/{repo}/blob/{commit}/changelog.txt)",
+              "",
+              "All macOS packages are Developer ID signed and notarized.",
+              "",
+              "| Package | Platform |",
+              "| --- | --- |",
+          ]
+          for asset in sorted(assets, key=lambda item: item["name"]):
+              name = asset["name"]
+              notes.append(f"| [{name}]({asset['browser_download_url']}) | {expected[name]} |")
+          notes += ["", "Dependency revisions:", ""]
+          for name, revision in dependencies.items():
+              notes.append(f"- {name}: `{revision}`" if revision else f"- {name}: not available")
+          published = api(endpoint, method="PATCH", body={
+              "draft": False,
+              "prerelease": os.environ["PRERELEASE"] == "true",
+              "body": "\n".join(notes) + "\n",
+          })
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write(f"Published [{version}]({published['html_url']}) from `{commit}` "
+                            f"with {len(assets)} verified packages.\n")
+          PY

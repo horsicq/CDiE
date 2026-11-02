@@ -1,0 +1,428 @@
+name: Build cdie for Apple
+
+on:
+  workflow_call:
+    inputs:
+      dependency_revisions:
+        description: Exact dependency SHAs as JSON; empty resolves current default branches
+        required: false
+        type: string
+        default: ''
+      upload_release:
+        description: Append verified Apple packages to the published Beta prerelease
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      CDIE_DEPS_TOKEN:
+        description: Optional token for private dependency repositories
+        required: false
+      APPLE_CERTIFICATE_P12_BASE64:
+        description: Base64 Developer ID Application certificate/private key, optionally also Installer
+        required: true
+      APPLE_CERTIFICATE_PASSWORD:
+        description: Password protecting the main .p12 file
+        required: true
+      APPLE_NOTARY_KEY_P8:
+        description: App Store Connect Team API private key (.p8 contents)
+        required: true
+      APPLE_NOTARY_KEY_ID:
+        description: API key ID; may instead be a repository variable
+        required: false
+      APPLE_NOTARY_ISSUER_ID:
+        description: API issuer UUID; may instead be a repository variable
+        required: false
+      APPLE_SIGNING_IDENTITY:
+        description: Optional Application identity name or SHA-1 fingerprint
+        required: false
+      APPLE_INSTALLER_CERTIFICATE_P12_BASE64:
+        description: Optional separate Developer ID Installer certificate/private key
+        required: false
+      APPLE_INSTALLER_CERTIFICATE_PASSWORD:
+        description: Password protecting the separate Installer .p12 file
+        required: false
+      APPLE_INSTALLER_SIGNING_IDENTITY:
+        description: Optional Installer identity name or SHA-1 fingerprint
+        required: false
+  workflow_dispatch:
+    inputs:
+      upload_release:
+        description: Append verified Apple packages to the published Beta prerelease
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  resolve-deps:
+    runs-on: ubuntu-24.04
+    outputs:
+      xxfclib: ${{ steps.revisions.outputs.xxfclib }}
+      cdisasm: ${{ steps.revisions.outputs.cdisasm }}
+      xxwidgets: ${{ steps.revisions.outputs.xxwidgets }}
+      detect_it_easy: ${{ steps.revisions.outputs.detect_it_easy }}
+      xxnetlib: ${{ steps.revisions.outputs.xxnetlib }}
+      xxgithub: ${{ steps.revisions.outputs.xxgithub }}
+    steps:
+      - name: Resolve dependency revisions
+        id: revisions
+        uses: actions/github-script@v7
+        env:
+          DEPENDENCY_REVISIONS: ${{ inputs.dependency_revisions }}
+        with:
+          github-token: ${{ secrets.CDIE_DEPS_TOKEN || github.token }}
+          script: |
+            const repositories = {
+              xxfclib: 'xxfclib',
+              cdisasm: 'cdisasm',
+              xxwidgets: 'xxwidgets',
+              detect_it_easy: 'Detect-It-Easy',
+            };
+            const optionalNames = ['xxnetlib', 'xxgithub'];
+            const supplied = process.env.DEPENDENCY_REVISIONS || '';
+            if (supplied) {
+              const revisions = JSON.parse(supplied);
+              const required = Object.keys(repositories);
+              const allowed = [...required, ...optionalNames];
+              if (!revisions || Array.isArray(revisions) || typeof revisions !== 'object' ||
+                  Object.keys(revisions).some(key => !allowed.includes(key))) {
+                throw new Error('dependency_revisions must contain only the six dependency SHA fields');
+              }
+              for (const name of allowed) {
+                const value = revisions[name] ?? '';
+                if (typeof value !== 'string' ||
+                    (value === '' ? required.includes(name) : !/^[0-9a-f]{40}$/i.test(value))) {
+                  throw new Error(`Invalid pinned dependency revision: ${name}`);
+                }
+                core.setOutput(name, value);
+              }
+              return;
+            }
+            for (const [output, repo] of Object.entries(repositories)) {
+              const { data: repository } = await github.rest.repos.get({ owner: 'horsicq', repo });
+              const { data: commit } = await github.rest.repos.getCommit({
+                owner: 'horsicq', repo, ref: repository.default_branch,
+              });
+              core.setOutput(output, commit.sha);
+              core.info(`${repo}: ${commit.sha}`);
+            }
+            // die-update and the GUI's Update database need xxnetlib and
+            // xxgithub. While they are not published (or the token cannot
+            // read them) the output stays empty, the checkouts below are
+            // skipped and CMake builds the packages without the updater.
+            const optional = {
+              xxnetlib: 'xxnetlib',
+              xxgithub: 'xxgithub',
+            };
+            for (const [output, repo] of Object.entries(optional)) {
+              try {
+                const { data: repository } = await github.rest.repos.get({ owner: 'horsicq', repo });
+                const { data: commit } = await github.rest.repos.getCommit({
+                  owner: 'horsicq', repo, ref: repository.default_branch,
+                });
+                core.setOutput(output, commit.sha);
+                core.info(`${repo}: ${commit.sha}`);
+              } catch (error) {
+                if (error.status !== 404) throw error;
+                core.setOutput(output, '');
+                core.warning(`${repo} is not available: the packages are built without die-update`);
+              }
+            }
+
+  macos:
+    needs: resolve-deps
+    runs-on: macos-15
+    timeout-minutes: 240
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+    env:
+      MACOS_DEPLOYMENT_TARGET_ARM64: '11.0'
+      MACOS_DEPLOYMENT_TARGET_X86_64: '10.14'
+    steps:
+      - name: Check out cdie
+        uses: actions/checkout@v4
+        with:
+          path: cdie
+          persist-credentials: false
+      - name: Check out xxfclib
+        uses: actions/checkout@v4
+        with:
+          repository: horsicq/xxfclib
+          ref: ${{ needs.resolve-deps.outputs.xxfclib }}
+          path: cdie/dep/xxfclib
+          token: ${{ secrets.CDIE_DEPS_TOKEN || github.token }}
+          persist-credentials: false
+      - name: Check out cdisasm
+        uses: actions/checkout@v4
+        with:
+          repository: horsicq/cdisasm
+          ref: ${{ needs.resolve-deps.outputs.cdisasm }}
+          path: cdie/dep/cdisasm
+          token: ${{ secrets.CDIE_DEPS_TOKEN || github.token }}
+          persist-credentials: false
+      - name: Check out xxwidgets
+        uses: actions/checkout@v4
+        with:
+          repository: horsicq/xxwidgets
+          ref: ${{ needs.resolve-deps.outputs.xxwidgets }}
+          path: cdie/dep/xxwidgets
+          token: ${{ secrets.CDIE_DEPS_TOKEN || github.token }}
+          persist-credentials: false
+      - name: Check out signature database
+        uses: actions/checkout@v4
+        with:
+          repository: horsicq/Detect-It-Easy
+          ref: ${{ needs.resolve-deps.outputs.detect_it_easy }}
+          path: cdie/dep/Detect-It-Easy
+          token: ${{ secrets.CDIE_DEPS_TOKEN || github.token }}
+          persist-credentials: false
+      - name: Check out xxnetlib
+        if: needs.resolve-deps.outputs.xxnetlib != ''
+        uses: actions/checkout@v4
+        with:
+          repository: horsicq/xxnetlib
+          ref: ${{ needs.resolve-deps.outputs.xxnetlib }}
+          path: cdie/dep/xxnetlib
+          token: ${{ secrets.CDIE_DEPS_TOKEN || github.token }}
+          persist-credentials: false
+      - name: Check out xxgithub
+        if: needs.resolve-deps.outputs.xxgithub != ''
+        uses: actions/checkout@v4
+        with:
+          repository: horsicq/xxgithub
+          ref: ${{ needs.resolve-deps.outputs.xxgithub }}
+          path: cdie/dep/xxgithub
+          token: ${{ secrets.CDIE_DEPS_TOKEN || github.token }}
+          persist-credentials: false
+      - name: Prepare Apple signing and notarization credentials
+        id: signing
+        working-directory: cdie
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_NOTARY_KEY_P8: ${{ secrets.APPLE_NOTARY_KEY_P8 }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID || vars.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID || vars.APPLE_NOTARY_ISSUER_ID }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || vars.APPLE_SIGNING_IDENTITY }}
+          APPLE_INSTALLER_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_INSTALLER_CERTIFICATE_P12_BASE64 }}
+          APPLE_INSTALLER_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_INSTALLER_CERTIFICATE_PASSWORD }}
+          APPLE_INSTALLER_SIGNING_IDENTITY: ${{ secrets.APPLE_INSTALLER_SIGNING_IDENTITY || vars.APPLE_INSTALLER_SIGNING_IDENTITY }}
+        run: python3 .github/scripts/apple_signing.py prepare
+
+      - name: Validate version and cross-compilation support
+        id: version
+        working-directory: cdie
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(tr -d '\r\n' < release_version.txt)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]
+          printf 'value=%s\n' "$version" >> "$GITHUB_OUTPUT"
+          test "$(uname -m)" = arm64
+          test -d dep/Detect-It-Easy/db
+          if [ ! -f dep/xxfclib/cmake/xxfclib_target_arch.cmake ]; then
+            echo "::error::Publish xxfclib with cmake/xxfclib_target_arch.cmake before cross-compiling cdie."
+            exit 1
+          fi
+
+      - name: Build signed and notarized app zips and installers
+        working-directory: cdie
+        env:
+          CDIE_DATABASE_DIR: ${{ github.workspace }}/cdie/dep/Detect-It-Easy
+          CDIE_BUILD_DIR: ${{ runner.temp }}/cdie-build
+          CDIE_RELEASE_DIR: ${{ github.workspace }}/cdie/release
+          MACOS_ARCHITECTURES: arm64 x86_64
+          CMAKE_BUILD_PARALLEL_LEVEL: '2'
+        run: |
+          bash packaging/macos/build_macos.sh \
+            -DXXFCLIB_DIR="$PWD/dep/xxfclib" \
+            -DXXFC_CDISASM_DIR="$PWD/dep/cdisasm"
+
+      - name: Verify signed packages and create matching portable zips
+        working-directory: cdie
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.value }}
+          WITH_UPDATER: ${{ needs.resolve-deps.outputs.xxnetlib != '' && needs.resolve-deps.outputs.xxgithub != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d)
+          trap 'rm -rf "$work"' EXIT
+          rosetta=false
+          if arch -x86_64 /usr/bin/true 2> /dev/null; then
+            rosetta=true
+          else
+            echo "::notice::Rosetta is unavailable; x86_64 programs receive architecture and signature checks only."
+          fi
+          verify_app() {
+            local app="$1"
+            local program details
+            test -x "$app/Contents/MacOS/die"
+            plutil -lint "$app/Contents/Info.plist"
+            test -n "$(find "$app/Contents/Resources/db" -type f -print -quit)"
+            codesign --verify --deep --strict --verbose=2 "$app"
+            xcrun stapler validate "$app"
+            spctl --assess --type execute --verbose=2 "$app"
+            if [ "$WITH_UPDATER" = true ]; then
+              test -x "$app/Contents/MacOS/die-update"
+            fi
+            for program in "$app"/Contents/MacOS/*; do
+              test -f "$program" || continue
+              test "$(lipo -archs "$program")" = "$expected"
+              codesign --verify --strict "$program"
+              details=$(codesign --display --verbose=4 "$program" 2>&1)
+              grep -Fqx "Authority=$CDIE_APP_SIGNING_IDENTITY" <<< "$details"
+              grep -Eq '^CodeDirectory .*flags=.*runtime' <<< "$details"
+              grep -q '^Timestamp=' <<< "$details"
+            done
+          }
+          for label in arm64 x64; do
+            if [ "$label" = arm64 ]; then expected=arm64; else expected=x86_64; fi
+            archive="release/cdie_mac_${label}_${RELEASE_VERSION}.zip"
+            installer="release/cdie_mac_${label}_${RELEASE_VERSION}.pkg"
+            test -s "$archive"
+            test -s "$installer"
+            inventory=$(unzip -Z -1 "$archive")
+            test -z "$(grep -v '^die\.app/' <<< "$inventory" || true)"
+            ditto -x -k "$archive" "$work/$label/app"
+            app="$work/$label/app/die.app"
+            verify_app "$app"
+            signature=$(pkgutil --check-signature "$installer")
+            grep -Fq "$CDIE_INSTALLER_SIGNING_IDENTITY" <<< "$signature"
+            xcrun stapler validate "$installer"
+            spctl --assess --type install --verbose=2 "$installer"
+            pkgutil --expand "$installer" "$work/$label/pkg"
+            grep -q 'install-location="/Applications"' "$work/$label/pkg"/*.pkg/PackageInfo
+
+            # Use the same signed, stapled app in the portable package. CPack's
+            # copy is unsigned; it is replaced before the ZIP is uploaded.
+            package="cdie_mac_${label}_portable_${RELEASE_VERSION}"
+            cpack --config "$RUNNER_TEMP/cdie-build/$label/CPackConfig.cmake" \
+              -G ZIP -B release -D "CPACK_PACKAGE_FILE_NAME=$package"
+            portable="release/$package.zip"
+            ditto -x -k "$portable" "$work/$label/portable"
+            package_dir="$work/$label/portable/$package"
+            test -d "$package_dir/die.app"
+            rm -rf "$package_dir/die.app"
+            ditto "$app" "$package_dir/die.app"
+            for excluded in diec diex cdie cdie_tui cdie_gui.app die-update; do
+              test ! -e "$package_dir/$excluded"
+            done
+            rm "$portable"
+            ditto -c -k --norsrc --keepParent "$package_dir" "$portable"
+            inventory=$(unzip -Z -1 "$portable")
+            test -z "$(grep -v "^$package/" <<< "$inventory" || true)"
+            ditto -x -k "$portable" "$work/$label/verified"
+            verify_app "$work/$label/verified/$package/die.app"
+
+            run=()
+            if [ "$label" = x64 ]; then
+              if [ "$rosetta" != true ]; then continue; fi
+              run=(arch -x86_64)
+            fi
+            # Invalid mode exits before creating a GUI window, proving the
+            # signed GUI loads under the hardened runtime on this runner.
+            status=0
+            output=$(${run[@]+"${run[@]}"} "$app/Contents/MacOS/die" --smoke-update launch-check 2>&1) || status=$?
+            test "$status" -eq 2
+            grep -Eq 'requires installed, current(,| or) failed' <<< "$output"
+            if [ "$WITH_UPDATER" = true ]; then
+              ${run[@]+"${run[@]}"} "$app/Contents/MacOS/die-update" --version
+            fi
+          done
+
+      - name: Remove temporary signing credentials
+        if: always()
+        working-directory: cdie
+        run: python3 .github/scripts/apple_signing.py cleanup
+
+      - name: Save macOS arm64 package
+        uses: actions/upload-artifact@v4
+        with:
+          name: cdie-macos-arm64
+          path: cdie/release/cdie_mac_arm64_portable_*.zip
+          if-no-files-found: error
+      - name: Save macOS x64 package
+        uses: actions/upload-artifact@v4
+        with:
+          name: cdie-macos-x64
+          path: cdie/release/cdie_mac_x64_portable_*.zip
+          if-no-files-found: error
+      - name: Save macOS arm64 app zip and installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: cdie-macos-arm64-app
+          path: |
+            cdie/release/cdie_mac_arm64_[0-9]*.zip
+            cdie/release/cdie_mac_arm64_*.pkg
+          if-no-files-found: error
+      - name: Save macOS x64 app zip and installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: cdie-macos-x64-app
+          path: |
+            cdie/release/cdie_mac_x64_[0-9]*.zip
+            cdie/release/cdie_mac_x64_*.pkg
+          if-no-files-found: error
+
+  publish-beta:
+    needs: [resolve-deps, macos]
+    if: inputs.upload_release && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    concurrency:
+      group: cdie-beta-publish
+      cancel-in-progress: false
+    steps:
+      - name: Download Apple packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: cdie-macos-*
+          merge-multiple: true
+          path: release-assets
+      - name: Verify Apple assets
+        env:
+          RELEASE_VERSION: ${{ needs.macos.outputs.version }}
+        run: |
+          set -euo pipefail
+          test "$(find release-assets -maxdepth 1 -type f | wc -l)" -eq 6
+          for label in arm64 x64; do
+            test -s "release-assets/cdie_mac_${label}_portable_${RELEASE_VERSION}.zip"
+            test -s "release-assets/cdie_mac_${label}_${RELEASE_VERSION}.zip"
+            test -s "release-assets/cdie_mac_${label}_${RELEASE_VERSION}.pkg"
+          done
+      - name: Point Beta tag at packaged commit
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const master = await github.rest.git.getRef({ owner, repo, ref: 'heads/master' });
+            if (master.data.object.sha !== context.sha) {
+              throw new Error('master moved before the Beta release was uploaded');
+            }
+            try {
+              await github.rest.git.getRef({ owner, repo, ref: 'tags/Beta' });
+              await github.rest.git.updateRef({
+                owner, repo, ref: 'tags/Beta', sha: context.sha, force: true,
+              });
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              await github.rest.git.createRef({
+                owner, repo, ref: 'refs/tags/Beta', sha: context.sha,
+              });
+            }
+      - name: Upload Apple packages to Beta
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: Beta
+          name: Beta
+          draft: false
+          prerelease: true
+          make_latest: false
+          fail_on_unmatched_files: true
+          files: |
+            release-assets/*.zip
+            release-assets/*.pkg
