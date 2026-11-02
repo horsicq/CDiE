@@ -12,6 +12,7 @@
 #include <xxfclib/global/xx_global.h>
 #include <xxfclib/rt/xx_rt.h>
 #include <xxfclib/strings/xx_string.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stddef.h>
@@ -26,6 +27,23 @@
 #define KEY_QT_RECENT "RecentFiles"
 #define KEY_QT_LANGUAGE "View/Lang"
 #define RECENT_CAPACITY sizeof(((gui_file_preferences *)0)->recent_files)
+/* Feature/ReadBufferSize and Feature/FileBufferSize take effect within the
+ * range of the Optimization page's choices (xxwidgets_optimization_options.c),
+ * which diec's --buffersize and --filebuffersize accept too: 1 KiB to 1 GiB,
+ * and to 64 MiB where a size_t has 32 bits (the library's 32-bit memory
+ * budget, XX_DEFAULT_FILE_MEMORY_LIMIT). 0 is the default size, as in Detect
+ * It Easy, and so is a number past BUFFER_SIZE_QT_MAX: Detect It Easy reads
+ * these keys with QVariant::toInt(), so its own "2 GiB" and "4 GiB" choices
+ * (and a REG_DWORD of 0x80000000 or more) mean its default size too. */
+#define BUFFER_SIZE_MIN ((uint64_t)1024)
+#if !defined(SIZE_MAX)
+#error SIZE_MAX (stdint.h) is needed to choose the buffer size range
+#elif SIZE_MAX > 0xFFFFFFFFu
+#define BUFFER_SIZE_MAX ((uint64_t)1024 * 1024 * 1024)
+#else
+#define BUFFER_SIZE_MAX ((uint64_t)64 * 1024 * 1024)
+#endif
+#define BUFFER_SIZE_QT_MAX ((uint64_t)INT32_MAX)
 
 enum setting_kind {
     SK_BOOL,           /* int member: "true"/"false" */
@@ -41,7 +59,7 @@ enum setting_kind {
     SK_PLAIN_COLOR,    /* cdie-only decimal half; group 0 scan, 1 dark scan, 2 disassembly */
     SK_SYNTAX,         /* Detect It Easy's ATT/INTEL/...; 0 Intel, 1 AT&T */
     SK_DATABASE_PATH,  /* index = GUI_DB_* slot; "$data/db..." = default folder */
-    SK_BUFFER,         /* index 0 read, 1 file buffer; 0 = default size */
+    SK_BUFFER,         /* index 0 read, 1 file buffer; 0 or past INT32_MAX = default size, else clamped */
     SK_FEATURE,        /* index = CPU feature */
     SK_BYTES_PER_ROW,
     SK_PAGE
@@ -860,8 +878,15 @@ static char *stored_canonical(const xx_settings *store, const setting_spec *spec
     case SK_DATABASE_PATH:
         return stored_database_path(value, spec->index);
     case SK_BUFFER:
-        if (!value_uint(value, &number) || number > SIZE_MAX) return NULL;
-        return number_text(number ? number : spec->index ? (uint64_t)XX_DEFAULT_FILE_BUFFER_SIZE : (uint64_t)XX_DEFAULT_BUFFER_SIZE);
+        /* Clamped as a 64-bit number, before apply() narrows it to size_t,
+         * so x86 never truncates it. The stored value is left as it is: a
+         * save writes it only when the size changes in Options. */
+        if (!value_uint(value, &number)) return NULL;
+        if (!number || number > BUFFER_SIZE_QT_MAX)
+            number = spec->index ? (uint64_t)XX_DEFAULT_FILE_BUFFER_SIZE : (uint64_t)XX_DEFAULT_BUFFER_SIZE;
+        else if (number < BUFFER_SIZE_MIN) number = BUFFER_SIZE_MIN;
+        else if (number > BUFFER_SIZE_MAX) number = BUFFER_SIZE_MAX;
+        return number_text(number);
     case SK_BYTES_PER_ROW:
         return value_uint(value, &number) && (number == 8 || number == 16 || number == 24 || number == 32 || number == 48 || number == 64) ?
             number_text(number) : NULL;
@@ -1118,8 +1143,14 @@ static void migrate_legacy(xx_settings *store, const char *directory)
     if (xx_settings_load(legacy) == XXFC_OK && xx_settings_count(legacy) && !xx_settings_get(legacy, KEY_MIGRATED)) {
         for (i = 0; i < spec_count; ++i) {
             char *text;
+            uint64_t number;
             if (xx_settings_get(store, specs[i].key)) continue;
-            text = stored_canonical(legacy, &specs[i], 1, NULL);
+            /* A buffer size moves as it was stored, not as cdie clamps it, so
+             * Detect It Easy reads what it would have read there. */
+            if (specs[i].kind == SK_BUFFER)
+                text = value_uint(xx_settings_get(legacy, specs[i].key), &number) ? number_text(number) : NULL;
+            else
+                text = stored_canonical(legacy, &specs[i], 1, NULL);
             if (text && specs[i].kind == SK_FONT) {
                 /* Older versions stored every font; a default one leaves Detect It Easy its own. */
                 char *plain = font_text(default_font(specs[i].index));

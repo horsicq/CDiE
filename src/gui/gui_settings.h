@@ -26,7 +26,12 @@ void gui_settings_close(xx_settings *store);
 /* Applies the stored backend settings (database folders, CPU optimization,
  * scan modes) and fills values and *page with the frontend's. Missing or
  * malformed keys keep what values and *page already hold; booleans and
- * numbers are accepted in Qt's text form or typed. Returns 0 when the
+ * numbers are accepted in Qt's text form or typed. Feature/ReadBufferSize
+ * and Feature/FileBufferSize take effect clamped to the Optimization page's
+ * range, 1 KiB to 1 GiB (64 MiB in a 32-bit build); 0 is the default size,
+ * and so is a number past INT32_MAX, which Detect It Easy reads as its
+ * default; the stored value stays as it is until the size is changed in
+ * Options. Returns 0 when the
  * stored database folders do not load; the defaults stay active then. */
 int gui_settings_load(xx_settings *store, gui_options_values *values, gui_options_page_id *page);
 

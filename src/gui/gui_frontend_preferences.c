@@ -54,6 +54,7 @@ static char instance_message[GUI_PREFERENCE_PATH_MAX];
 static size_t instance_received;
 static int instance_oversized;
 static time_t instance_client_since;
+static int instance_terminated; /* the message's NUL arrived */
 #endif
 
 static int frontend_preferences_applied;
@@ -314,65 +315,6 @@ static void instance_listen(const char *path)
     strcpy(instance_socket_path, path);
 }
 
-/* The running copy may still be between its lock and its listen; wait for it
- * as Windows waits on the mutex. The path is buffered by the kernel, so the
- * running copy receives it when its main loop next polls, even if a dialog
- * is open now. */
-static int instance_forward(const char *path, const char *startup_file)
-{
-    struct sockaddr_un address;
-    char *absolute = NULL;
-    size_t length;
-    int fd = -1, attempt, sent = 0;
-    if (!startup_file || !*startup_file) return 0;
-    if (strlen(path) >= sizeof(address.sun_path)) return -1;
-    if (startup_file[0] == '/') {
-        length = strlen(startup_file) + 1;
-        absolute = malloc(length);
-        if (absolute) memcpy(absolute, startup_file, length);
-    } else if (!(absolute = realpath(startup_file, NULL))) {
-        char directory[GUI_PREFERENCE_PATH_MAX];
-        if (getcwd(directory, sizeof(directory))) {
-            length = strlen(directory) + strlen(startup_file) + 2;
-            absolute = malloc(length);
-            if (absolute) snprintf(absolute, length, "%s/%s", directory, startup_file);
-        }
-    }
-    if (!absolute || strlen(absolute) >= GUI_PREFERENCE_PATH_MAX) { free(absolute); return -1; }
-    memset(&address, 0, sizeof(address));
-    address.sun_family = AF_UNIX;
-    strcpy(address.sun_path, path);
-    for (attempt = 0; attempt < 60 && fd < 0; ++attempt) {
-        if (attempt) { struct timespec delay = {0, 50000000L}; nanosleep(&delay, NULL); }
-        if (!instance_socket_ours(path)) continue;
-        fd = socket(AF_UNIX, SOCK_STREAM, 0);
-        if (fd < 0) break;
-        instance_set_flags(fd, 0);
-#ifdef SO_NOSIGPIPE
-        { int on = 1; (void)setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof(on)); }
-#endif
-        if (connect(fd, (struct sockaddr *)&address, sizeof(address)) != 0) { close(fd); fd = -1; }
-    }
-    if (fd >= 0) {
-        const char *at = absolute;
-        size_t left = strlen(absolute) + 1;
-        int flags = 0;
-#ifdef MSG_NOSIGNAL
-        flags = MSG_NOSIGNAL;
-#endif
-        while (left) {
-            ssize_t n = send(fd, at, left, flags);
-            if (n < 0 && errno == EINTR) continue;
-            if (n <= 0) break;
-            at += n; left -= (size_t)n;
-        }
-        sent = !left;
-        close(fd);
-    }
-    free(absolute);
-    return sent ? 0 : -1;
-}
-
 static int instance_utf8_valid(const unsigned char *text)
 {
     while (*text) {
@@ -383,6 +325,158 @@ static int instance_utf8_valid(const unsigned char *text)
         while (more--) { if ((*text & 0xC0) != 0x80) return 0; ++text; }
     }
     return 1;
+}
+
+static int instance_send_flags(void)
+{
+#ifdef MSG_NOSIGNAL
+    return MSG_NOSIGNAL;
+#else
+    return 0; /* SO_NOSIGPIPE on the socket instead */
+#endif
+}
+
+static void instance_no_sigpipe(int fd)
+{
+#ifdef SO_NOSIGPIPE
+    int on = 1;
+    (void)setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof(on));
+#else
+    (void)fd;
+#endif
+}
+
+/* The socket beside a per-user folder that is not aged: XDG_RUNTIME_DIR on
+ * Linux, the per-user temporary folder on macOS. In shared /tmp another
+ * account could take the name first, and tmpfiles cleaners age it out. The
+ * folder must be ours and closed to others; /tmp otherwise. */
+static void instance_socket_name(char *buffer, size_t capacity, uint64_t hash)
+{
+    char directory[GUI_PREFERENCE_PATH_MAX];
+    const char *base = "/tmp";
+    struct stat info;
+    size_t length;
+    directory[0] = 0;
+#if defined(__APPLE__) && defined(_CS_DARWIN_USER_TEMP_DIR)
+    length = confstr(_CS_DARWIN_USER_TEMP_DIR, directory, sizeof(directory));
+    if (!length || length > sizeof(directory)) directory[0] = 0;
+#else
+    {
+        const char *runtime = getenv("XDG_RUNTIME_DIR");
+        if (runtime && strlen(runtime) < sizeof(directory)) strcpy(directory, runtime);
+    }
+#endif
+    length = strlen(directory);
+    while (length > 1 && directory[length - 1] == '/') directory[--length] = 0;
+    if (directory[0] == '/' && stat(directory, &info) == 0 && S_ISDIR(info.st_mode) &&
+        info.st_uid == getuid() && !(info.st_mode & (S_IRWXG | S_IRWXO)))
+        base = directory;
+    if (snprintf(buffer, capacity, "%s/cdie-%lu-%016llx.sock", base, (unsigned long)getuid(), (unsigned long long)hash) >= (int)capacity)
+        snprintf(buffer, capacity, "/tmp/cdie-%lu-%016llx.sock", (unsigned long)getuid(), (unsigned long long)hash);
+}
+
+/* file as an absolute path without resolving links, as GetFullPathNameW does
+ * on Windows: the working folder in front, then "." and ".." removed by name,
+ * so Recent files keeps the spelling the user gave. free() by caller. */
+static char *instance_absolute(const char *file)
+{
+    char directory[GUI_PREFERENCE_PATH_MAX];
+    const char *part;
+    char *joined, *result;
+    size_t length, at = 0;
+    if (file[0] == '/') directory[0] = 0;
+    else if (!getcwd(directory, sizeof(directory))) return NULL;
+    length = strlen(directory) + strlen(file) + 2;
+    joined = malloc(length);
+    result = malloc(length + 1);
+    if (!joined || !result) { free(joined); free(result); return NULL; }
+    snprintf(joined, length, "%s/%s", directory, file);
+    for (part = joined; *part;) {
+        const char *end = strchr(part, '/');
+        size_t size = end ? (size_t)(end - part) : strlen(part);
+        if (size == 2 && part[0] == '.' && part[1] == '.') {
+            while (at && result[at - 1] != '/') --at;
+            if (at) --at;
+        } else if (size && !(size == 1 && part[0] == '.')) {
+            result[at++] = '/';
+            memcpy(result + at, part, size);
+            at += size;
+        }
+        part += size;
+        if (*part == '/') ++part;
+    }
+    if (!at) result[at++] = '/';
+    result[at] = 0;
+    free(joined);
+    return result;
+}
+
+/* A later launch, which found lock held. About 3 s, as Windows waits on the
+ * mutex: the running copy may still be between its lock and its listen. It
+ * answers one byte once its main loop has taken the path. When the lock comes
+ * free meanwhile, the running copy has closed (even with the path sent but
+ * not read): this process takes over and returns 1, keeping lock. A path sent
+ * but not answered in time stays queued for the running copy (a dialog may be
+ * open there) and counts as forwarded. Without a file an empty message only
+ * brings that copy to the front, as on Windows; not delivering it is no
+ * error. A name that is not UTF-8, which that copy would refuse, is reported
+ * here and only raises it. */
+static int instance_forward(int lock, const char *path, const char *startup_file)
+{
+    struct sockaddr_un address;
+    char *absolute;
+    int fd = -1, attempt, sent = 0, acknowledged = 0, dropped = 0, raise_only = !startup_file || !*startup_file;
+    if (!raise_only && !instance_utf8_valid((const unsigned char *)startup_file)) {
+        fprintf(stderr, "%s\n", CDIE_TR("Cannot open this file: its name is not valid text (UTF-8)."));
+        raise_only = 1;
+    }
+    absolute = raise_only ? calloc(1, 1) : instance_absolute(startup_file);
+    if (!absolute || strlen(absolute) >= GUI_PREFERENCE_PATH_MAX || strlen(path) >= sizeof(address.sun_path)) {
+        free(absolute);
+        return raise_only ? 0 : -1;
+    }
+    memset(&address, 0, sizeof(address));
+    address.sun_family = AF_UNIX;
+    strcpy(address.sun_path, path);
+    for (attempt = 0; attempt < 60 && !acknowledged; ++attempt) {
+        if (attempt) { struct timespec delay = {0, 50000000L}; nanosleep(&delay, NULL); }
+        if (flock(lock, LOCK_EX | LOCK_NB) == 0) {
+            if (fd >= 0) close(fd);
+            free(absolute);
+            return 1;
+        }
+        if (fd < 0) {
+            const char *at = absolute;
+            size_t left = strlen(absolute) + 1;
+            /* Once dropped unread, the running copy is closing: only wait for its lock. */
+            if (dropped || !instance_socket_ours(path)) continue;
+            fd = socket(AF_UNIX, SOCK_STREAM, 0);
+            if (fd < 0) break;
+            instance_set_flags(fd, 0);
+            instance_no_sigpipe(fd);
+            if (connect(fd, (struct sockaddr *)&address, sizeof(address)) != 0) { close(fd); fd = -1; continue; }
+            while (left) {
+                ssize_t n = send(fd, at, left, instance_send_flags());
+                if (n < 0 && errno == EINTR) continue;
+                if (n <= 0) break;
+                at += n; left -= (size_t)n;
+            }
+            if (left) { close(fd); fd = -1; continue; }
+            sent = 1;
+            instance_set_flags(fd, 1);
+        }
+        {
+            char answer;
+            ssize_t n = recv(fd, &answer, 1, 0);
+            if (n == 1) acknowledged = 1;
+            else if (n == 0 || (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)) {
+                close(fd); fd = -1; dropped = 1;
+            }
+        }
+    }
+    if (fd >= 0) close(fd);
+    free(absolute);
+    return acknowledged || (sent && !dropped) || raise_only ? 0 : -1;
 }
 #endif
 int gui_frontend_instance_start(xxwidgets_widget *window, const char *startup_file)
@@ -441,7 +535,7 @@ int gui_frontend_instance_start(xxwidgets_widget *window, const char *startup_fi
     }
 #else
     {
-        char path[128], socket_path[128];
+        char path[128], socket_path[sizeof(((struct sockaddr_un *)0)->sun_path)];
         int flags = O_CREAT | O_RDWR;
         (void)window;
 #ifdef O_NOFOLLOW
@@ -452,12 +546,13 @@ int gui_frontend_instance_start(xxwidgets_widget *window, const char *startup_fi
         flags |= O_CLOEXEC;
 #endif
         snprintf(path, sizeof(path), "/tmp/cdie-%lu-%016llx.lock", (unsigned long)getuid(), (unsigned long long)hash);
-        snprintf(socket_path, sizeof(socket_path), "/tmp/cdie-%lu-%016llx.sock", (unsigned long)getuid(), (unsigned long long)hash);
+        instance_socket_name(socket_path, sizeof(socket_path), hash);
         instance_file = open(path, flags, 0600);
         if (instance_file < 0) return -1;
         if (flock(instance_file, LOCK_EX | LOCK_NB) != 0) {
-            close(instance_file); instance_file = -1;
-            return instance_forward(socket_path, startup_file);
+            int forwarded = instance_forward(instance_file, socket_path, startup_file);
+            if (forwarded != 1) { close(instance_file); instance_file = -1; return forwarded; }
+            /* The running copy closed meanwhile: this one owns the lock now. */
         }
         instance_listen(socket_path);
     }
@@ -473,14 +568,16 @@ int gui_frontend_instance_poll(xxwidgets_widget *window, char **path_out)
 #ifdef _WIN32
     return 0;
 #else
-    for (;;) {
+    /* A few senders per call at most, so a flood cannot hold the main loop. */
+    for (int clients = 0; clients < 8; ++clients) {
         int done = 0;
         if (instance_client < 0) {
             if (instance_listener < 0) return 0;
             instance_client = accept(instance_listener, NULL, NULL);
             if (instance_client < 0) return 0;
             instance_set_flags(instance_client, 1);
-            instance_received = 0; instance_oversized = 0;
+            instance_no_sigpipe(instance_client);
+            instance_received = 0; instance_oversized = 0; instance_terminated = 0;
             instance_client_since = time(NULL);
         }
         while (!done) {
@@ -492,6 +589,9 @@ int gui_frontend_instance_poll(xxwidgets_widget *window, char **path_out)
                 if (instance_received + take >= sizeof(instance_message)) instance_oversized = 1;
                 else { memcpy(instance_message + instance_received, chunk, take); instance_received += take; }
                 done = end != NULL;
+                if (done) instance_terminated = 1;
+                /* Too long, or still streaming after 2 s: dropped at once. */
+                else if (instance_oversized || time(NULL) - instance_client_since > 2) { instance_oversized = 1; done = 1; }
             } else if (n == 0) done = 1;
             else if (errno == EINTR) continue;
             else if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -500,14 +600,23 @@ int gui_frontend_instance_poll(xxwidgets_widget *window, char **path_out)
                 instance_oversized = 1; done = 1;
             } else { instance_oversized = 1; done = 1; }
         }
-        close(instance_client); instance_client = -1;
         instance_message[instance_received] = 0;
-        if (!instance_oversized && instance_received &&
-            instance_utf8_valid((const unsigned char *)instance_message)) {
+        /* A whole message: a path, or "" from a launch without a file (raise
+         * only). A name that is not UTF-8 still raises the window. The answer
+         * tells the sender the path was taken; it may have stopped waiting. */
+        if (!instance_oversized && instance_terminated) {
+            char answer = 1;
+            if (!instance_utf8_valid((const unsigned char *)instance_message)) { instance_message[0] = 0; instance_received = 0; }
             *path_out = malloc(instance_received + 1);
-            if (*path_out) { memcpy(*path_out, instance_message, instance_received + 1); return 1; }
+            if (*path_out) {
+                memcpy(*path_out, instance_message, instance_received + 1);
+                (void)send(instance_client, &answer, 1, instance_send_flags());
+            }
         }
+        close(instance_client); instance_client = -1;
+        if (*path_out) return 1;
     }
+    return 0;
 #endif
 }
 void gui_frontend_instance_close(void)

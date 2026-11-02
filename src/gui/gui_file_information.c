@@ -104,13 +104,19 @@ void gui_file_information_free(gui_file_information_data *data)
 
 int gui_file_information_read(const char *path, xx_pd_struct *progress, gui_file_information_data **out, char **error)
 {
+    return gui_file_information_read_slice(path, CDIE_FILE_INFO_SLICE_AUTO, progress, out, error);
+}
+
+int gui_file_information_read_slice(const char *path, int slice, xx_pd_struct *progress,
+    gui_file_information_data **out, char **error)
+{
     static const cdie_file_info_visitor visitor = {collect_file, collect_structure, collect_field, end_structure};
     gui_file_information_data *data;
     if (!out || !error) return 0;
     *out = NULL; *error = NULL;
     data = calloc(1, sizeof(*data));
     if (!data) return 0;
-    if (!cdie_file_info_visit(path, NULL, 0, &visitor, data, progress, error)) {
+    if (!cdie_file_info_visit_slice(path, slice, NULL, 0, &visitor, data, progress, error)) {
         gui_file_information_free(data); return 0;
     }
     *out = data;
@@ -123,7 +129,7 @@ typedef struct information_job {
     char *error;
     xx_mutex_t *lock;
     xx_pd_struct work, snapshot;
-    int ok, stop, done;
+    int slice, ok, stop, done;
 } information_job;
 static bool observe_information(const xx_pd_struct *progress, void *user)
 {
@@ -136,7 +142,7 @@ static int information_worker(void *user)
 {
     information_job *job = user;
     xx_pd_observer previous = xx_pd_set_observer(&job->work, observe_information, job);
-    job->ok = gui_file_information_read(job->path, &job->work, &job->data, &job->error);
+    job->ok = gui_file_information_read_slice(job->path, job->slice, &job->work, &job->data, &job->error);
     xx_pd_set_observer(previous.progress, previous.callback, previous.user_data);
     xx_mutex_lock(job->lock); job->snapshot = job->work; job->done = 1; xx_mutex_unlock(job->lock);
     return 0;
@@ -152,13 +158,18 @@ static xxwidgets_status information_progress(void *user, int stop_requested, xx_
 }
 xxwidgets_status gui_file_information_show(xxwidgets_widget *owner, const char *path)
 {
+    return gui_file_information_show_slice(owner, path, CDIE_FILE_INFO_SLICE_AUTO);
+}
+
+xxwidgets_status gui_file_information_show_slice(xxwidgets_widget *owner, const char *path, int slice)
+{
     information_job job = {0};
     xx_pd_struct progress = xx_pd_init();
     xx_thread_t *thread;
     xxwidgets_status status;
     int joined;
-    if (!owner || !path || !*path) return XXWIDGETS_INVALID_ARGUMENT;
-    job.path = path; job.work = xx_pd_init(); job.snapshot = job.work; job.lock = xx_mutex_create();
+    if (!owner || !path || !*path || slice < CDIE_FILE_INFO_SLICE_AUTO) return XXWIDGETS_INVALID_ARGUMENT;
+    job.path = path; job.slice = slice; job.work = xx_pd_init(); job.snapshot = job.work; job.lock = xx_mutex_create();
     if (!job.lock) return XXWIDGETS_OUT_OF_MEMORY;
     thread = xx_thread_create(information_worker, &job);
     if (!thread) { xx_mutex_destroy(job.lock); return XXWIDGETS_PLATFORM_ERROR; }

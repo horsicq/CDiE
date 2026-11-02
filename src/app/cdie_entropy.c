@@ -6,6 +6,7 @@
 #include <xxfclib/formats/executable/macho/xx_macho.h>
 #include <xxfclib/buf/xx_buf.h>
 #include <xxfclib/terminal/xx_terminal.h>
+#include <xxfclib/global/xx_global.h>
 
 static double histogram_entropy(const uint64_t counts[256], uint64_t size)
 {
@@ -25,13 +26,26 @@ static int cancelled(xx_pd_struct *progress)
     xx_pd_stop(progress); /* Observer cancellation stays sticky after leaving a level. */
     return 1;
 }
+/* Each read is the general buffer size (diec --buffersize, the GUI's
+ * Feature/ReadBufferSize), no larger than the input. The default size is used
+ * when that much memory is not available, so the setting never changes a value. */
+static unsigned char *read_buffer(uint64_t size, size_t *capacity)
+{
+    size_t wanted = xx_get_buffer_size();
+    unsigned char *buffer;
+    if ((uint64_t)wanted > size) wanted = size ? (size_t)size : 1;
+    buffer = xx_rt_malloc(wanted);
+    if (!buffer && wanted > XX_DEFAULT_BUFFER_SIZE) buffer = xx_rt_malloc(wanted = XX_DEFAULT_BUFFER_SIZE);
+    *capacity = buffer ? wanted : 0;
+    return buffer;
+}
 static int read_histogram(xx_io_device *device, uint64_t offset, uint64_t size,
-    uint64_t counts[256], unsigned char *buffer, xx_pd_struct *progress, int level)
+    uint64_t counts[256], unsigned char *buffer, size_t capacity, xx_pd_struct *progress, int level)
 {
     uint64_t done = 0;
     xx_rt_memset(counts, 0, 256 * sizeof(*counts));
     while (done < size) {
-        size_t i, chunk = size - done < 65536 ? (size_t)(size - done) : 65536;
+        size_t i, chunk = size - done < capacity ? (size_t)(size - done) : capacity;
         if (cancelled(progress)) return 0;
         if (!xx_io_read_at(device, (int64_t)(offset + done), buffer, chunk)) return 0;
         for (i = 0; i < chunk; ++i) ++counts[buffer[i]];
@@ -68,7 +82,7 @@ int cdie_entropy_read(const char *path, xx_pd_struct *progress, cdie_entropy_dat
     const char *message = "Cannot read entropy data";
     uint64_t counts[256];
     int64_t size;
-    size_t i, j;
+    size_t i, j, capacity = 0;
     int ok = 0, initialized = 0, level = -1;
     if (!out || !error) return 0;
     *out = NULL; *error = NULL;
@@ -78,7 +92,7 @@ int cdie_entropy_read(const char *path, xx_pd_struct *progress, cdie_entropy_dat
     if (!device) { message = "Cannot open file"; goto finish; }
     size = xx_io_total_size(device);
     if (size < 0) { message = "Cannot determine file size"; goto finish; }
-    data = xx_rt_calloc(1, sizeof(*data)); buffer = xx_rt_malloc(65536);
+    data = xx_rt_calloc(1, sizeof(*data)); buffer = read_buffer((uint64_t)size, &capacity);
     if (!data || !buffer) { message = "Cannot allocate entropy data"; goto finish; }
     data->size = (uint64_t)size;
     xx_rt_snprintf(data->file_type, sizeof(data->file_type), "Binary");
@@ -126,7 +140,7 @@ int cdie_entropy_read(const char *path, xx_pd_struct *progress, cdie_entropy_dat
         sample->offset = i * (data->size / data->sample_count);
         sample->size = i + 1 == data->sample_count ? data->size - sample->offset : data->size / data->sample_count;
         bytes_level = xx_pd_enter_level(progress, sample->size, "Reading blocks");
-        ok = read_histogram(device, sample->offset, sample->size, counts, buffer, progress, bytes_level);
+        ok = read_histogram(device, sample->offset, sample->size, counts, buffer, capacity, progress, bytes_level);
         xx_pd_leave_level(progress, bytes_level);
         if (!ok) goto finish;
         sample->entropy = histogram_entropy(counts, sample->size);
@@ -144,7 +158,7 @@ int cdie_entropy_read(const char *path, xx_pd_struct *progress, cdie_entropy_dat
             continue;
         }
         bytes_level = xx_pd_enter_level(progress, region->size, "Reading regions");
-        read = read_histogram(device, region->offset, region->size, counts, buffer, progress, bytes_level);
+        read = read_histogram(device, region->offset, region->size, counts, buffer, capacity, progress, bytes_level);
         xx_pd_leave_level(progress, bytes_level);
         if (!read) goto finish;
         region->entropy = histogram_entropy(counts, region->size);

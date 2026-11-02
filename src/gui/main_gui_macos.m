@@ -74,11 +74,12 @@ static xxwidgets_status refresh_panel_tags(void)
     return status;
 }
 /* After a database reload the results and file types came from the old
- * signatures: clear them, as Windows and GTK do, then refresh the tags. */
+ * signatures: clear them, as Windows and GTK do, then refresh the tags.
+ * Automatic alone (nothing scanned yet) stays enabled, as on GTK. */
 static xxwidgets_status reload_panel_tags(void)
 {
     xxwidgets_status status = xxwidgets_scan_panel_clear(g_panel);
-    if (status == XXWIDGETS_OK) status = xxwidgets_widget_set_enabled(control(XXWIDGETS_SCAN_PANEL_FILE_TYPE), 0);
+    if (status == XXWIDGETS_OK && g_type_path) status = xxwidgets_widget_set_enabled(control(XXWIDGETS_SCAN_PANEL_FILE_TYPE), 0);
     [g_type_path release]; g_type_path = nil;
     return status == XXWIDGETS_OK ? refresh_panel_tags() : status;
 }
@@ -164,15 +165,19 @@ static void on_event(xxwidgets_app *app, const xxwidgets_event *event, void *use
     else if (event->type == XXWIDGETS_EVENT_SHORTCUT) g_pending = event->value;
     else if (event->type == XXWIDGETS_EVENT_DROP_FILES && event->widget == g_window && event->path_count) open_path(string(event->paths[0]));
     else if (event->type == XXWIDGETS_EVENT_CHANGE && event->widget == g_path) {
-        xxwidgets_scan_panel_clear(g_panel);
+        /* As on Windows: the results stay; the file types describe the last
+         * scanned file, so they wait for the next scan. */
         xxwidgets_widget_set_enabled(control(XXWIDGETS_SCAN_PANEL_FILE_TYPE), 0);
     } else if (event->type == XXWIDGETS_EVENT_CHANGE &&
                (event->widget == control(XXWIDGETS_SCAN_PANEL_INCLUDE_TAGS) ||
                 event->widget == control(XXWIDGETS_SCAN_PANEL_EXCLUDE_TAGS))) {
         xxwidgets_status status = apply_panel_tag_filters();
         if (status != XXWIDGETS_OK) report_ui_error(CDIE_N_("Read tag filters"), status);
-    } else if (event->type == XXWIDGETS_EVENT_SELECT && event->widget == control(XXWIDGETS_SCAN_PANEL_FILE_TYPE)) g_pending = ACTION_SCAN;
-    else if (gui_tree_event(g_panel, event)) {
+    } else if (event->type == XXWIDGETS_EVENT_SELECT && event->widget == control(XXWIDGETS_SCAN_PANEL_FILE_TYPE)) {
+        /* As on Windows: a file type scans the file in the path field, if any. */
+        size_t length = 0;
+        if (xxwidgets_widget_get_text(g_path, NULL, 0, &length) == XXWIDGETS_OK && length > 1) g_pending = ACTION_SCAN;
+    } else if (gui_tree_event(g_panel, event)) {
         /* S or ? on a result row: shown after polling returns. */
     } else if (event->type == XXWIDGETS_EVENT_CLICK) {
         if (event->widget == g_browse) g_pending = ACTION_OPEN;
@@ -244,8 +249,11 @@ static int do_scan(void)
     if (![path length]) { NSBeep(); xxwidgets_widget_focus(g_path); return 0; }
     xxwidgets_scan_panel_clear(g_panel);
     if (!refresh_types(path)) {
+        /* One sentence on every platform, with the file system's reason (gui_error.h). */
+        char message[512];
         xxwidgets_widget_set_enabled(combo, 0);
-        xxwidgets_widget_set_text(g_status, CDIE_TR("Cannot open this file. Check the path and permissions."));
+        gui_error_open_status(message, sizeof(message), [path UTF8String]);
+        xxwidgets_widget_set_text(g_status, message);
         return 0;
     }
     xx_var type_id = {0};
@@ -288,6 +296,9 @@ static void do_open(void)
     [picker setMessage:cdie_ns_tr(@"Select a file to scan")];
     [picker setCanChooseDirectories:NO];
     [picker setAllowsMultipleSelection:NO];
+    /* Inside packages too, as on Windows: an .app's executable is the file to
+     * scan (an .app itself is a folder, which cannot be scanned). */
+    [picker setTreatsFilePackagesAsDirectories:YES];
     gui_options_values preferences;
     gui_preferences_get(&preferences);
     /* As on Windows, the folder of the file in the path field comes first,
@@ -302,7 +313,7 @@ static void do_open(void)
         if (![folder length] || ![[NSFileManager defaultManager] fileExistsAtPath:folder isDirectory:&directory] || !directory) folder = nil;
     }
     if (!folder && preferences.file.save_last_directory && preferences.file.last_directory[0]) folder = string(preferences.file.last_directory);
-    if (folder) [picker setDirectoryURL:[NSURL fileURLWithPath:folder isDirectory:YES]];
+    if (folder) [picker setDirectoryURL:[NSURL fileURLWithPath:[folder stringByStandardizingPath] isDirectory:YES]];
     if ([picker runModal] == NSModalResponseOK) open_path([[picker URL] path]);
 }
 static void do_file_information(void)
@@ -554,9 +565,13 @@ static xxwidgets_status browse_database(xxwidgets_widget *dialog, const char *in
     (void)dialog; (void)user;
     *path = NULL; *accepted = 0;
     [picker setCanChooseDirectories:YES]; [picker setCanChooseFiles:NO];
+    /* The default database lies inside die.app (Contents/Resources/db): the
+     * picker must open there and browse into packages; a folder can be made. */
+    [picker setTreatsFilePackagesAsDirectories:YES]; [picker setCanCreateDirectories:YES];
     [picker setTitle:string(gui_options_browse_title(page))];
     [picker setMessage:string(gui_options_browse_title(page))];
-    if (start) [picker setDirectoryURL:[NSURL fileURLWithPath:string(start) isDirectory:YES]];
+    /* Without "MacOS/.." (cdie_paths gives <exe>/../Resources/db), which the panel does not follow. */
+    if (start) [picker setDirectoryURL:[NSURL fileURLWithPath:[string(start) stringByStandardizingPath] isDirectory:YES]];
     free(start);
     if ([picker runModal] != NSModalResponseOK) return XXWIDGETS_OK;
     const char *chosen = [[[picker URL] path] UTF8String];
@@ -788,16 +803,24 @@ static void receive_forwarded_file(void)
     if ([item tag] == ACTION_RECENT) return history_enabled() ? YES : NO;
     return YES;
 }
-/* Quit, Dock > Quit and logout. As on Windows, nothing quits while a dialog,
- * a picker or a scan holds the main window (the test validateMenuItem: uses):
- * the Signatures editor would lose an unsaved edit without its question.
- * Otherwise AppKit goes on to applicationWillTerminate: and exit(), so a
- * logout is not held up. */
+/* Quit, Dock > Quit and logout. As on Windows, Quit does nothing while a
+ * dialog, a picker or a scan holds the main window (the test
+ * validateMenuItem: uses): the Signatures editor would lose an unsaved edit
+ * without its question. A log out, restart or shut down is never refused,
+ * as on Windows, where a dialog does not block it. Otherwise AppKit goes on
+ * to applicationWillTerminate: and exit(). */
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender
 {
     NSWindow *window = g_window ? xxwidgets_widget_native_handle(g_window) : nil;
+    /* The quit event's reason ('why?'): 'logo', 'rlgo', 'rrst', 'rest',
+     * 'rsdn' or 'shut' end the session (kAEQuitReason and kAELogOut ...). */
+    NSAppleEventDescriptor *quit = [[NSAppleEventManager sharedAppleEventManager] currentAppleEvent];
+    NSAppleEventDescriptor *why = quit ? [quit attributeDescriptorForKeyword:0x7768793Fu] : nil;
+    OSType reason = why ? [why typeCodeValue] : 0;
+    BOOL session_ends = reason == 0x6C6F676Fu || reason == 0x726C676Fu || reason == 0x72727374u ||
+                        reason == 0x72657374u || reason == 0x7273646Eu || reason == 0x73687574u;
     (void)sender;
-    if ([window ignoresMouseEvents] || [NSApp modalWindow]) { NSBeep(); return NSTerminateCancel; }
+    if (!session_ends && ([window ignoresMouseEvents] || [NSApp modalWindow])) { NSBeep(); return NSTerminateCancel; }
     return NSTerminateNow;
 }
 - (void)applicationWillTerminate:(NSNotification *)notification
@@ -806,11 +829,21 @@ static void receive_forwarded_file(void)
 { (void)sender; open_path(filename); return YES; }
 @end
 
+/* "About die": the one name the backend's Hide and Quit items, the menu bar
+ * and the Dock show (the bundle's name, else the process name). */
+static NSString *about_title(void)
+{
+    id name = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleName"];
+    char title[256];
+    if (![name isKindOfClass:[NSString class]] || ![(NSString *)name length]) name = [[NSProcessInfo processInfo] processName];
+    cdie_translation_snprintf(title, sizeof(title), CDIE_N_("About %s"), [(NSString *)name UTF8String] ?: "die");
+    return string(title);
+}
 static void install_menu(CDIEApplication *delegate)
 {
     NSMenu *menu = [NSApp mainMenu];
     NSMenu *application = [[menu itemAtIndex:0] submenu];
-    NSMenuItem *about = [[[NSMenuItem alloc] initWithTitle:cdie_ns_tr(@"About cdie") action:@selector(action:) keyEquivalent:@""] autorelease];
+    NSMenuItem *about = [[[NSMenuItem alloc] initWithTitle:about_title() action:@selector(action:) keyEquivalent:@""] autorelease];
     [about setTarget:delegate]; [about setTag:ACTION_ABOUT]; [application insertItem:about atIndex:0];
     NSMenuItem *settings = [[[NSMenuItem alloc] initWithTitle:cdie_ns_tr(@"Settings…") action:@selector(action:) keyEquivalent:@","] autorelease];
     [settings setTarget:delegate]; [settings setTag:ACTION_OPTIONS]; [application insertItem:settings atIndex:1];
@@ -821,6 +854,8 @@ static void install_menu(CDIEApplication *delegate)
         NSMenuItem *update = [[[NSMenuItem alloc] initWithTitle:cdie_ns_tr(@"Update database") action:@selector(action:) keyEquivalent:@"u"] autorelease];
         [update setTarget:delegate]; [update setTag:ACTION_UPDATE]; [application insertItem:update atIndex:3];
     }
+    /* Set apart from the backend's Hide, Hide Others, Show All and Quit below. */
+    [application insertItem:[NSMenuItem separatorItem] atIndex:gui_update_supported() ? 4 : 3];
     NSMenuItem *file = [[[NSMenuItem alloc] initWithTitle:cdie_ns_tr(@"File") action:NULL keyEquivalent:@""] autorelease];
     NSMenu *submenu = [[[NSMenu alloc] initWithTitle:cdie_ns_tr(@"File")] autorelease];
     NSArray *titles = @[cdie_ns_tr(@"Open…"), cdie_ns_tr(@"Scan"), cdie_ns_tr(@"Report"), cdie_ns_tr(@"File Information"), cdie_ns_tr(@"Entropy"), cdie_ns_tr(@"Hash"), cdie_ns_tr(@"Strings"), cdie_ns_tr(@"Hex View"), cdie_ns_tr(@"Disasm"), cdie_ns_tr(@"Memory Map"), cdie_ns_tr(@"Imports"), cdie_ns_tr(@"Exports"), cdie_ns_tr(@"Resources"), cdie_ns_tr(@"Symbols"), cdie_ns_tr(@"Extractor")];
@@ -841,7 +876,7 @@ static void install_menu(CDIEApplication *delegate)
      * the Mac help key) and the window's F1 match F1 on Windows and Linux. */
     NSMenuItem *help = [[[NSMenuItem alloc] initWithTitle:cdie_ns_tr(@"Help") action:NULL keyEquivalent:@""] autorelease];
     NSMenu *help_menu = [[[NSMenu alloc] initWithTitle:cdie_ns_tr(@"Help")] autorelease];
-    NSMenuItem *help_about = [help_menu addItemWithTitle:cdie_ns_tr(@"About cdie") action:@selector(action:) keyEquivalent:@"?"];
+    NSMenuItem *help_about = [help_menu addItemWithTitle:about_title() action:@selector(action:) keyEquivalent:@"?"];
     [help_about setTarget:delegate]; [help_about setTag:ACTION_ABOUT];
     [help setSubmenu:help_menu]; [menu addItem:help]; [NSApp setHelpMenu:help_menu];
 }
@@ -877,7 +912,10 @@ static int create_controls(void)
     NSTextField *field = xxwidgets_widget_native_handle(g_path);
     [field setPlaceholderString:cdie_ns_tr(@"Choose or drop a file to scan")];
     [field setAccessibilityLabel:cdie_ns_tr(@"File to scan")];
-    xxwidgets_widget_set_enabled(control(XXWIDGETS_SCAN_PANEL_FILE_TYPE), 0);
+    /* The file types stay enabled (Automatic) until a path is edited, as on
+     * Windows and Linux. ">" names the report, as Windows' tooltip does
+     * (File > Report shows its Cmd key). */
+    (void)xxwidgets_widget_set_tooltip(control(XXWIDGETS_SCAN_PANEL_REPORT), CDIE_TR("Scan report"));
     xxwidgets_widget_set_enabled(g_update, gui_update_supported());
     NSButton *scan = xxwidgets_widget_native_handle(control(XXWIDGETS_SCAN_PANEL_SCAN));
     [scan setKeyEquivalent:@"\r"];
@@ -1237,8 +1275,8 @@ static int smoke_main_usable(void)
         [options isEnabled] && xxwidgets_app_poll(g_app, 0) == XXWIDGETS_OK;
 }
 /* The main window fits the visible part of its screen and, laid out for the
- * size it got, holds every control inside: nothing is cut off. A screen too
- * narrow for the window's minimum size is only reported. */
+ * size it got, holds every control inside: nothing is cut off, also on a
+ * screen too narrow for the window's minimum size (then also reported). */
 static int smoke_main_fits(void)
 {
     NSWindow *window = xxwidgets_widget_native_handle(g_window);
@@ -1254,10 +1292,8 @@ static int smoke_main_fits(void)
     /* The cell width, from a control's alignment rect (its cells, without AppKit's bezel). */
     if (!screen || !browse || xxwidgets_widget_get_rect(g_browse, &cells) != XXWIDGETS_OK || cells.width <= 0) return 0;
     cell = NSWidth([browse alignmentRectForFrame:[browse frame]]) / cells.width;
-    if (MAIN_WINDOW_MIN_COLUMNS * cell > NSWidth([window contentRectForFrameRect:visible]) + 0.5) {
-        fprintf(stderr, "Cocoa GUI smoke: the screen (%.0f pt) is narrower than the main window's minimum; its fit is not checked\n", NSWidth(visible));
-        return 1;
-    }
+    if (MAIN_WINDOW_MIN_COLUMNS * cell > NSWidth([window contentRectForFrameRect:visible]) + 0.5)
+        fprintf(stderr, "Cocoa GUI smoke: the screen (%.0f pt) is narrower than the main window's minimum\n", NSWidth(visible));
     if (NSWidth(frame) > NSWidth(visible) + 0.5 || NSHeight(frame) > NSHeight(visible) + 0.5) {
         fprintf(stderr, "Cocoa GUI smoke: the main window (%.0fx%.0f) is larger than the screen's visible area (%.0fx%.0f)\n",
             NSWidth(frame), NSHeight(frame), NSWidth(visible), NSHeight(visible));

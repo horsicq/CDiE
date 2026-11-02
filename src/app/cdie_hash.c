@@ -5,6 +5,7 @@
 #include <xxfclib/algo/md5/xx_md5.h>
 #include <xxfclib/algo/sha/xx_sha.h>
 #include <xxfclib/buf/xx_buf.h>
+#include <xxfclib/global/xx_global.h>
 
 static const char *const algorithms[CDIE_HASH_COUNT] = {"CRC32", "MD5", "SHA1", "SHA256"};
 int cdie_hash_algorithm_index(const char *algorithm)
@@ -27,6 +28,19 @@ static int cancelled(xx_pd_struct *progress)
     xx_pd_stop(progress);
     return 1;
 }
+/* Each read is the general buffer size (diec --buffersize, the GUI's
+ * Feature/ReadBufferSize), no larger than the input. The default size is used
+ * when that much memory is not available, so the setting never changes a hash. */
+static unsigned char *read_buffer(uint64_t size, size_t *capacity)
+{
+    size_t wanted = xx_get_buffer_size();
+    unsigned char *buffer;
+    if ((uint64_t)wanted > size) wanted = size ? (size_t)size : 1;
+    buffer = xx_rt_malloc(wanted);
+    if (!buffer && wanted > XX_DEFAULT_BUFFER_SIZE) buffer = xx_rt_malloc(wanted = XX_DEFAULT_BUFFER_SIZE);
+    *capacity = buffer ? wanted : 0;
+    return buffer;
+}
 int cdie_hash_read_device(xx_io_device *device, xx_pd_struct *progress, cdie_hash_data **out, char **error)
 {
     xx_md5_context md5;
@@ -38,19 +52,20 @@ int cdie_hash_read_device(xx_io_device *device, xx_pd_struct *progress, cdie_has
     const char *message = "Cannot read hash data";
     uint64_t done = 0;
     int64_t size;
+    size_t capacity = 0;
     int ok = 0, level = -1, i;
     if (!out || !error) return 0;
     *out = NULL; *error = NULL;
     if (cancelled(progress)) goto finish;
     if (!device || (size = xx_io_total_size(device)) < 0) { message = "Cannot determine file size"; goto finish; }
-    data = xx_rt_calloc(1, sizeof(*data)); buffer = xx_rt_malloc(65536);
+    data = xx_rt_calloc(1, sizeof(*data)); buffer = read_buffer((uint64_t)size, &capacity);
     if (!data || !buffer) { message = "Cannot allocate hash data"; goto finish; }
     if (!xx_md5_init(&md5) || !xx_sha1_init(&sha1) || !xx_sha256_init(&sha256) ||
         !xx_crc_context_init_type(&crc, XX_CRC_TYPE_CRC32)) { message = "Cannot initialize hashes"; goto finish; }
     data->size = (uint64_t)size;
     level = xx_pd_enter_level(progress, data->size, "Calculating hashes");
     while (done < data->size) {
-        size_t chunk = data->size - done < 65536 ? (size_t)(data->size - done) : 65536;
+        size_t chunk = data->size - done < capacity ? (size_t)(data->size - done) : capacity;
         if (cancelled(progress)) goto finish;
         if (!xx_io_read_at(device, (int64_t)done, buffer, chunk)) goto finish;
         xx_crc_context_update(&crc, buffer, chunk);

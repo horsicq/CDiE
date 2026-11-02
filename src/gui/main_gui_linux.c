@@ -42,6 +42,7 @@
 #include "gui_extractor.h"
 #include "gui_update.h"
 #include "gui_error.h"
+#include "gui_tools.h"
 #include <gtk/gtk.h>
 
 enum { ACTION_NONE, ACTION_SCAN, ACTION_REPORT, ACTION_QUIT, ACTION_OPTIONS, ACTION_BROWSE,
@@ -193,8 +194,11 @@ static int scan(tui_app *ui, int smoke)
         set_status(ui, CDIE_TR("Cannot clear the previous scan results.")); goto cleanup;
     }
     if (!refresh_types(ui, path)) {
+        /* One sentence on every platform, with the file system's reason (gui_error.h). */
+        char reason[512];
         (void)xxwidgets_widget_set_enabled(control(ui, XXWIDGETS_SCAN_PANEL_FILE_TYPE), 0);
-        set_status(ui, CDIE_TR("Scan failed: cannot open this file. Check its path and permissions.")); goto cleanup;
+        gui_error_open_status(reason, sizeof(reason), path);
+        set_status(ui, reason); goto cleanup;
     }
     if (xxwidgets_combobox_get_current(control(ui, XXWIDGETS_SCAN_PANEL_FILE_TYPE), &selected) != XXWIDGETS_OK ||
         selected.type != XX_VAR_TYPE_UINT64 || selected.val.u64 > INT_MAX ||
@@ -230,9 +234,8 @@ cleanup:
 }
 
 
+/* The button labels, in gui_tools order (gui_tool_run opens them). */
 static const char *tool_names[] = {CDIE_N_("File Information"), CDIE_N_("Entropy"), CDIE_N_("Hash"), CDIE_N_("Strings"), CDIE_N_("Hex View"), CDIE_N_("Disasm"), CDIE_N_("Memory Map"), CDIE_N_("Imports"), CDIE_N_("Exports"), CDIE_N_("Resources"), CDIE_N_("Symbols"), CDIE_N_("Extractor")};
-typedef xxwidgets_status (*tool_fn)(xxwidgets_widget *, const char *);
-static const tool_fn tool_functions[] = {gui_file_information_show, gui_entropy_show, gui_hash_show, gui_strings_show, gui_hex_view_show, gui_disasm_show, gui_memory_map_show, gui_imports_show, gui_exports_show, gui_resources_show, gui_symbols_show, gui_extractor_show};
 
 static void layout(tui_app *ui)
 {
@@ -376,14 +379,19 @@ static int chooser_start_last(GtkWidget *dialog)
 static xxwidgets_status browse_database(xxwidgets_widget *owner, const char *initial, char **path, int *accepted, void *user)
 {
     xxwidgets_status status = XXWIDGETS_OK;
+    /* Scan and Info share this picker: the asking page's title and start
+     * folder, as on Windows and macOS (gui_options.h). */
+    gui_options_page_id page = gui_options_browse_page();
+    char *start = gui_options_browse_start(page, initial);
     (void)user;
     *path = NULL; *accepted = 0;
-    GtkWidget *dialog = gtk_file_chooser_dialog_new(CDIE_TR("Choose signature database folder"),
+    GtkWidget *dialog = gtk_file_chooser_dialog_new(gui_options_browse_title(page),
         GTK_WINDOW(xxwidgets_widget_native_handle(owner)), GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER,
         CDIE_TR("Cancel"), GTK_RESPONSE_CANCEL, CDIE_TR("Select"), GTK_RESPONSE_ACCEPT, NULL);
-    /* The folder in the box comes first; the last directory only for an
-     * empty (default) box or a folder that no longer exists. */
-    if (!chooser_start(dialog, initial)) (void)chooser_start_last(dialog);
+    /* The nearest existing folder of the box (the main database for an empty
+     * Scan box); the last directory only when there is none. */
+    if (!chooser_start(dialog, start)) (void)chooser_start_last(dialog);
+    free(start);
     if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
         gchar *filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
         gchar *utf8 = filename ? g_filename_to_utf8(filename, -1, NULL, NULL, NULL) : NULL;
@@ -582,12 +590,14 @@ static void run_action(tui_app *ui, int action)
         else if ((status = xxwidgets_scan_panel_show_report(ui->panel)) != XXWIDGETS_OK) report_window_error(ui, CDIE_TR("Scan report"), status);
     }
     else if (action == ACTION_OPTIONS) options_dialog(ui, ui->options_page);
-    else if (action >= ACTION_TOOL_BASE && action < ACTION_TOOL_BASE + 12) {
+    else if (action >= ACTION_TOOL_BASE && action < ACTION_TOOL_BASE + GUI_TOOL_COUNT) {
+        /* The wording every platform uses (gui_tools.c): the tool's hint for
+         * no file, "<Tool>: <reason>" for a failure. */
         char *selected = read_path(ui);
-        if (!selected || !*selected) set_status(ui, CDIE_TR("Choose a file first."));
-        else {
-            status = tool_functions[action - ACTION_TOOL_BASE](ui->window, selected);
-            if (status != XXWIDGETS_OK) report_window_error(ui, CDIE_TR(tool_names[action - ACTION_TOOL_BASE]), status);
+        const char *message = gui_tool_run(ui->window, (gui_tool_id)(action - ACTION_TOOL_BASE), selected);
+        if (message) {
+            set_status(ui, message);
+            if (!selected || !*selected) (void)xxwidgets_widget_focus(ui->path);
         }
         free(selected);
     }
@@ -635,7 +645,8 @@ int main(int argc, char **argv)
                 /* As on Windows, a box too, in English: no translation is loaded. */
                 GtkWidget *box = gtk_message_dialog_new(NULL, GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK, "%s",
                     "Cannot load PO translation. Check --translation FILE and CDIE_TRANSLATION.");
-                gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(box), "Line %lu: %s", (unsigned long)line, xxwidgets_status_string(status));
+                if (line) gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(box), "Line %lu: %s", (unsigned long)line, xxwidgets_status_string(status));
+                else gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(box), "%s", xxwidgets_status_string(status));
                 gtk_window_set_title(GTK_WINDOW(box), "cdie");
                 (void)gtk_dialog_run(GTK_DIALOG(box));
                 gtk_widget_destroy(box);
@@ -646,8 +657,15 @@ int main(int argc, char **argv)
     /* The window icon from the icon theme, under the .desktop file's Icon=
      * name (installed by the FHS layout, the deb and the AppImage). */
     gtk_window_set_default_icon_name("io.github.horsicq.cdie");
-    if (smoke) (void)xxwidgets_app_set_create_hidden(ui.app, 1);
-    if (!create_controls(&ui, path)) { fprintf(stderr, "Cannot create GUI controls.\n"); result = 1; goto cleanup; }
+    /* Created hidden and shown after the instance check, as on Windows and
+     * macOS: a copy that only forwards its file never maps a window. Smoke
+     * runs keep every window hidden. */
+    (void)xxwidgets_app_set_create_hidden(ui.app, 1);
+    /* GTK text is UTF-8: a name that is not stays out of the path box (the
+     * window says why), and a later launch only raises the running copy. */
+    const char *shown = path && g_utf8_validate(path, -1, NULL) ? path : NULL;
+    if (!create_controls(&ui, shown)) { fprintf(stderr, "Cannot create GUI controls.\n"); result = 1; goto cleanup; }
+    if (!smoke) (void)xxwidgets_app_set_create_hidden(ui.app, 0);
     ui.options_page = GUI_OPTIONS_SCAN;
     {
         /* Saved Options apply before the first scan; smoke tests keep them in memory. */
@@ -662,14 +680,16 @@ int main(int argc, char **argv)
         else if (!databases) set_status(&ui, CDIE_TR("The saved signature folders cannot be loaded; the default ones are active."));
         else if (!stored) set_status(&ui, CDIE_TR("Saved options cannot be read; the defaults are used."));
     }
-    if (update_expected) { result = smoke_update(&ui, update_expected); goto cleanup; }
+    if (update_expected) { if (!smoke) (void)xxwidgets_widget_set_visible(ui.window, 1); result = smoke_update(&ui, update_expected); goto cleanup; }
     if (smoke) { result = scan(&ui, 1) ? 0 : 1; if (!result) printf("GTK GUI smoke: %zu detections\n", xxwidgets_scan_panel_count(ui.panel)); goto cleanup; }
     {
         int instance = gui_frontend_instance_start(ui.window, path);
         if (instance <= 0) { if (instance < 0) { fprintf(stderr,"Cannot acquire application instance lock.\n"); result=1; } goto cleanup; }
     }
-    if (path) gui_frontend_remember_file(path);
-    ui.running = 1; ui.pending = path && gui_frontend_scan_after_open() ? ACTION_SCAN : ACTION_NONE;
+    if (xxwidgets_widget_set_visible(ui.window, 1) != XXWIDGETS_OK) { result = 1; goto cleanup; }
+    if (shown) gui_frontend_remember_file(shown);
+    else if (path) set_status(&ui, CDIE_TR("Cannot open this file: its name is not valid text (UTF-8)."));
+    ui.running = 1; ui.pending = shown && gui_frontend_scan_after_open() ? ACTION_SCAN : ACTION_NONE;
     while (ui.running) {
         status = xxwidgets_app_poll(ui.app, 30);
         if (status != XXWIDGETS_OK) { result = 1; break; }
@@ -679,7 +699,8 @@ int main(int argc, char **argv)
              * Windows: the path, history, a scan if wanted, and to the front. */
             char *forwarded = NULL;
             if (gui_frontend_instance_poll(ui.window, &forwarded) && forwarded) {
-                if (xxwidgets_widget_set_text(ui.path, forwarded) == XXWIDGETS_OK) {
+                /* "": a launch without a file, which only raises the window. */
+                if (forwarded[0] && xxwidgets_widget_set_text(ui.path, forwarded) == XXWIDGETS_OK) {
                     gui_frontend_remember_file(forwarded);
                     if (gui_frontend_scan_after_open()) ui.pending = ACTION_SCAN;
                 }

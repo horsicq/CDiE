@@ -59,10 +59,15 @@ that is itself an archive is expanded too, down to 20 archive levels. Without
 (executables, DEX, PDF, TAR and archives) are scanned, at most 21 per archive.
 Every member reached is CRC-checked, stored members included: a damaged member
 is skipped, the result ends with `Last error: Invalid CRC`, and the exit code
-stays 0. GZIP, BZIP2, LHA and Mach-O Fat files are scanned as files and not
-expanded, as in Detect It Easy; 7z, RAR, CAB and ISO 9660 members are not
-expanded yet. As a safety limit that Detect It Easy does not have, one input
-scans at most 10,000 archive members (100,000 with `-g`). Directory traversal
+stays 0. Members have no size limit: a compressed member smaller than the file
+buffer size (64 KiB, `--filebuffersize`) is decoded in memory, a larger one through a temporary
+file, so scanning large archive members needs free space in the temporary
+folder; a member that cannot get its temporary file, does not fit there, or
+(from 16 MiB on) would leave less than 1 GiB free there, is skipped. GZIP, BZIP2, LHA and Mach-O Fat files are
+scanned as files and not expanded, as in Detect It Easy; 7z, RAR, CAB and
+ISO 9660 members are not expanded yet. As a safety limit that Detect It Easy
+does not have, one input scans at most 10,000 archive members (100,000 with
+`-g`). Directory traversal
 remains controlled by `-r` / `--recursivescan`, which, as in Detect It Easy,
 also turns on resource and overlay scanning. See
 [docs/LIMITATIONS.md](docs/LIMITATIONS.md).
@@ -262,7 +267,10 @@ Scans, table saves, and dumps run on cancellable workers. **Dump selected**
 and **Dump all** copy the source bytes identified by Offset and Size, including
 compressed bytes for compressed members. Output filenames are flattened and
 made unique, and each file is published atomically after a successful write.
-The core API also supports decoded member extraction with a size limit.
+The core API also supports decoded member extraction, with no size limit
+unless one is set: as in archive scanning, a member is decoded in memory below
+the file buffer size and through a temporary file above it, and a member that
+cannot get its temporary file is left out of the list.
 Raw carving validates candidates with native readers. It retains the complete
 signed PE extent and rejects malformed streams that Qt may list as Binary.
 
@@ -480,8 +488,9 @@ parser. **Scan options** edits the flags and the custom database; **Fonts**
 chooses fonts for controls, tables, result trees and text. OK applies these
 choices for the current run; Cancel preserves the previous values.
 
-**Optimization** sets the general memory buffer and file I/O buffer sizes
-through value comboboxes, including 1 KiB, 2 KiB, 4 KiB and 8 KiB. It also
+**Optimization** sets the read buffer size (how much the hash, entropy,
+strings, checksum and search loops read at a time) and the file I/O buffer
+size through value comboboxes, including 1 KiB, 2 KiB, 4 KiB and 8 KiB. It also
 controls SSE2, SSE4.2, AVX2, AES-NI, SHA-NI, VPCLMULQDQ, Arm NEON, Arm CRC32,
 Arm AES/SHA crypto and Arm Dot Product acceleration preferences.
 SHA-NI applies to SHA-1 and SHA-256; VPCLMULQDQ applies to CRC64 when AVX2
@@ -571,6 +580,35 @@ accepted as an alias (shown in parentheses) except where it would collide.
 | `-s`, `--showdatabase` | print database paths and signature counts |
 | `--checkupdate` | check for a database update by running `die-update --check` (long form only: `-u` is `--heuristicscan`) |
 | `--update` | download and install a database update by running `die-update` |
+| `--buffersize <size>` | read buffer size (default 64 KiB): how much `--hash`, `--entropy`, `--strings` and the scan's hash, checksum and search loops read at a time, as the GUI's *Buffer size* (`Feature/ReadBufferSize`) |
+| `--filebuffersize <size>` | file buffer size (default 64 KiB): an archive member smaller than this is decoded in memory, a larger one through a temporary file; it also sizes the decoders' I/O buffers, and an input smaller than this is read into memory whole |
+
+`--buffersize` and `--filebuffersize` exist in this port only (Detect It
+Easy's `diec` has neither; its GUI and cdie's keep these sizes in their
+settings as `Feature/ReadBufferSize` and `Feature/FileBufferSize`, which
+`diec` does not read). `<size>` is the next argument: a byte count from 1 KiB to 1 GiB, the
+range of the GUI's *Optimization* choices (1 KiB to 64 MiB in a 32-bit
+`diec`), optionally with a `K`, `M` or `G`
+suffix (KiB, MiB, GiB, either case), such as `4096`, `64K`, `16M` or `1G`.
+A missing, malformed or out-of-range value (`0`, `1023`, `2G`, `64KB`,
+`--filebuffersize=16M`) is refused with exit code `4` and nothing is scanned.
+When an option is repeated, the last value wins. Both are set before any
+other work. `--buffersize` is how much `--hash`, `--entropy` and `--strings`
+(16 MiB at most) read at a time, and in a scan the MD5, SHA-1, SHA-256, CRC
+and BLAKE2sp loops and the byte searches that read into a buffer of their
+own (in Detect It Easy, `Feature/ReadBufferSize` is the read chunk of its
+hash, entropy, strings and search loops). Each such buffer is no larger than
+what is left to read, and when that much memory cannot be allocated the
+64 KiB default is used, so the value changes how often the input is read,
+never the output. The signature engine, the CRC32, Adler-32 and entropy
+script functions and the decoders size their reads by the file buffer
+instead, which `--hash`, `--entropy` and `--strings` do not use. `die-update`,
+which `--checkupdate` and `--update` run, receives neither. A larger file
+buffer keeps larger members out of the temporary folder at the cost of
+memory: every open file and every decoder allocates a whole file buffer,
+however small its input, so `1G` needs about 1 GiB per open file. If that
+memory cannot be allocated, the scan reports no error, but its result can
+be incomplete or wrong.
 
 `-E` and `--extradatabase` were removed: cdie uses only the main (`-D`) and
 custom (`-C`) databases. Either option is refused with exit code `4`; its path
@@ -729,7 +767,13 @@ it only to `System` or English (`""`), never to a `.po` path. Fonts always
 carry a family Qt can resolve, and cdie's colors are opaque (`#aarrggbb`
 values are read blended over white); Detect It Easy's one color per scan
 category is cdie's light-theme color, the dark theme's stay in
-`Scan/Color/Dark`. On the first start, settings an older cdie saved in
+`Scan/Color/Dark`. `Feature/ReadBufferSize` and `Feature/FileBufferSize`
+take effect within the range the *Optimization* page offers, 1 KiB to 1 GiB
+(64 MiB in a 32-bit build): a larger value up to 2147483647 counts as that
+maximum, a smaller one as 1 KiB, and `0` or a value over 2147483647 as the 64 KiB default
+(Detect It Easy reads such a value, its own *2 GiB* and *4 GiB* choices
+included, as its default too), while the stored value stays as it is until
+the size is changed in Options. On the first start, settings an older cdie saved in
 `cdie.ini` or `NTInfo/cdie` fill whatever the store does not hold yet, once:
 both stores get `cdie/Migrated`, so resetting Detect It Easy's settings does
 not bring them back, and the old settings are otherwise left as they were.

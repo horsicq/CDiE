@@ -37,6 +37,19 @@
 #include <xxfclib/formats/executable/elf/xx_elf.h>
 #include <xxfclib/formats/executable/macho/xx_macho.h>
 #include <xxfclib/formats/executable/pe/xx_pe.h>
+#include <xxfclib/formats/executable/pe/xx_pe_inspect.h>
+#include <xxfclib/formats/executable/msdos/xx_msdos.h>
+#include <xxfclib/formats/executable/ne/xx_ne.h>
+#include <xxfclib/formats/executable/le/xx_le.h>
+#include <xxfclib/formats/executable/lx/xx_lx.h>
+#include <xxfclib/formats/executable/dex/xx_dex.h>
+#include <xxfclib/formats/executable/amigahunk/xx_amigahunk.h>
+#include <xxfclib/formats/archive/zip/xx_zip.h>
+#include <xxfclib/formats/executable/jar/xx_jar.h>
+#include <xxfclib/formats/installer/apk/xx_apk.h>
+#include <xxfclib/formats/installer/ipa/xx_ipa.h>
+#include <xxfclib/formats/archive/rar/xx_rar.h>
+#include <xxfclib/data/xx_data.h>
 /* xx_format.h aliases fileType for format code; the scan result's member is fileType. */
 #undef fileType
 #include <xxfclib/fs/xx_fs.h>
@@ -49,6 +62,8 @@
 
 #include "../app/cdie_app.h"
 #include "../app/cdie_paths.h"
+
+#include <time.h>
 
 
 static xx_scan_options g_options;
@@ -1047,6 +1062,418 @@ int gui_backend_signature_entry(int index, const char **display, const char **pa
         *display = folder;
     }
     return 1;
+}
+
+/* ------------------------------------------------------------ file facts */
+
+/* What the Advanced view shows, as Qt DIE's FormatsWidget::reload() fills it:
+ * the page and its values come from the selected file type's own reader. */
+
+typedef struct facts_types {
+    int wanted, found, first;
+} facts_types;
+
+static void facts_type(XFileType type, void *user)
+{
+    facts_types *types = (facts_types *)user;
+    if (!gui_concrete_file_type(type)) return;
+    if (!types->first) types->first = (int)type;
+    if ((int)type == types->wanted) types->found = 1;
+}
+
+static int facts_page(int type)
+{
+    switch (type) {
+    case XFT_ZIP: case XFT_JAR: case XFT_APK: case XFT_IPA: case XFT_NPM: case XFT_RAR: case XFT_ISO9660:
+        return GUI_FACTS_PAGE_ARCHIVE;
+    case XFT_DEX: return GUI_FACTS_PAGE_DEX;
+    case XFT_MSDOS: return GUI_FACTS_PAGE_MSDOS;
+    case XFT_NE: return GUI_FACTS_PAGE_NE;
+    case XFT_LE: case XFT_LX: return GUI_FACTS_PAGE_LE;
+    case XFT_PE32: case XFT_PE64: return GUI_FACTS_PAGE_PE;
+    case XFT_ELF32: case XFT_ELF64: return GUI_FACTS_PAGE_ELF;
+    case XFT_MACHO32: case XFT_MACHO64: return GUI_FACTS_PAGE_MACH;
+    case XFT_COM: return GUI_FACTS_PAGE_COM;
+    default: return GUI_FACTS_PAGE_BINARY;
+    }
+}
+
+/* The reader of the other types that have one in the engine's link closure
+ * (xx_format_create_reader is outside it); Binary and the rest have none.
+ * Every reader struct starts with its Abstractformat. */
+static void facts_free_ne(void *reader) { xx_ne_free((xx_ne *)reader); }
+static void facts_free_le(void *reader) { xx_le_free((xx_le *)reader); }
+static void facts_free_lx(void *reader) { xx_lx_free((xx_lx *)reader); }
+static void facts_free_dex(void *reader) { xx_dex_free((xx_dex *)reader); }
+static void facts_free_amigahunk(void *reader) { xx_amigahunk_free((xx_amigahunk *)reader); }
+static void facts_free_zip(void *reader) { xx_zip_free((xx_zip *)reader); }
+static void facts_free_jar(void *reader) { xx_jar_free((xx_jar *)reader); }
+static void facts_free_apk(void *reader) { xx_apk_free((xx_apk *)reader); }
+static void facts_free_ipa(void *reader) { xx_ipa_free((xx_ipa *)reader); }
+static void facts_free_rar(void *reader) { xx_rar_free((xx_rar *)reader); }
+static Abstractformat *facts_reader(int type, xx_io_device *device, void (**release)(void *))
+{
+    void *reader = NULL;
+    switch (type) {
+    case XFT_NE: reader = xx_ne_create(device, 0); *release = facts_free_ne; break;
+    case XFT_LE: reader = xx_le_create(device, 0); *release = facts_free_le; break;
+    case XFT_LX: reader = xx_lx_create(device, 0); *release = facts_free_lx; break;
+    case XFT_DEX: reader = xx_dex_create(device, 0); *release = facts_free_dex; break;
+    case XFT_AMIGAHUNK: reader = xx_amigahunk_create(device, 0); *release = facts_free_amigahunk; break;
+    case XFT_ZIP: reader = xx_zip_create(device, 0); *release = facts_free_zip; break;
+    case XFT_JAR: reader = xx_jar_create(device, 0); *release = facts_free_jar; break;
+    case XFT_APK: reader = xx_apk_create(device, 0); *release = facts_free_apk; break;
+    case XFT_IPA: reader = xx_ipa_create(device, 0); *release = facts_free_ipa; break;
+    case XFT_RAR: reader = xx_rar_create(device, 0); *release = facts_free_rar; break;
+    default: break;
+    }
+    return (Abstractformat *)reader;
+}
+
+/* XBinary::getWidthModeFromSize: the address width of a file without a mode. */
+static unsigned int facts_size_bits(uint64_t size)
+{
+    return size >= 0xFFFFFFFFu ? 64 : size >= 0xFFFFu ? 32 : size >= 0xFFu ? 16 : 8;
+}
+
+/* The engine row, filled the way describe_input fills gui_backend_scan_info. */
+static void facts_engine_row(gui_backend_facts *facts, xx_endian_t endian, xx_arch_t arch, xx_format_type_t type)
+{
+    int bits = arch_bits(arch);
+    copy_field(facts->endianness, sizeof(facts->endianness), endian == XX_ENDIAN_LITTLE ? "LE" : endian == XX_ENDIAN_BIG ? "BE" : "");
+    if (bits) xx_rt_snprintf(facts->mode, sizeof(facts->mode), "%d-bit", bits);
+    copy_field(facts->architecture, sizeof(facts->architecture), arch_name(arch));
+    copy_field(facts->type, sizeof(facts->type), type_name(type));
+}
+
+static void facts_format_row(gui_backend_facts *facts, Abstractformat *format)
+{
+    facts_engine_row(facts, format->get_endian ? format->get_endian(format) : format->endian,
+        format->get_arch ? format->get_arch(format) : format->arch,
+        format->get_type ? format->get_type(format) : format->format_type);
+}
+
+static void facts_entry_offset(gui_backend_facts *facts, const xx_memory_map *map)
+{
+    int64_t offset = map ? xx_memory_map_address_to_offset(map, facts->entry_point) : -1;
+    if (offset >= 0) { facts->entry_point_offset = offset; facts->flags |= GUI_FACTS_ENTRY_OFFSET; }
+}
+
+/* XBinary::valueToTimeString(DT_TYPE_POSIX): a QDateTime in local time. */
+static void facts_time(char *text, size_t capacity, uint32_t stamp)
+{
+    time_t value = (time_t)stamp;
+    struct tm *local = localtime(&value);
+    if (local) xx_rt_snprintf(text, capacity, "%04d-%02d-%02d %02d:%02d:%02d", local->tm_year + 1900, local->tm_mon + 1,
+        local->tm_mday, local->tm_hour, local->tm_min, local->tm_sec);
+}
+
+static char *facts_strdup(const char *text)
+{
+    size_t size = xx_rt_strlen(text) + 1;
+    char *copy = (char *)xx_rt_malloc(size);
+    if (copy) xx_rt_memcpy(copy, text, size);
+    return copy;
+}
+
+/* The first resource of a type decides, as XPE::isResourcePresent(id, -1). */
+static int facts_resource(const xx_pe_inspection *pe, uint32_t type)
+{
+    int i;
+    for (i = 0; i < pe->nResourceCount; ++i)
+        if (pe->pResources[i].nTypeId == type) return pe->pResources[i].nSize != 0;
+    return 0;
+}
+
+static int facts_pe(gui_backend_facts *facts, xx_io_device *device)
+{
+    xx_pe_inspection pe;
+    xx_pe reader;
+    int ok, i;
+    xx_rt_memset(&pe, 0, sizeof(pe));
+    ok = xx_pe_inspect_analyze_from_device(&pe, device, 0, NULL) && pe.bValid;
+    if (ok) {
+        facts->base_bits = facts->entry_bits = pe.bIs64 ? 64 : 32;
+        facts->base_address = pe.map.module_address != XX_INVALID_ADDRESS ? pe.map.module_address : pe.nImageBase;
+        facts->entry_point = pe.nEntryPointAddress != XX_INVALID_ADDRESS ? pe.nEntryPointAddress : facts->base_address + pe.nAddressOfEntryPoint;
+        if (pe.nEntryPointOffset >= 0) { facts->entry_point_offset = pe.nEntryPointOffset; facts->flags |= GUI_FACTS_ENTRY_OFFSET; }
+        facts->sections = pe.nNumberOfSections;
+        facts->time_date_stamp = pe.nTimeDateStamp;
+        facts_time(facts->time_date_stamp_text, sizeof(facts->time_date_stamp_text), pe.nTimeDateStamp);
+        facts->size_of_image = pe.nSizeOfImage;
+        /* XPE::isOptionalHeader_DataDirectoryPresent tests the RVA alone. */
+        if (pe.pDirRVA[XX_PE_INSPECT_DIR_EXPORT]) facts->flags |= GUI_FACTS_EXPORTS;
+        if (pe.pDirRVA[XX_PE_INSPECT_DIR_IMPORT]) facts->flags |= GUI_FACTS_IMPORTS;
+        if (pe.pDirRVA[XX_PE_INSPECT_DIR_RESOURCE]) facts->flags |= GUI_FACTS_RESOURCES;
+        if (pe.pDirRVA[XX_PE_INSPECT_DIR_TLS]) facts->flags |= GUI_FACTS_TLS;
+        if (pe.pDirRVA[14]) facts->flags |= GUI_FACTS_DOTNET; /* IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR */
+        if (pe.nNumberOfSections) facts->flags |= GUI_FACTS_SECTIONS;
+        if (pe.nOverlayOffset >= 0 && pe.nOverlaySize > 0) {
+            facts->overlay_offset = pe.nOverlayOffset; facts->overlay_size = pe.nOverlaySize;
+            facts->flags |= GUI_FACTS_OVERLAY;
+        }
+        if (facts_resource(&pe, 24)) { /* RT_MANIFEST */
+            facts->flags |= GUI_FACTS_MANIFEST;
+            facts->manifest = facts_strdup(pe.pManifest ? pe.pManifest : "");
+        }
+        if (facts_resource(&pe, 16)) { /* RT_VERSION */
+            xx_buf_t text;
+            facts->flags |= GUI_FACTS_VERSION;
+            xx_buf_init(&text);
+            for (i = 0; i < pe.nVersionCount; ++i)
+                xx_buf_appendf(&text, "%s: %s\n", pe.pVersionRecords[i].pKey ? pe.pVersionRecords[i].pKey : "",
+                    pe.pVersionRecords[i].pValue ? pe.pVersionRecords[i].pValue : "");
+            if (!text.size) xx_buf_append_str(&text, "");
+            facts->version = xx_buf_detach(&text, NULL);
+        }
+        facts->header_selector = "IMAGE_FILE_HEADER";
+        facts->sections_selector = "IMAGE_SECTION_HEADER";
+        facts->tls_selector = pe.bIs64 ? "IMAGE_TLS_DIRECTORY64" : "IMAGE_TLS_DIRECTORY32";
+        /* The engine row exactly as describe_input reads it. */
+        xx_rt_memset(&reader, 0, sizeof(reader));
+        xx_pe_init(&reader, device, 0);
+        if (reader.format.check_is_valid(&reader.format, NULL) && xx_format_handle_base_info(&reader.format, NULL))
+            facts_format_row(facts, &reader.format);
+        xx_pe_destroy(&reader);
+    }
+    xx_pe_inspect_free(&pe);
+    return ok;
+}
+
+static int facts_elf(gui_backend_facts *facts, xx_io_device *device)
+{
+    xx_elf elf;
+    int ok;
+    xx_rt_memset(&elf, 0, sizeof(elf));
+    xx_elf_init(&elf, device, 0);
+    ok = elf.format.check_is_valid(&elf.format, NULL) && xx_format_handle_base_info(&elf.format, NULL);
+    if (ok) {
+        const xx_memory_map *map = xx_format_get_memory_map(&elf.format, XX_MEMORY_MAP_MODE_UNKNOWN, NULL);
+        int is_64 = xx_elf_is_64(&elf);
+        uint64_t first_load = 0, i;
+        facts_format_row(facts, &elf.format);
+        facts->base_bits = facts->entry_bits = is_64 ? 64 : 32;
+        /* XELF::getMemoryMap loads the image at module address 0 (XBinary's
+         * base) and moves the first PT_LOAD there, so Qt DIE shows base 0 and
+         * the entry relative to that segment. The file offset uses e_entry. */
+        for (i = 0; i < xx_elf_get_number_of_program_headers(&elf); ++i) {
+            const xx_elf_program_header *header = xx_elf_get_program_header(&elf, i);
+            if (header && header->type == 1u) { first_load = header->virtual_address; break; } /* PT_LOAD */
+        }
+        facts->entry_point = xx_elf_get_entry_point(&elf);
+        facts_entry_offset(facts, map);
+        facts->entry_point -= first_load;
+        if (!is_64) facts->entry_point &= 0xFFFFFFFFu;
+        facts->programs = (uint32_t)xx_elf_get_number_of_program_headers(&elf);
+        facts->sections = (uint32_t)xx_elf_get_number_of_section_headers(&elf);
+        if (facts->programs) facts->flags |= GUI_FACTS_PROGRAMS;
+        if (facts->sections) facts->flags |= GUI_FACTS_SECTIONS;
+        facts->header_selector = is_64 ? "elf_header64" : "elf_header32";
+        facts->programs_selector = is_64 ? "program_header64" : "program_header32";
+        facts->sections_selector = is_64 ? "section_header64" : "section_header32";
+    }
+    xx_elf_destroy(&elf);
+    return ok;
+}
+
+/* XMACH::getLibraryRecords: the LC_LOAD_DYLIB commands, which the reader
+ * validated but does not keep. */
+static uint32_t facts_macho_libraries(xx_macho *macho)
+{
+    int big = macho->format.endian == XX_ENDIAN_BIG;
+    int64_t offset = macho->format.base_address + (macho->is_64 ? 32 : 28);
+    int64_t end = offset + (int64_t)macho->commands_size;
+    uint32_t i, count = 0;
+    for (i = 0; i < macho->command_count && end - offset >= 8; ++i) {
+        uint32_t command = xx_io_get_u32(macho->format.device, offset, big != 0);
+        uint32_t size = xx_io_get_u32(macho->format.device, offset + 4, big != 0);
+        if (size < 8 || (int64_t)size > end - offset) break;
+        if (command == 0xCu) ++count;
+        offset += size;
+    }
+    return count;
+}
+
+static int facts_macho(gui_backend_facts *facts, xx_io_device *device)
+{
+    xx_macho macho;
+    int ok;
+    uint32_t i;
+    xx_rt_memset(&macho, 0, sizeof(macho));
+    xx_macho_init(&macho, device, 0);
+    ok = macho.format.check_is_valid(&macho.format, NULL) && xx_format_handle_base_info(&macho.format, NULL);
+    if (ok) {
+        const xx_memory_map *map = xx_format_get_memory_map(&macho.format, XX_MEMORY_MAP_MODE_UNKNOWN, NULL);
+        int is_64 = xx_macho_is_64(&macho);
+        facts_format_row(facts, &macho.format);
+        facts->base_bits = facts->entry_bits = is_64 ? 64 : 32;
+        /* XMACH::getBaseAddress: the size of a leading segment without flags
+         * (__PAGEZERO), which is where __TEXT starts in an executable. */
+        if (macho.segment_count && !macho.segments[0].flags) facts->base_address = macho.segments[0].virtual_size;
+        facts->entry_point = map && map->entry_point_address != XX_INVALID_ADDRESS ? map->entry_point_address : 0;
+        facts_entry_offset(facts, map);
+        facts->commands = macho.command_count;
+        facts->segments = macho.segment_count;
+        /* XMACH::getSectionRecords ignores an implausible nsects. */
+        for (i = 0; i < macho.segment_count; ++i)
+            if (!(macho.segments[i].section_count & 0xFFFFFF00u)) facts->sections += macho.segments[i].section_count;
+        facts->libraries = facts_macho_libraries(&macho);
+        if (facts->commands) facts->flags |= GUI_FACTS_COMMANDS;
+        if (facts->segments) facts->flags |= GUI_FACTS_SEGMENTS;
+        if (facts->sections) facts->flags |= GUI_FACTS_SECTIONS;
+        if (facts->libraries) facts->flags |= GUI_FACTS_LIBRARIES;
+        facts->header_selector = is_64 ? "mach_header_64" : "mach_header";
+        facts->commands_selector = "load_command";
+        facts->segments_selector = is_64 ? "segment_command_64" : "segment_command";
+        facts->sections_selector = is_64 ? "section_64" : "section";
+        facts->libraries_selector = "dylib_command";
+    }
+    xx_macho_destroy(&macho);
+    return ok;
+}
+
+static void facts_map_overlay(gui_backend_facts *facts, const xx_memory_map *map)
+{
+    size_t i;
+    for (i = 0; map && i < map->record_count; ++i)
+        if ((map->records[i].file_part & XX_FILE_PART_OVERLAY) && !map->records[i].is_virtual && map->records[i].size > 0) {
+            facts->overlay_offset = map->records[i].offset; facts->overlay_size = map->records[i].size;
+            facts->flags |= GUI_FACTS_OVERLAY;
+            return;
+        }
+}
+
+/* XMSDOS: the load module sits at 0x10000000 and the entry is
+ * module + CS * 16 + IP, wrapped at 1 MiB; both shown as seg:off. */
+static int facts_msdos(gui_backend_facts *facts, xx_io_device *device)
+{
+    xx_msdos msdos;
+    int ok;
+    xx_rt_memset(&msdos, 0, sizeof(msdos));
+    xx_msdos_init(&msdos, device, 0);
+    ok = msdos.format.check_is_valid(&msdos.format, NULL) && xx_format_handle_base_info(&msdos.format, NULL);
+    if (ok) {
+        uint64_t entry = (uint64_t)msdos.cs * 16u + msdos.ip;
+        if (entry >= 0x100000u) entry -= 0x100000u;
+        facts->flags |= GUI_FACTS_SEG_OFF;
+        facts->base_bits = facts->entry_bits = 32;
+        facts->base_address = 0x10000000u;
+        facts->entry_point = 0x10000000u + entry;
+        facts_map_overlay(facts, xx_format_get_memory_map(&msdos.format, XX_MEMORY_MAP_MODE_UNKNOWN, NULL));
+        copy_field(facts->endianness, sizeof(facts->endianness), "LE");
+        copy_field(facts->mode, sizeof(facts->mode), "16-bit");
+        copy_field(facts->architecture, sizeof(facts->architecture), "8086");
+        copy_field(facts->type, sizeof(facts->type), "EXE");
+    }
+    xx_msdos_destroy(&msdos);
+    return ok;
+}
+
+/* NE, LE/LX, DEX, archives and Amiga hunks: the reader's memory map; COM as
+ * XCOM has it. A file the reader rejects keeps the defaults, not a failure. */
+static void facts_other(gui_backend_facts *facts, xx_io_device *device)
+{
+    void (*release)(void *) = NULL;
+    Abstractformat *format = facts_reader(facts->type_id, device, &release);
+    const xx_memory_map *map = NULL;
+    if (format && xx_format_is_valid(format, NULL) && xx_format_handle_base_info(format, NULL)) {
+        map = xx_format_get_memory_map(format, XX_MEMORY_MAP_MODE_UNKNOWN, NULL);
+        if (map) facts_engine_row(facts, map->endian, map->arch, map->format_type);
+        else facts_format_row(facts, format);
+        if (facts->page == GUI_FACTS_PAGE_ARCHIVE) {
+            /* XBinary::getFileFormatString: "ZIP(2.0)". XZip::getVersion takes
+             * the first central record's version, then its minimum version,
+             * then the first local header's; the others name no version. */
+            unsigned int version = 0;
+            if (facts->type_id == XFT_ZIP) {
+                const xx_zip *zip = (const xx_zip *)format;
+                if (zip->cd_offset >= 0 && xx_io_get_u32(device, zip->cd_offset, false) == 0x02014b50u) {
+                    version = xx_io_get_u8(device, zip->cd_offset + 4);
+                    if (!version) version = xx_io_get_u8(device, zip->cd_offset + 6);
+                }
+                if (!version) version = xx_io_get_u8(device, 4);
+            }
+            if (version)
+                xx_rt_snprintf(facts->main_label, sizeof(facts->main_label), "%s(%u.%u)", facts->type_name, version / 10, version % 10);
+            /* An archive is data: no byte order (Qt says Unknown) and MODE_DATA. */
+            facts->endianness[0] = 0;
+            copy_field(facts->mode, sizeof(facts->mode), "Data");
+        } else if (map) {
+            if (map->module_address != XX_INVALID_ADDRESS) facts->base_address = map->module_address;
+            if (map->entry_point_address != XX_INVALID_ADDRESS) {
+                facts->entry_point = map->entry_point_address;
+                facts_entry_offset(facts, map);
+            }
+        }
+    }
+    switch (facts->page) {
+    case GUI_FACTS_PAGE_COM: /* XCOM: loaded at 0100, MODE_16, 8086, EXE */
+        facts->base_bits = facts->entry_bits = 16;
+        facts->base_address = facts->entry_point = 0x100u;
+        facts->entry_point_offset = 0;
+        facts->flags |= GUI_FACTS_ENTRY_OFFSET;
+        copy_field(facts->endianness, sizeof(facts->endianness), "LE");
+        copy_field(facts->mode, sizeof(facts->mode), "16-bit");
+        copy_field(facts->architecture, sizeof(facts->architecture), "8086");
+        copy_field(facts->type, sizeof(facts->type), "EXE");
+        break;
+    case GUI_FACTS_PAGE_NE: case GUI_FACTS_PAGE_LE: facts->base_bits = facts->entry_bits = 32; break; /* MODE_16SEG / MODE_32 */
+    case GUI_FACTS_PAGE_DEX: facts->base_bits = 32; facts->entry_bits = 16; break;
+    default: facts->base_bits = facts_size_bits(facts->file_size); facts->entry_bits = 32; break;
+    }
+    if (format) release(format);
+}
+
+void gui_backend_facts_free(gui_backend_facts *facts)
+{
+    if (!facts) return;
+    xx_rt_free(facts->manifest);
+    xx_rt_free(facts->version);
+    facts->manifest = facts->version = NULL;
+}
+
+int gui_backend_file_facts(const char *path, int type_id, gui_backend_facts *facts)
+{
+    facts_types types;
+    xx_io_device *device;
+    int64_t size;
+    int ok = 1;
+    if (!facts) return 0;
+    xx_rt_memset(facts, 0, sizeof(*facts));
+    facts->entry_point_offset = facts->overlay_offset = -1;
+    if (!path || !*path || type_id < 0 || type_id >= XFT_COUNT || (type_id && !gui_concrete_file_type((XFileType)type_id))) return 0;
+    types.wanted = type_id; types.found = 0; types.first = 0;
+    if (!die_engine_detect_file_types(path, facts_type, &types) || !types.first || (type_id && !types.found)) return 0;
+    if (!type_id) type_id = types.first;
+    if (!(device = xx_io_file_open(path, "rb"))) return 0;
+    size = xx_io_total_size(device);
+    if (size < 0) { xx_io_close(device); return 0; }
+    facts->type_id = type_id;
+    copy_field(facts->type_name, sizeof(facts->type_name), xft_to_string((XFileType)type_id));
+    facts->page = facts_page(type_id);
+    facts->file_size = (uint64_t)size;
+    facts->base_bits = facts_size_bits(facts->file_size);
+    facts->entry_bits = 32;
+    switch (facts->page) {
+    case GUI_FACTS_PAGE_PE: copy_field(facts->main_label, sizeof(facts->main_label), "PE"); ok = facts_pe(facts, device); break;
+    case GUI_FACTS_PAGE_ELF: copy_field(facts->main_label, sizeof(facts->main_label), "ELF"); ok = facts_elf(facts, device); break;
+    case GUI_FACTS_PAGE_MACH: copy_field(facts->main_label, sizeof(facts->main_label), "Mach-O"); ok = facts_macho(facts, device); break;
+    case GUI_FACTS_PAGE_MSDOS: copy_field(facts->main_label, sizeof(facts->main_label), "MSDOS"); ok = facts_msdos(facts, device); break;
+    default:
+        copy_field(facts->main_label, sizeof(facts->main_label),
+            facts->page == GUI_FACTS_PAGE_NE ? "NE" : facts->page == GUI_FACTS_PAGE_LE ? (type_id == XFT_LX ? "LX" : "LE") :
+            facts->page == GUI_FACTS_PAGE_DEX ? "DEX" : facts->page == GUI_FACTS_PAGE_ARCHIVE ? facts->type_name :
+            facts->page == GUI_FACTS_PAGE_COM ? "" : "Binary");
+        facts_other(facts, device);
+        break;
+    }
+    xx_io_close(device);
+    if (!ok) {
+        gui_backend_facts_free(facts);
+        xx_rt_memset(facts, 0, sizeof(*facts));
+        facts->entry_point_offset = facts->overlay_offset = -1;
+    }
+    return ok;
 }
 
 void gui_backend_free(void *pPtr)

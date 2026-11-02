@@ -31,6 +31,26 @@ expects the same result. It also checks that `-E`/`--extradatabase` exit 4
 (lowercase `-e` is still entropy), that `--showdatabase` names only the main
 and custom databases in text, JSON and XML, and that a `db_extra` beside `db`
 is never loaded (the same rule in `db_custom` is the positive control).
+Its `BufferSizeOptionTests` cover `--buffersize` and `--filebuffersize`:
+byte counts and `K`/`M`/`G` suffixes in either case from 1 KiB to 64 MiB leave
+scans (JSON, plain text, archive members, nested archives), `--hash`,
+`--entropy`, `--strings` and `--info` byte-identical; the top of the range
+(1 GiB, or 64 MiB when `diec` is a 32-bit PE or ELF file) is accepted with
+`--version`, which opens no file, so no test allocates a 1 GiB buffer; `0`,
+an empty or missing value, `1023`, one byte over the top, `2G`, a 20-digit
+number, `12X`, `64KB`, `-5`, `1 M` and other
+malformed values exit 4 with the option's message and nothing on stdout; the
+last of repeated options wins. The analysis modes give the same output
+whatever either size, so they show only that a size is accepted, not that it
+is applied before them (for `--buffersize`, the `read_buffer` suite below
+shows that), and the `G`
+multiplier is checked only through the range (on a 64-bit `diec`, `1G` is
+accepted, `2G` and 1 GiB + 1 refused). With `TMP`, `TEMP` and `TMPDIR` naming a
+missing folder, a deflated 1 MiB PE member is scanned with
+`--filebuffersize 2M` or `1025K` (decoded in memory) and, on Windows only,
+skipped without a message at the 64 KiB default and at `1M` (no temporary
+file); glibc's `tmpfile()` falls back to `/tmp`, so POSIX hosts check only the
+first half.
 
 File Information coverage uses independently generated 32/64-bit PE and
 little-/big-endian ELF and Mach-O files. It verifies native header values,
@@ -117,11 +137,63 @@ Three tests drive the archive walker on fixtures that
 `archive_storage` checks member bytes, memory versus temporary-file storage
 around the buffer threshold, bounded source views, the source cursor and
 cleanup. `archive_failures` injects temporary-file open, write, short-write,
-seek, size and close faults, cancellation, rejected callbacks, damaged
-members and size/count limits: a temporary file that cannot be created keeps
-the member in memory (`diec` still scans it), other storage faults and
-cancellation fail the walk, damaged or oversized members are skipped and
-reported. It also feeds the
+seek, size and close faults, a full temporary disk (an injected free-space
+value, so no walker case depends on the real free space; the cases that write
+hundreds of MiB to the real temporary folder print a `SKIP` line instead when
+it has less than 2 GiB free), cancellation, rejected callbacks, damaged
+members and explicit size/count limits: a member that cannot have its
+temporary file, does not fit on the temporary volume (from 16 MiB on, with
+1 GiB left free), or whose temporary file
+cannot be written or read back (seek, size: POSIX stdio may write its
+buffered tail only then) is skipped without a report (as `diec` skips a
+member whose buffer it cannot create) and the walk goes on; a failed close of
+the temporary file fails nothing; cancellation fails the walk; damaged
+members are skipped, a wrong CRC reported; members over an explicit limit are
+skipped without a report. `generate_large_members.py`
+adds members over the 256 MiB limit cdie once had (deflated, about 1 MB of
+fixtures): one of 256 MiB + 1 byte is scanned through a temporary file, from
+the central directory or the local headers, and a wrong CRC is reported; a
+stream that decodes past its declared size stops at an explicit limit but
+fails its CRC within the default 4 GiB bound; without a temporary file a
+15 MiB member is scanned from memory under a 16 MiB file buffer size and a
+17 MiB one is skipped undecoded (no `Invalid CRC`); a memory-only scope's
+ceiling is the room; a stored member of 300 MiB, written and deleted by the
+test, is read in place with no free space at all. Around 16 MiB, where the
+1 GiB reserve starts (Detect It Easy's own cut-off between memory and disk):
+a 100 KiB member is scanned with 200 KiB, or exactly 100 KiB, free and
+skipped with 50 KiB; a member of 16 MiB - 1 needs no more than its size, one
+of 16 MiB its size plus 1 GiB, and one of 20 MiB is skipped with 1 GiB free
+and scanned with 2 GiB; a GZIP stream, of unknown size to the walker, only
+needs room for each write while it is under 16 MiB (the injected free space
+shrinks by what the temporary file holds): 100 KiB is scanned with exactly
+100 KiB free and skipped with a byte less; it needs the reserve as it
+reaches 16 MiB: with 500 MiB free one of 16 MiB - 1 is scanned, while one of
+16 MiB or 20 MiB is skipped at that check, its temporary file just under
+16 MiB. It also writes a
+Zstandard member of 17 MiB built from Raw and RLE blocks (1.6 KB): scanned
+from a temporary file or from memory, skipped silently without a temporary
+file, without room or with a 256 MiB window, its wrong CRC reported; an XZ
+member with one 65 MiB Block behind the x86 BCJ filter, filtered as it
+streams; and a ZIP method `diec` does not map, reported only for a member
+that can have its storage. The same fixtures check that the Extractor lists
+members over 256 MiB and extracts one; reads a stored member in place (also
+in a 1 MiB memory-only scope, and when extracting it); keeps a PDF stream of
+unknown size in memory below the file buffer size and moves a larger one to
+a temporary file; leaves out one that cannot have its temporary file (a
+memory-only scope too small for it); and still fails on an explicit limit.
+The Extractor's free-space check is injected too, in a copy of its source
+built into the test (its temporary files tracked as the walker's are): the
+same 100 KiB, 16 MiB - 1, 16 MiB and 20 MiB members, and PDF streams of
+20 KiB, 100 KiB, 16 MiB - 1, 16 MiB and 20 MiB, follow the walker's rule (a
+100 KiB stream is listed with exactly 100 KiB free and left out with a byte
+less, at its second 64 KiB write; streams of 16 MiB and 20 MiB are left out
+with 500 MiB free at the check as they reach 16 MiB, one of 16 MiB - 1 is
+listed, and 20 MiB is listed with 2 GiB). Its temporary-file write failures
+are not injected. In `tests/test_compatibility.py`, `diec --archivesscan` scans a
+300 MiB member, reports its bad-CRC copy, reads it without end records and
+keeps the 21-member window in order with it third (`--suite reference`
+compares the four with a `diec` 4.0.0); both tests are skipped when the
+temporary folder has less than 2 GiB free. It also feeds the
 head filter that decides whether a member can be scannable in 1-, 4- and
 7-byte pieces (a 6-byte XZ header, a 7-byte LHA header, a PDF marker at
 offset 900, a 2-byte `MZ`). `archive_integration` scans every fixture through
@@ -182,6 +254,35 @@ its first 2 GiB contain only 283 files and 142 directories; `Game.exe` contains
 139 files and 36 directories, versus 98 files and 22 directories in the prefix.
 These counts come from seeking between archive headers; compressed payloads
 need not be unpacked to establish the expected result.
+
+The `read_buffer` suite (`tests/test_read_buffer.c`) checks that the read
+buffer size (`diec --buffersize`, `Feature/ReadBufferSize`) is the read chunk
+of the hash, strings, entropy, checksum and search loops. A 200,003-byte
+device that records every read it is asked for runs `cdie_hash_read_device`,
+`cdie_strings_read_device`, `xx_md5_device`, `xx_sha1_device`,
+`xx_sha256_device`, `xx_blake2sp_calc_device`, `xx_crc_calculate_device` and
+`xx_io_find_bytes` at buffer sizes of 7, 1000, 4096, 64 KiB (the default) and
+1 MiB. The largest read is the buffer size, or the whole input when that is
+less (an 11-byte CRC reads 11 bytes, a 5000-byte search at most 5000), the
+hash takes the matching number of reads, and every hash, digest, CRC, string
+record and search result equals the one at 64 KiB; at 7 the 8-byte search
+pattern takes the prefix-table path. The strings chunk stops at 16 MiB, and
+on a 64-bit build a size no allocator can satisfy (2^62) falls back to
+64 KiB reads with the same search result. Entropy opens its file itself, so
+it reads a 10,000,037-byte temporary file under a progress observer: the
+largest step of *Reading blocks* is the buffer size, or the 100,037-byte
+block when that is less, and the total and every block value equal those at
+64 KiB. Build and run it with:
+
+```powershell
+cmake --build F:\ownCloud_build\cdie\build --target cdie_test_read_buffer
+ctest --test-dir F:\ownCloud_build\cdie\build -R read_buffer --output-on-failure
+```
+
+Outside the suite, the operating system's read count shows the same on
+Windows (`GetProcessIoCounters`): `diec --hash` on a 7.4 MB file reads 113
+times at the default, 7217 times with `--buffersize 1K` and 8 times with
+`1M`, with the same output.
 
 `private_tests/test_pe_metadata.c` exercises 32 small PE fixtures through the
 script API: invalid-address sentinels, header entry points, unaligned raw
@@ -765,21 +866,39 @@ checks three things:
 - A `.po` language goes only to `cdie/Lang`, and `System` reaches `View/Lang`
   too.
 
+Buffer sizes take effect within the *Optimization* page's range (1 GiB, or
+64 MiB in a 32-bit build, at most): `Feature/ReadBufferSize` and
+`Feature/FileBufferSize` of 0, 2147483648, 4294967295, 4294967296,
+99999999999 or 18446744073709551615 count as the 64 KiB default (Detect It
+Easy reads each as its default), 2147483647, 1610612736 and 1073741825 as
+the maximum, 512, 1 or 1023 as 1 KiB; 1024, 1500, 16 MiB, 64 MiB and 1 GiB
+are used as stored (above 64 MiB only in a 64-bit build), and a number past
+64 bits is ignored. A save that changes another option, after Options' OK
+applied the sizes as loaded, keeps both lines byte-identical, also for typed
+QWORD values; a file buffer size changed as Options' OK applies it rewrites
+its own line only.
+
 `--native-migration` (an isolated HKCU key or `XDG_CONFIG_HOME`) copies an
 older `NTInfo/cdie` store once and marks both stores `cdie/Migrated`. It keeps
 Qt's registry types, and clearing the die store does not bring the old
 settings back. The old store's `Scan/Die/Database/Extra/Path` is neither
 migrated nor removed. Malformed values and wrong types are ignored, and an
 `Extra/Path` or `Extra/Enabled` value of earlier versions changes nothing.
+A `REG_DWORD` `Feature/ReadBufferSize` of 0x80000000 (a negative number to
+Qt) takes effect as the default and a `REG_QWORD` `Feature/FileBufferSize` of
+1.5 GiB as the maximum; both keep their type and value through a save.
 
 `cdie.settings_policy` runs from an isolated Unicode installation folder with
 an empty uppercase `PORTABLE` marker and a different working directory. It
 tests every exposed Options value in portable INI and an isolated native
 registry namespace, complementary value profiles, saved Defaults,
 preservation of unrelated keys, unsupported CPU feature masking, and a
-write/verify pair in separate processes. It also migrates an older `cdie.ini`
-into an existing die.ini without changing Detect It Easy's lines; its
-`Scan/Die/Database/Extra/*` keys are not carried over. The old file
+write/verify pair in separate processes. Nine buffer sizes in the portable
+die.ini, one process each, take effect as above (the maximum read from the
+probe's PE or ELF header) and keep their lines through a save. It also
+migrates an older `cdie.ini` into an existing die.ini without changing
+Detect It Easy's lines; its buffer sizes (0 and 4294967296) are copied as
+stored, and its `Scan/Die/Database/Extra/*` keys are not carried over. The old file
 gains only `[cdie] Migrated`. Neither removing a migrated key nor deleting
 die.ini makes the copy run again. Signature folders are real
 minimal fixture databases. Two explicitly stored empty database paths (main
@@ -870,8 +989,10 @@ install followed by "current", that a portable GUI leaves the per-user
 folder alone, that the installation's `db_extra` from an earlier version stays
 byte-identical (no `die-update.ini` written into it) and no other `db_extra`
 appears, and that a failed (MD5 mismatch) update keeps the database and
-leaves no stage behind. On Linux without a display it runs under `xvfb-run`
-when CMake found it, and skips otherwise.
+leaves no stage behind. On Windows and macOS it also drives the dialogs the
+update shows its owner: `--smoke-update box-current` (the "No updates" box),
+`ask-no` and `ask-yes` (the question before an install). On Linux without a
+display it runs under `xvfb-run` when CMake found it, and skips otherwise.
 
 ```bash
 ctest --test-dir build -C Debug -R "cdie\.(updater|gui_update)" --output-on-failure

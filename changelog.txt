@@ -26,6 +26,28 @@
       folder with -D and -j passed on and return its exit code (127 when it
       cannot be started). diec still imports KERNEL32.dll only.
 
+    * Added diec --buffersize <size> and --filebuffersize <size> (cdie only;
+      Detect It Easy's diec has neither, its GUI keeps both in die.ini): the
+      read buffer size (see below) and the file buffer size, below which an
+      archive member is decoded in memory instead of through a temporary file
+      (both 64 KiB by default, unchanged). <size> is 1K..1G (1K..64M in a
+      32-bit diec), in bytes or with a K, M or G suffix in either case; a
+      missing, malformed or out-of-range value is exit code 4 with nothing
+      scanned, and the last one given wins. Both are set before any other
+      work; die-update (--checkupdate, --update) receives neither. Every
+      open file and decoder allocates a whole file buffer, so a large one
+      costs that much memory even for small inputs. diec still imports
+      KERNEL32.dll only.
+
+    * The read buffer size (diec --buffersize, the GUI's Buffer size,
+      Feature/ReadBufferSize; 64 KiB by default) is how much the hash,
+      entropy and strings views and diec modes read at a time (strings at
+      most 16 MiB), and so do the scan's MD5, SHA-1, SHA-256, CRC and
+      BLAKE2sp loops and byte searches that read into a buffer of their own.
+      Each buffer is no larger than what is left to read, and falls back to
+      64 KiB when that much memory cannot be allocated, so the size changes
+      how often the input is read, never a result.
+
     * Two signature databases, as in Detect It Easy: main (-D, always used)
       and custom (-C, on by default). The former extra rules are part of db,
       tagged extra (--excludetags extra skips them). diec, die-update and
@@ -65,7 +87,13 @@
       always name a family Qt can resolve, #aarrggbb colors are read blended
       over white, and Detect It Easy's recent files are shown until cdie has
       its own. Settings from cdie.ini / NTInfo/cdie are copied once; both
-      stores are marked cdie/Migrated.
+      stores are marked cdie/Migrated. Feature/ReadBufferSize and
+      Feature/FileBufferSize take effect within the Optimization page's range,
+      1 KiB to 1 GiB, 1 KiB to 64 MiB in a 32-bit build, which now offers only
+      those choices (0, and a value over 2147483647, which Detect It Easy
+      reads as its default too, its 2 GiB and 4 GiB choices included, are the
+      64 KiB default), and the stored value is kept until the size changes in
+      Options; the one-time copy moves them as stored.
 
     * Dialogs: every dialog of the Windows, GTK and macOS GUIs is opened,
       checked and closed by the smoke tests (gui_win32, the new
@@ -210,6 +238,23 @@
       diec does not have: at most 10,000 archive member scans per input
       (100,000 with -g), reported as "Last error: Archive member scan limit
       reached (10000)". The GUI option is now "Scan archive members".
+    * Archive members larger than 256 MiB are scanned again, as diec 4.0.0
+      scans them (cdie had skipped compressed ones without a message): there
+      is no member size limit. A member smaller than the file buffer size is
+      decoded in memory, a larger one through a temporary file. A member that
+      cannot get its temporary file, whose size does not fit in the temporary
+      folder (or, from 16 MiB on, where diec also uses temporary files, would
+      leave less than 1 GiB free there), or whose temporary file cannot be
+      written or read back is skipped without a message; a full disk no
+      longer fails the whole input (a nearly full one also skips compressed
+      members from 64 KiB on that do not fit, which diec scans from memory
+      below 16 MiB). Zstandard
+      members and XZ Blocks behind a branch (BCJ) or Delta filter are now
+      decoded as they stream: zstd members had been held whole in memory,
+      filtered XZ Blocks over 64 MiB skipped. The Extractor lists and
+      extracts members of any size too, reads stored members in place, and
+      leaves out a member that cannot get its temporary file or room for it
+      instead of stopping; a damaged member still stops the listing.
     * MS-DOS files are mapped at 0x10000000, as Formats' XMSDOS and DIE 3.10
       map them: getAddressOfEntryPoint is 0x10000000 + CS:IP, and the
       native entry offset and compareEP resolve into the image. A four-byte

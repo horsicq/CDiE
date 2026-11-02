@@ -9,4 +9,5 @@ Icon=io.github.horsicq.cdie
 StartupWMClass=die
 Categories=Development;
 Keywords=detect;packer;compiler;protector;PE;ELF;Mach-O;APK;
+MimeType=application/x-executable;application/x-pie-executable;application/x-sharedlib;application/x-mach-binary;application/x-dosexec;application/x-ms-dos-executable;application/x-msdownload;application/vnd.microsoft.portable-executable;application/vnd.android.package-archive;
 Terminal=false

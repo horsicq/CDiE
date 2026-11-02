@@ -24,6 +24,7 @@
 #include "../global.h"
 #include <xxfclib/die_engine/die_engine.h>
 #include <xxfclib/fs/xx_fs.h>
+#include <xxfclib/global/xx_global.h>
 #include <xxfclib/list/xx_list.h>
 #include <xxfclib/rt/xx_rt.h>
 #include <xxfclib/terminal/xx_terminal.h>
@@ -153,6 +154,22 @@ static void print_xml_string(const char *pText)
     }
 }
 
+/* Range of --buffersize and --filebuffersize. 64-bit builds take the GUI's
+ * Optimization choices, 1 KiB to 1 GiB. The library allocates a full file
+ * buffer for every buffered file and decoder, whatever the input size, and a
+ * failed allocation changes results without an error; a 32-bit diec has 2 GiB
+ * of address space (it is not linked /LARGEADDRESSAWARE), so there the cap is
+ * the library's own 32-bit memory budget, XX_DEFAULT_FILE_MEMORY_LIMIT. */
+#define CDIE_BUFFER_SIZE_MIN ((uint64_t)1024)
+#if !defined(SIZE_MAX)
+#error SIZE_MAX (stdint.h) is needed to choose the buffer size range
+#elif SIZE_MAX > 0xFFFFFFFFu
+#define CDIE_BUFFER_SIZE_MAX ((uint64_t)1024 * 1024 * 1024)
+#define CDIE_BUFFER_SIZE_MAX_TEXT "1G"
+#else
+#define CDIE_BUFFER_SIZE_MAX ((uint64_t)64 * 1024 * 1024)
+#define CDIE_BUFFER_SIZE_MAX_TEXT "64M"
+#endif
 
 static void print_help(void)
 {
@@ -198,6 +215,18 @@ static void print_help(void)
     defined(__i386__) || defined(__x86_64__) || defined(__arm__) || defined(__aarch64__)
     cdie_printf("                            Default: on when supported; unsupported keys are ignored.\n");
 #endif
+    cdie_printf("      --buffersize <size>   Read buffer size (default %uK): how much --hash,\n",
+                (unsigned)(XX_DEFAULT_BUFFER_SIZE / 1024));
+    cdie_printf("                            --entropy, --strings and the scan's hash,\n");
+    cdie_printf("                            checksum and search loops read at a time.\n");
+    cdie_printf("      --filebuffersize <size>\n");
+    cdie_printf("                            File buffer size (default %uK): archive members\n",
+                (unsigned)(XX_DEFAULT_FILE_BUFFER_SIZE / 1024));
+    cdie_printf("                            smaller than this are decoded in memory, others in\n");
+    cdie_printf("                            a temporary file. Each open file and decoder takes\n");
+    cdie_printf("                            a buffer this large, even for a small input.\n");
+    cdie_printf("                            <size> for both: 1K.." CDIE_BUFFER_SIZE_MAX_TEXT ", in bytes or with a K, M\n");
+    cdie_printf("                            or G suffix (4096, 64K, 16M); the last one wins.\n");
     cdie_printf("  -U, --hideunknown         Hide unknown results.\n");
     cdie_printf("  -M, --messages            Show engine messages.\n");
     cdie_printf("  -l, --profiling           Show profiling information.\n");
@@ -262,6 +291,46 @@ static void print_structured_information(cdie_output_format outputFormat,
 static void report_removed_option(const char *pOption)
 {
     xx_rt_fprintf(xx_rt_stderr(), "%s was removed: cdie uses only the main (-D) and custom (-C) databases\n", pOption);
+}
+
+/* --buffersize and --filebuffersize: a byte count from 1 KiB to
+ * CDIE_BUFFER_SIZE_MAX, optionally followed by K, M or G (KiB, MiB, GiB;
+ * either case). 0 is refused, as xx_set_buffer_size() and
+ * xx_set_file_buffer_size() would take it for the default. The value is
+ * checked digit by digit, so no input can overflow. @p pText is NULL when
+ * the option is the last argument; *pSize changes only on success. */
+static int parse_buffer_size(const char *pOption, const char *pText, size_t *pSize)
+{
+    const char *p = pText ? pText : "";
+    uint64_t nValue = 0;
+    int bValid = (*p >= '0') && (*p <= '9');
+
+    for (; bValid && (*p >= '0') && (*p <= '9'); p++) {
+        nValue = nValue * 10 + (uint64_t)(*p - '0');
+        if (nValue > CDIE_BUFFER_SIZE_MAX) bValid = 0;
+    }
+    if (bValid && *p) {
+        if ((*p == 'K') || (*p == 'k')) nValue <<= 10;
+        else if ((*p == 'M') || (*p == 'm')) nValue <<= 20;
+        else if ((*p == 'G') || (*p == 'g')) nValue <<= 30;
+        else bValid = 0;
+        if (p[1]) bValid = 0;
+    }
+    if (bValid && ((nValue < CDIE_BUFFER_SIZE_MIN) || (nValue > CDIE_BUFFER_SIZE_MAX))) bValid = 0;
+
+    if (!bValid) {
+        if (pText) {
+            xx_rt_fprintf(xx_rt_stderr(), "%s requires a size from 1K to " CDIE_BUFFER_SIZE_MAX_TEXT
+                          " (bytes, or with a K, M or G suffix), not '%s'\n", pOption, pText);
+        } else {
+            xx_rt_fprintf(xx_rt_stderr(), "%s requires a size from 1K to " CDIE_BUFFER_SIZE_MAX_TEXT
+                          " (bytes, or with a K, M or G suffix)\n", pOption);
+        }
+        return 0;
+    }
+
+    *pSize = (size_t)nValue;
+    return 1;
 }
 
 /* Frees the cdie_strdup'd elements and then the list itself. xx_list_t stores
@@ -512,6 +581,7 @@ int x_main(int argc, char *argv[])
     int bShowVersion = 0;
     int bShowInfo = 0, bShowStructs = 0, bEntropy = 0, bHash = 0, bStrings = 0, bStringsConfig = 0;
     int bCheckUpdate = 0, bUpdate = 0;
+    size_t nBufferSize = 0, nFileBufferSize = 0; /* 0: not given, keep the default */
     cdie_strings_options stringsOptions = cdie_strings_defaults();
     int bDatabaseLoaded = 0;
     int bEndOfOptions = 0;
@@ -686,6 +756,11 @@ int x_main(int argc, char *argv[])
                 pCreateTarPath = argv[++i];
             } else if ((xx_rt_strcmp(pArg, "--createprecompiledtar") == 0) && (i + 1 < argc)) {
                 pCreateBcTarPath = argv[++i];
+            } else if (xx_rt_strcmp(pArg, "--buffersize") == 0) {
+                /* The next argument is the size, consumed even when invalid. */
+                if (!parse_buffer_size(pArg, i + 1 < argc ? argv[++i] : NULL, &nBufferSize)) nResult = CR_INVALIDPARAMETER;
+            } else if (xx_rt_strcmp(pArg, "--filebuffersize") == 0) {
+                if (!parse_buffer_size(pArg, i + 1 < argc ? argv[++i] : NULL, &nFileBufferSize)) nResult = CR_INVALIDPARAMETER;
             } else if (xx_rt_strcmp(pArg, "--checkupdate") == 0) {
                 bCheckUpdate = 1;
             } else if (xx_rt_strcmp(pArg, "--update") == 0) {
@@ -839,6 +914,10 @@ int x_main(int argc, char *argv[])
         free_string_vector(&vecFiles);
         return cdie_finish_result(nResult);
     }
+
+    /* Before any engine work, so every mode below uses them. */
+    if (nBufferSize) xx_set_buffer_size(nBufferSize);
+    if (nFileBufferSize) xx_set_file_buffer_size(nFileBufferSize);
 
     /* As in XScanEngine::scanProcess, a recursive scan also scans the
      * resources and the overlay of every file it walks. */

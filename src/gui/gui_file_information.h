@@ -15,9 +15,15 @@ typedef struct gui_file_information_data {
  * is released with gui_backend_free. Failures/cancellation return no model. */
 int gui_file_information_read(const char *path, xx_pd_struct *progress,
     gui_file_information_data **data, char **error);
+/* As above with the slice of a fat (universal) Mach-O to open: its fat_arch
+ * index, or -1 (CDIE_FILE_INFO_SLICE_AUTO, what gui_file_information_read
+ * and _show pass) for the host architecture's slice, else the first. */
+int gui_file_information_read_slice(const char *path, int slice, xx_pd_struct *progress,
+    gui_file_information_data **data, char **error);
 void gui_file_information_free(gui_file_information_data *data);
 
 /* UI thread, outside input dispatch. Loads with cancellable worker progress,
  * then displays the reusable xxwidgets modal browser. */
 xxwidgets_status gui_file_information_show(xxwidgets_widget *owner, const char *path);
+xxwidgets_status gui_file_information_show_slice(xxwidgets_widget *owner, const char *path, int slice);
 #endif

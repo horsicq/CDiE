@@ -51,8 +51,9 @@ static inline const char *gui_error_file_reason(const char *path)
 static inline void gui_error_open_status(char *buffer, size_t capacity, const char *path)
 {
     const char *reason = gui_error_file_reason(path);
-    cdie_translation_snprintf(buffer, capacity, CDIE_N_("Cannot open this file. %s"),
-                              reason ? reason : CDIE_TR("Check the path and permissions."));
+    /* Without a reason, the older whole sentence: every catalog translates it. */
+    if (reason) cdie_translation_snprintf(buffer, capacity, CDIE_N_("Cannot open this file. %s"), reason);
+    else cdie_translation_snprintf(buffer, capacity, "%s", CDIE_TR("Cannot open this file. Check the path and permissions."));
 }
 
 /* "headline\n\nreason\n\nDetails: detail" for a tool that cannot open or read

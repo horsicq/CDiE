@@ -399,26 +399,60 @@ See [JS_ENGINE.md](JS_ENGINE.md).
   is skipped; the first two report "Invalid CRC" or "Unknown compression
   method: Unknown", which `xx_scan_engine.c` adds as a "Last error" record to
   the result of the next scan that finishes, as `XScanEngine`'s single error
-  string does. Only storage faults, allocation failures and cancellation fail
-  the walk; an unreadable later record ends it after the members before it.
+  string does. Only faults reading the archive, allocation failures and
+  cancellation fail the walk; an unreadable later record ends it after the
+  members before it.
   Without `aggressive_scan` a member is passed on only when its first 1,029
   bytes can satisfy `XScanEngine::isScanable` (executables, DEX, PDF,
   archives, TAR); any other member is decoded into a discarding sink for its
-  CRC alone, with no buffer, temporary file or type detection. Empty members
-  and directories therefore reach only an aggressive scan. A ZIP without end
-  records is read from its local headers (Store and Deflate members), and a
-  ZIP whose offsets count from the start of leading data is read as XZip
-  reads it. Compressed output uses memory only when its decoded size is less
-  than `xx_get_file_buffer_size()`. Equality or a larger size uses
-  `xx_io_temp_open()`; temporary storage is cleaned up after scanning and
-  honors an active memory-only policy. ZIP Store members use bounded
-  `xx_io_sub` source views after their CRC is verified. Archive child scans
-  use the selected device directly, without copying small inputs into memory
-  again. No archive-derived output paths are opened. This storage threshold
-  does not bound decoder internal buffers. Defaults are 256 MiB per member,
-  no total limit and 100,000 entries; the `archive_max_member_size`,
+  CRC alone, with no buffer or type detection (its temporary file, below, is
+  opened but not written). Empty members and directories therefore reach
+  only an aggressive scan. A ZIP without end records is read from its local
+  headers (Store and Deflate members), and a ZIP whose offsets count from the
+  start of leading data is read as XZip reads it. The file buffer size
+  (`xx_get_file_buffer_size()`: 64 KiB, `diec --filebuffersize`, or the GUI's
+  "File buffer size", `Feature/FileBufferSize`) is the only switch between memory and disk, as
+  `XBinary::createFileBuffer`'s threshold is in Detect It Easy: a member
+  declared smaller is decoded in memory; one declared at that size or larger
+  gets an `xx_io_temp_open()` file before anything is decoded; output of
+  unknown size moves into one when it reaches that size, so memory never
+  holds a member that large. There is no member size limit: a member of any
+  size it can declare is decoded. A member that needs a temporary file and
+  cannot have one is skipped without a report and is not decoded, not even
+  for its CRC, as `XScanEngine` skips a member whose buffer it cannot create;
+  a ZIP method XZip does not map is reported only for a member that could
+  have its storage, as `XScanEngine` creates the buffer before XDecompress
+  reports anything. So is a member whose declared size does not fit on the
+  temporary volume (`xx_io_temp_free_space()`: `GetDiskFreeSpaceExW`, or
+  `statvfs` on `TMPDIR` when it is a writable folder, else `/tmp`); from
+  16 MiB on (`XX_SCAN_ARCHIVE_TEMP_RESERVE_FROM`, `XBinary::createFileBuffer`'s
+  own cut-off between memory and disk) it must also leave 1 GiB
+  (`XX_SCAN_ARCHIVE_TEMP_RESERVE`) free there. Output of unknown size checks
+  at each write while it is under 16 MiB that what it writes fits, without
+  the reserve; as it reaches 16 MiB it needs the reserve and room for the
+  next 64 MiB, and it checks again every 64 MiB.
+  The Extractor applies the same rule (`XX_EXTRACTOR_TEMP_RESERVE_FROM`). So
+  is one whose temporary file cannot be written or read back (a full disk,
+  a race; POSIX stdio may report a full disk only when the
+  file is repositioned for scanning): the walk goes on and the input keeps
+  its other results. A failed close of a temporary file, scratch that was
+  read back first, fails nothing. Temporary storage is cleaned up after scanning
+  and honors an active memory-only policy, whose RAM ceiling is then the
+  room. ZIP Store members use bounded `xx_io_sub` source views after their
+  CRC is verified, whatever their size. Archive child scans use the selected
+  device directly, without copying small inputs into memory again. No
+  archive-derived output paths are opened. This storage threshold does not
+  bound decoder internal buffers (an LZMA dictionary, or a zstd window, which
+  the member's declared size caps). Codecs stream their output,
+  Zstandard frames and XZ Blocks behind branch (BCJ) or Delta filters
+  included, except WinZip JPEG and WavPack (methods 96 and 97), which hold a
+  member in memory up to their native 64 MiB. Defaults are 4 GiB per member, no total
+  limit and 100,000 entries; the `archive_max_member_size`,
   `archive_max_total_size` and `archive_max_members` options override these
-  when nonzero. Native decoder limits still apply.
+  when nonzero. No ZIP entry without ZIP64 can declare 4 GiB, so the default
+  member bound only stops a stream that decodes on past anything it could
+  declare. Native decoder limits still apply, and so does the readers' own
+  512 MiB budget for methods that hold a whole member in memory.
   The engine scans at most 21 members per archive (100,000 when aggressive).
   Members keep `archives_scan` and clear the other traversal flags, so nested
   archives expand, down to 20 archive levels (`XX_SCAN_ARCHIVE_MAX_DEPTH`).

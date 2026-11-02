@@ -1102,12 +1102,19 @@ static int create_controls(void)
         /* A down arrow, as a history list; ">" belongs to the report. */
         !create_control(&g_recent, XXWIDGETS_BUTTON, "\xE2\x96\xBC", IDC_BTN_RECENT) ||
         !create_control(&g_browse, XXWIDGETS_BUTTON, CDIE_N_("..."), IDC_BTN_BROWSE)) return 0;
-    /* Tab follows creation order (IsDialogMessage): the scan panel, which is
-     * next on screen, comes before the tool buttons below it. */
+    /* Tab follows creation order (IsDialogMessage), so controls are created in
+     * screen order: the scan panel, Update database (in the panel's lower row),
+     * the upper tool row (Options ... Extractor), the lower one, then Exit. */
     if (xxwidgets_scan_panel_create(g_window, panel_bounds, &g_panel) != XXWIDGETS_OK) return 0;
-    if (!create_control(&g_status, XXWIDGETS_LABEL, "", IDC_STATUS) ||
+    if (!create_control(&g_updateButton, XXWIDGETS_BUTTON, CDIE_N_("Update database"), IDC_BTN_UPDATE) ||
+        !create_control(&g_status, XXWIDGETS_LABEL, "", IDC_STATUS) ||
         !create_control(&g_options, XXWIDGETS_BUTTON, CDIE_N_("Options"), IDC_BTN_OPTIONS) ||
         !create_control(&g_aboutButton, XXWIDGETS_BUTTON, CDIE_N_("About"), IDC_BTN_ABOUT) ||
+        !create_control(&g_importsButton, XXWIDGETS_BUTTON, CDIE_N_("Imports"), IDC_BTN_IMPORTS) ||
+        !create_control(&g_exportsButton, XXWIDGETS_BUTTON, CDIE_N_("Exports"), IDC_BTN_EXPORTS) ||
+        !create_control(&g_resourcesButton, XXWIDGETS_BUTTON, CDIE_N_("Resources"), IDC_BTN_RESOURCES) ||
+        !create_control(&g_symbolsButton, XXWIDGETS_BUTTON, CDIE_N_("Symbols"), IDC_BTN_SYMBOLS) ||
+        !create_control(&g_extractorButton, XXWIDGETS_BUTTON, CDIE_N_("Extractor"), IDC_BTN_EXTRACTOR) ||
         !create_control(&g_fileInformationButton, XXWIDGETS_BUTTON, CDIE_N_("File Information"), IDC_BTN_FILE_INFORMATION) ||
         !create_control(&g_entropyButton, XXWIDGETS_BUTTON, CDIE_N_("Entropy"), IDC_BTN_ENTROPY) ||
         !create_control(&g_hashButton, XXWIDGETS_BUTTON, CDIE_N_("Hash"), IDC_BTN_HASH) ||
@@ -1115,12 +1122,6 @@ static int create_controls(void)
         !create_control(&g_hexViewButton, XXWIDGETS_BUTTON, CDIE_N_("Hex View"), IDC_BTN_HEX_VIEW) ||
         !create_control(&g_disasmButton, XXWIDGETS_BUTTON, CDIE_N_("Disasm"), IDC_BTN_DISASM) ||
         !create_control(&g_memoryMapButton, XXWIDGETS_BUTTON, CDIE_N_("Memory Map"), IDC_BTN_MEMORY_MAP) ||
-        !create_control(&g_importsButton, XXWIDGETS_BUTTON, CDIE_N_("Imports"), IDC_BTN_IMPORTS) ||
-        !create_control(&g_exportsButton, XXWIDGETS_BUTTON, CDIE_N_("Exports"), IDC_BTN_EXPORTS) ||
-        !create_control(&g_resourcesButton, XXWIDGETS_BUTTON, CDIE_N_("Resources"), IDC_BTN_RESOURCES) ||
-        !create_control(&g_symbolsButton, XXWIDGETS_BUTTON, CDIE_N_("Symbols"), IDC_BTN_SYMBOLS) ||
-        !create_control(&g_extractorButton, XXWIDGETS_BUTTON, CDIE_N_("Extractor"), IDC_BTN_EXTRACTOR) ||
-        !create_control(&g_updateButton, XXWIDGETS_BUTTON, CDIE_N_("Update database"), IDC_BTN_UPDATE) ||
         !create_control(&g_exit, XXWIDGETS_BUTTON, CDIE_N_("Exit"), IDC_BTN_EXIT)) return 0;
     /* A build without the updater keeps the button, disabled. */
     if (!gui_update_supported() && xxwidgets_widget_set_enabled(g_updateButton, 0) != XXWIDGETS_OK) return 0;
@@ -1158,6 +1159,8 @@ static int create_controls(void)
         !g_signaturesButton || !g_directoryButton || !g_logButton || !g_msec ||
         !g_flagLabel || !g_databaseLabel || !g_includeTags || !g_excludeTags ||
         !g_includeTagsLabel || !g_excludeTagsLabel || sync_panel_options() != XXWIDGETS_OK) return 0;
+    /* Update database sits right of Log on screen: tab to it next. */
+    SetWindowPos(native(g_updateButton), native(g_logButton), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     SetWindowLongPtrW(native(g_type), GWLP_ID, IDC_COMBO_TYPE);
     SetWindowLongPtrW(native(g_flags), GWLP_ID, IDC_COMBO_FLAGS);
     SetWindowLongPtrW(native(g_databases), GWLP_ID, IDC_COMBO_DATABASES);

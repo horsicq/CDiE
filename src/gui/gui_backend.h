@@ -279,6 +279,67 @@ char *gui_backend_info_text(const char *name);
  * beside the executable. NULL/empty restores the bundled lookup locations. */
 int gui_backend_set_info_path(const char *path);
 
+/* What the Advanced view shows for one file and type (DIE_LOOK.md 1.3-1.5 and
+ * 2.5): the type page, the header values and the engine row. Pages are in the
+ * order of xxwidgets_format_page, so a frontend can pass them on unchanged. */
+typedef enum gui_backend_facts_page {
+    GUI_FACTS_PAGE_BINARY = 0, GUI_FACTS_PAGE_COM, GUI_FACTS_PAGE_ARCHIVE, GUI_FACTS_PAGE_MSDOS,
+    GUI_FACTS_PAGE_NE, GUI_FACTS_PAGE_LE, GUI_FACTS_PAGE_DEX, GUI_FACTS_PAGE_PE, GUI_FACTS_PAGE_ELF,
+    GUI_FACTS_PAGE_MACH, GUI_FACTS_PAGE_COUNT
+} gui_backend_facts_page;
+enum {
+    GUI_FACTS_SEG_OFF = 1u << 0,    /* MSDOS: show base and entry as "hhhh:llll" halves of 32 bits */
+    GUI_FACTS_EXPORTS = 1u << 1,    /* PE data directories present, as Qt DIE tests them */
+    GUI_FACTS_IMPORTS = 1u << 2,
+    GUI_FACTS_RESOURCES = 1u << 3,
+    GUI_FACTS_DOTNET = 1u << 4,     /* a COM descriptor; .NET stays disabled until it has a viewer */
+    GUI_FACTS_TLS = 1u << 5,
+    GUI_FACTS_OVERLAY = 1u << 6,    /* PE and MSDOS: overlay_offset/overlay_size are valid */
+    GUI_FACTS_MANIFEST = 1u << 7,   /* PE: manifest holds the RT_MANIFEST text */
+    GUI_FACTS_VERSION = 1u << 8,    /* PE: version holds the RT_VERSION strings */
+    GUI_FACTS_SECTIONS = 1u << 9,   /* PE, ELF, Mach-O: sections is not zero */
+    GUI_FACTS_PROGRAMS = 1u << 10,  /* ELF */
+    GUI_FACTS_COMMANDS = 1u << 11,  /* Mach-O */
+    GUI_FACTS_SEGMENTS = 1u << 12,
+    GUI_FACTS_LIBRARIES = 1u << 13,
+    GUI_FACTS_ENTRY_OFFSET = 1u << 14 /* entry_point_offset is a file offset */
+};
+typedef struct gui_backend_facts {
+    int type_id;             /* the file_types() ID described: the preferred type when 0 was asked */
+    char type_name[32];      /* its name, e.g. "PE64", "MSDOS", "Binary" */
+    int page;                /* gui_backend_facts_page */
+    char main_label[64];     /* the page button: "PE", "ELF", "Mach-O", "MSDOS", "NE", "LE" or "LX",
+                              * "DEX", "Binary", or the archive format, e.g. "ZIP(2.0)"; "" for COM */
+    unsigned int flags;      /* GUI_FACTS_* */
+    uint64_t file_size;
+    /* Header values; Qt pads them to bits / 4 hex digits and shows them bold
+     * when not zero. */
+    uint64_t base_address, entry_point;
+    unsigned int base_bits, entry_bits; /* 8, 16, 32 or 64 */
+    int64_t entry_point_offset;         /* -1 unless GUI_FACTS_ENTRY_OFFSET */
+    /* The engine row, as gui_backend_scan_info has it ("" when unknown). */
+    char endianness[16], mode[16], architecture[32], type[48];
+    /* File Information structures for the page's buttons and arrows (static
+     * strings, NULL when the page has no such item): the main button, Sections,
+     * TLS, and the ELF and Mach-O arrows. */
+    const char *header_selector, *sections_selector, *tls_selector, *programs_selector;
+    const char *commands_selector, *segments_selector, *libraries_selector;
+    /* Counts: PE NumberOfSections, ELF section headers, Mach-O sections. */
+    uint32_t sections, programs, commands, segments, libraries;
+    /* PE */
+    uint32_t time_date_stamp, size_of_image;
+    char time_date_stamp_text[32];      /* "yyyy-MM-dd hh:mm:ss" in local time, as Qt DIE */
+    int64_t overlay_offset, overlay_size; /* -1 and 0 without an overlay */
+    char *manifest, *version;           /* heap UTF-8 or NULL; "Key: Value" lines for version */
+} gui_backend_facts;
+/* Fills facts for path as type_id (a gui_backend_file_types ID; 0 resolves to
+ * the preferred concrete type, as a type-0 scan does). Reads headers only and
+ * needs no database, so it may run before gui_backend_init. Returns 1 on
+ * success; 0 for an unreadable file or a type the file does not have, with
+ * facts zeroed. Release with gui_backend_facts_free, also after a failure. */
+int gui_backend_file_facts(const char *path, int type_id, gui_backend_facts *facts);
+void gui_backend_facts_free(gui_backend_facts *facts);
+
 /* Frees a string handed back by gui_backend_scan (uses the engine allocator,
  * which on the CRT-free build is not the Win32 heap the frontend uses). */
 void gui_backend_free(void *pPtr);

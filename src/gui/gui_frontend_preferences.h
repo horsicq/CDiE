@@ -15,10 +15,14 @@ char *gui_frontend_executable_directory(void); /* free() by caller */
 int gui_frontend_instance_start(xxwidgets_widget *window, const char *startup_file);
 void gui_frontend_instance_close(void);
 /* POSIX: a later launch of this installation that found the instance lock
- * sends its absolute file path over a per-user AF_UNIX socket beside the lock
- * (mode 0600). Call from the main loop: returns 1 and a malloc'd UTF-8 path
- * (free() by caller) when one arrived, else 0 with *path_out = NULL. Never
- * blocks. Always 0 on Windows, where WM_COPYDATA carries the path. */
+ * sends its absolute file path over a per-user AF_UNIX socket (mode 0600, in
+ * XDG_RUNTIME_DIR or the macOS per-user temporary folder, else /tmp) and waits
+ * up to 3 s for a one-byte answer; when the lock comes free meanwhile it takes
+ * over as the owner. Call from the main loop: returns 1 and a malloc'd UTF-8 path
+ * (free() by caller) when one arrived, else 0 with *path_out = NULL. The path
+ * is "" for a launch without a file: only bring the window to the front, as
+ * Windows does. Never blocks. Always 0 on Windows, where WM_COPYDATA carries
+ * the path. */
 int gui_frontend_instance_poll(xxwidgets_widget *window, char **path_out);
 #define GUI_FRONTEND_COPYDATA_ID 0x43444945u
 /* Windows user PATH: inspect/apply the exact application-directory component.
