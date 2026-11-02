@@ -295,6 +295,27 @@ case folding, accepts up to 256 UTF-8 bytes and selects the first visible row.
 TSV copying includes full typed metadata, capped at 32 MiB. Clipboard support
 depends on the backend. Reopen after changes. No console Symbols mode is added.
 
+## Shared-library compatibility boundary
+
+`die.dll` matches the 14-export ABI of horsicq/die_library 0.1.0, including
+the x86/x64 calling conventions, VB progress callback, ownership functions,
+database reuse and the reference formatter's flag precedence. The library
+adapts cdie's XML/CSV console spelling to ScanItemModel's spelling, so the
+same detection records serialize byte-for-byte as the Qt library.
+
+The DLL does not replace cdie's detection engine with Qt. Therefore an engine
+or script-API deviation documented in this file can still produce a different
+record set for the same input and database. In a direct current-database check,
+ordinary PE output matched, while a deep scan of the cdie DLL itself produced
+one additional `VMProtect(new)[DS]` record in the Qt reference. The serializer
+then formatted each engine's record set correctly, but it cannot manufacture a
+detection the pure-C engine did not return. This is the remaining behavioral
+boundary, not an ABI, ownership or output-format difference.
+
+The reference exports no version query function. Its 0.1.0 version is Windows
+file/build metadata; language bindings obtain their displayed versions from
+compile-time definitions.
+
 ## Console features
 
 The following `diec` options are not ported: `--test` and `--createtest`.

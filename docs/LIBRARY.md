@@ -8,6 +8,11 @@ die_library — including its own samples — compiles and links against this
 library unchanged. The implementation is the pure-C `cdie` engine
 ([ARCHITECTURE.md](ARCHITECTURE.md)) rather than the Qt one.
 
+The compatibility contract was checked against die_library commit
+`fcf005cd19aefcacca0a011b1f529e0ef51c1fe1` (library version 0.1.0), its C,
+VB6 and VB.NET samples, and the `elastic/die-python` and `elastic/die-rust`
+bindings linked from that repository.
+
 ## Artifacts
 
 | Target | Windows | Linux | macOS |
@@ -45,27 +50,40 @@ int __stdcall DIE_VB_ScanFileCallback(..., DIE_VB_CALLBACK pfnCallback);
 A returned string is owned by the caller and freed with the matching
 `DIE_FreeMemory{A,W}` — never with `free`/`delete`.
 
+The twelve ordinary functions use the platform C calling convention (`__cdecl`
+on Windows x86). The two VB functions are `__stdcall`. On x86 their exported
+names are `_DIE_VB_ScanFile@20` and `_DIE_VB_ScanFileCallback@24`, as used by
+the upstream VB6 sample; on x64 they have the undecorated names shown above.
+There is no exported die_library version function. Version 0.1.0 is build/file
+metadata, and the Python binding obtains its version strings at compile time.
+
 `DIE_ScanFile*`/`DIE_ScanMemory*` load the database directory named in the call
-on every invocation. `DIE_LoadDatabase*` loads it once into the library and the
-`*Ex` variants reuse it.
+on every invocation. A null or empty database argument selects `$data/db`, as
+it does upstream. `DIE_LoadDatabase*` loads once into the library and returns
+`1` on success or `0` on failure; the `*Ex` variants reuse that database.
 
 ## Flags
 
-| Flag | Meaning |
-| --- | --- |
-| `DIE_DEEPSCAN` | deep-scan signatures (`DS.*`, `EP.*`) |
-| `DIE_HEURISTICSCAN` | heuristic signatures (`HEUR.*`) |
-| `DIE_ALLTYPESSCAN` | scan all file types |
-| `DIE_RECURSIVESCAN` | recurse into directories |
-| `DIE_VERBOSE` | verbose detections |
-| `DIE_AGGRESSIVESCAN` | aggressive scan |
-| `DIE_RESULTASXML` / `DIE_RESULTASJSON` / `DIE_RESULTASTSV` / `DIE_RESULTASCSV` | structured output instead of plain text |
+| Flag | Value | Meaning |
+| --- | ---: | --- |
+| `DIE_DEEPSCAN` | `0x00000001` | deep-scan signatures (`DS.*`, `EP.*`) |
+| `DIE_HEURISTICSCAN` | `0x00000002` | heuristic signatures (`HEUR.*`) |
+| `DIE_ALLTYPESSCAN` | `0x00000004` | scan all applicable file types |
+| `DIE_RECURSIVESCAN` | `0x00000008` | recursive scan option |
+| `DIE_VERBOSE` | `0x00000010` | verbose detections |
+| `DIE_AGGRESSIVESCAN` | `0x00000020` | aggressive scan |
+| `DIE_RESULTASXML` | `0x00010000` | XML result |
+| `DIE_RESULTASJSON` | `0x00020000` | JSON result |
+| `DIE_RESULTASTSV` | `0x00040000` | currently plain text, matching upstream's omitted TSV assignment |
+| `DIE_RESULTASCSV` | `0x00080000` | semicolon-separated result |
 
-Flags are interpreted exactly as `XScanEngine::setScanFlags` does, and the
-result string is what `ScanItemModel::toString()` produces — which the cdie
-formatters reproduce byte for byte. As in die_library, results are left in
-signature-priority order unless the (undocumented) sort bit `0x02000000` is
-set; the console scanner, by contrast, always sorts by result-type priority.
+Flags are interpreted as `XScanEngine::setScanFlags` does, including its current
+omission of `DIE_RESULTASTSV`. Combined result bits use ScanItemModel's exact
+precedence: CSV, JSON, TSV, XML, then text. The library adapts cdie's console
+XML element names and Unknown capitalization to the ScanItemModel spelling;
+text, JSON, XML and CSV have been byte-compared with the Qt library. Results
+remain in signature-priority order unless the undocumented sort bit
+`0x02000000` is set; the console scanner normally sorts by result priority.
 
 ## Database paths and `$data`
 
@@ -104,11 +122,11 @@ The CMake `die_static` target carries those dependencies automatically.
 
 ## Compatibility notes
 
-- The `.def` in die_library lists `DIE_LoadDatebase*` (a typo); the real
-  exports — and the header — use `DIE_LoadDatabase*`, which is what this
-  library exports.
-- On x64 the `__stdcall` VB functions export under their plain names (x64 has a
-  single calling convention), matching die_library.
-- The per-signature progress callback of `DIE_VB_ScanFileCallback` is not
-  surfaced by the cdie engine; the scan still runs and fills the buffer exactly
-  as `DIE_VB_ScanFile`.
+- The Windows DLL is `die.dll` on both x86 and x64; no architecture suffix is
+  used. Its 14-name x64 export table is identical to the reference DLL built
+  from the commit named above.
+- `DIE_VB_ScanFileCallback` forwards signature name, zero-based database index
+  and database count, and a callback return of zero cancels the scan.
+- The ABI and serialization are compatible. Detection content still comes from
+  the cdie engine, so a core signature-execution difference documented in
+  [LIMITATIONS.md](LIMITATIONS.md) can change which records are serialized.

@@ -106,12 +106,111 @@ static void die_options_from_flags(xx_scan_options *pOptions, unsigned int nFlag
     pOptions->result_as_tsv = 0;
 }
 
+/* cdie's console XML deliberately uses a schema-stable <file-part type="...">
+ * element. ScanItemModel instead uses the displayed part name as the element
+ * name. Adapt only the library result so diec keeps its own public schema. */
+static char *die_compat_xml(const char *pText)
+{
+    static const char sOpen[] = "<file-part type=\"";
+    static const char sClose[] = "</file-part>";
+    static const char sUnknown[] = "type=\"unknown\"";
+    char aNames[64][64];
+    int nDepth = 0;
+    const char *p = pText ? pText : "";
+    xx_buf_t output;
+
+    xx_buf_init(&output);
+
+    while (*p != 0) {
+        if (xx_rt_strncmp(p, sOpen, sizeof(sOpen) - 1) == 0) {
+            const char *pName = p + sizeof(sOpen) - 1;
+            const char *pQuote = pName;
+            const char *pEnd = NULL;
+            size_t nName = 0;
+
+            while ((*pQuote != 0) && (*pQuote != '\"')) {
+                pQuote++;
+            }
+
+            pEnd = pQuote;
+            while ((*pEnd != 0) && (*pEnd != '>')) {
+                pEnd++;
+            }
+
+            nName = (size_t)(pQuote - pName);
+            xx_buf_append_char(&output, '<');
+            xx_buf_append(&output, pName, nName);
+            xx_buf_append(&output, pQuote + ((*pQuote == '\"') ? 1 : 0), (size_t)(pEnd - pQuote - ((*pQuote == '\"') ? 1 : 0) + ((*pEnd == '>') ? 1 : 0)));
+
+            if ((nDepth < (int)(sizeof(aNames) / sizeof(aNames[0]))) && (nName + 1 < sizeof(aNames[0])) && (pEnd > p) && (pEnd[-1] != '/')) {
+                xx_rt_memcpy(aNames[nDepth], pName, nName);
+                aNames[nDepth][nName] = 0;
+                nDepth++;
+            }
+
+            p = pEnd + ((*pEnd == '>') ? 1 : 0);
+        } else if (xx_rt_strncmp(p, sClose, sizeof(sClose) - 1) == 0) {
+            xx_buf_append_str(&output, "</");
+
+            if (nDepth > 0) {
+                nDepth--;
+                xx_buf_append_str(&output, aNames[nDepth]);
+            } else {
+                xx_buf_append_str(&output, "file-part");
+            }
+
+            xx_buf_append_char(&output, '>');
+            p += sizeof(sClose) - 1;
+        } else if (xx_rt_strncmp(p, sUnknown, sizeof(sUnknown) - 1) == 0) {
+            xx_buf_append_str(&output, "type=\"Unknown\"");
+            p += sizeof(sUnknown) - 1;
+        } else {
+            xx_buf_append_char(&output, *p++);
+        }
+    }
+
+    /* QXmlStreamWriter does not append a newline after the root element. */
+    if ((output.size > 0) && (output.data[output.size - 1] == '\n')) {
+        output.size--;
+        output.data[output.size] = 0;
+    }
+
+    return xx_buf_detach(&output, NULL);
+}
+
+static char *die_compat_csv(const char *pText)
+{
+    const char *p = pText ? pText : "";
+    int bLineStart = 1;
+    xx_buf_t output;
+
+    xx_buf_init(&output);
+
+    while (*p != 0) {
+        if (bLineStart && (xx_rt_strncmp(p, "unknown;", 8) == 0)) {
+            xx_buf_append_str(&output, "Unknown;");
+            p += 8;
+            bLineStart = 0;
+        } else {
+            char nChar = *p++;
+            xx_buf_append_char(&output, nChar);
+            bLineStart = (nChar == '\n');
+        }
+    }
+
+    return xx_buf_detach(&output, NULL);
+}
+
 /* Formats a result the same way the console (and ScanItemModel) does. */
 static char *die_format(xx_scan_result *pResult, xx_scan_options *pOptions)
 {
     /* ScanItemModel::toString tests the formats in this exact order. */
     if (pOptions->result_as_csv) {
-        return xx_scan_format_csv(pResult, pOptions, ';');
+        char *pRaw = xx_scan_format_csv(pResult, pOptions, ';');
+        char *pResultText = die_compat_csv(pRaw);
+
+        xx_rt_free(pRaw);
+        return pResultText;
     }
 
     if (pOptions->result_as_json) {
@@ -123,7 +222,11 @@ static char *die_format(xx_scan_result *pResult, xx_scan_options *pOptions)
     }
 
     if (pOptions->result_as_xml) {
-        return xx_scan_format_xml(pResult, pOptions);
+        char *pRaw = xx_scan_format_xml(pResult, pOptions);
+        char *pResultText = die_compat_xml(pRaw);
+
+        xx_rt_free(pRaw);
+        return pResultText;
     }
 
     return xx_scan_format_text(pResult, pOptions);
@@ -357,8 +460,13 @@ typedef struct die_callback_context {
     xx_scan_options *pOptions;
     DIE_VB_CALLBACK pfnCallback;
     XFileType preferredType;
+    XFileType currentType;
+    XFileType aDetectedTypes[XFT_COUNT];
+    int nDetectedTypes;
+    int nPass;
     int bHasPreferredType;
     int bIsCliAssembly;
+    int bInSignatureLevel;
     uint64_t nLastIndex;
 } die_callback_context;
 
@@ -373,6 +481,11 @@ static void die_callback_detect_type(XFileType fileType, void *pUserData)
 
     if (fileType == XFT_CLI_ASSEMBLY) {
         pContext->bIsCliAssembly = 1;
+    } else if (!((fileType == XFT_BINARY) && (pContext->preferredType != XFT_BINARY) && (pContext->preferredType != XFT_COM)) &&
+               (pContext->nDetectedTypes < (int)(sizeof(pContext->aDetectedTypes) / sizeof(pContext->aDetectedTypes[0])))) {
+        /* Type detection always includes the Binary fallback. XScanEngine's
+         * all-types pass does not run it for a recognized formatted file. */
+        pContext->aDetectedTypes[pContext->nDetectedTypes++] = fileType;
     }
 }
 
@@ -409,7 +522,7 @@ static int die_callback_record_runs(const die_callback_context *pContext, const 
         if (!pContext->bIsCliAssembly) {
             return 0;
         }
-    } else if (!xft_check(pRecord->fileType, pContext->preferredType)) {
+    } else if (!xft_check(pRecord->fileType, pContext->currentType)) {
         return 0;
     }
 
@@ -441,6 +554,20 @@ static bool die_callback_observer(const xx_pd_struct *pProgress, void *pUserData
         if (pProgressRecord->is_busy && (xx_rt_strcmp(pProgressRecord->status, "DIE signatures") == 0)) {
             uint64_t nIndex = pProgressRecord->current;
 
+            if (!pContext->bInSignatureLevel) {
+                pContext->bInSignatureLevel = 1;
+                pContext->currentType = pContext->preferredType;
+
+                /* xx_scan_device runs applicable parent formats before the
+                 * preferred format. detect_file_types reports preferred first,
+                 * then the detected parents, so reverse that list per pass. */
+                if (pContext->pOptions->all_types_scan && (pContext->nPass < pContext->nDetectedTypes)) {
+                    pContext->currentType = pContext->aDetectedTypes[pContext->nDetectedTypes - 1 - pContext->nPass];
+                }
+
+                pContext->nPass++;
+            }
+
             if ((nIndex == pContext->nLastIndex) || (nIndex >= (uint64_t)pContext->pDb->nCount)) {
                 return false;
             }
@@ -459,6 +586,7 @@ static bool die_callback_observer(const xx_pd_struct *pProgress, void *pUserData
         }
     }
 
+    pContext->bInSignatureLevel = 0;
     pContext->nLastIndex = UINT64_MAX;
 
     return false;

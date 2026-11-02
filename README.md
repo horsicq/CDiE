@@ -800,6 +800,12 @@ The build also produces a **shared and a static library** exposing the same C
 API as [horsicq/die_library](https://github.com/horsicq/die_library) — the same
 `die.h`, the same flags, the same exported functions — so a program written
 against die_library (its samples included) builds against this one unchanged.
+Compatibility is verified against die_library 0.1.0: `die.dll` has the same 14
+exports, x86 VB stdcall decoration, A/W ownership rules, database lifecycle,
+callback contract and ScanItemModel text/JSON/XML/CSV serialization. The
+upstream project exports no version function; its version is file/build
+metadata. Detection records are still produced by cdie's pure-C engine, so the
+engine limitations documented below also apply through the DLL.
 
 ```text
 die_shared -> die.dll  + die.lib      (Windows)   /  libdie.so  (Unix)
