@@ -720,7 +720,11 @@ MinGW; native desktop runtime/clipboard and Cocoa compilation require those host
 Every dialog of the three GUIs is opened, checked and closed by a smoke run:
 `gui_win32` (`die --smoke-test`, Windows), `cdie.linux_dialogs` and
 `cdie.linux_settings` (GTK probes under `xvfb-run`; skipped with code 77
-without it) and `gui_cocoa` (macOS, needs a logged-in session). Unset
+without it) and `gui_cocoa` (macOS, needs a logged-in session). The shipped
+GTK `die` itself runs as `cdie.gui_gtk_smoke` (`xvfb-run -a die --smoke-test
+die`: a hidden window scans its own executable), also skipped with 77 without
+xvfb-run, as are `cdie.catalog`, `xxwidgets.catalog` and `cdie.translation`
+there. Unset
 `CDIE_TRANSLATION`: all matching is against English captions. On Windows,
 `CDIE_GUI_SMOKE_TRACE=1` prints each step and why a check was skipped;
 `CDIE_GTK_DRIVE_DUMP=1` prints every GTK dialog's widgets.

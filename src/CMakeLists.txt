@@ -139,19 +139,6 @@ function(cdie_stage_frontend_resources target)
         VERBATIM)
 endfunction()
 
-# The Windows GUI previously staged no databases at build time. Add only its
-# translation files; retain the existing database/resource staging elsewhere.
-function(cdie_stage_frontend_translations target)
-    set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS ${CDIE_TRANSLATION_CATALOGS})
-    add_custom_command(TARGET ${target} POST_BUILD
-        COMMAND "${CMAKE_COMMAND}"
-            "-DRESOURCES_DIR=$<TARGET_FILE_DIR:${target}>"
-            "-DCDIE_SOURCE_DIR=${_CDIE_SOURCE_DIR}"
-            "-DINFO_DIR=${CDIE_INFO_DIR}"
-            -DTRANSLATIONS_ONLY=ON -P "${_CDIE_RESOURCES_SCRIPT}"
-        VERBATIM)
-endfunction()
-
 if(CDIE_BUILD_CONSOLE)
     add_subdirectory(console)
 endif()

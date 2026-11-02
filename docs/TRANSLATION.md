@@ -33,7 +33,10 @@ from the main window, Options and the signature editor. The template
 xxwidgets source tree. Built frontend directories carry a `translations` folder
 beside the executable; a macOS bundle carries it in `Contents/Resources`.
 Linux installation puts catalogs in `share/cdie/translations` under the install
-prefix. The command-line path is interpreted relative to the current directory;
+prefix (the FHS layout beside die in `lib/cdie`). With the language field empty
+or `System`, Options > Appearance > "Choose translation..." opens in whichever
+of these folders exists (`cdie_translations_dir()`), including the one inside
+the macOS bundle. The command-line path is interpreted relative to the current directory;
 use an absolute path when launching from other directories.
 
 ## Editing catalogs

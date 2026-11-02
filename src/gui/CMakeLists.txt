@@ -31,8 +31,14 @@ if(APPLE)
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_LIST_DIR}/Info.plist.in"
         MACOSX_BUNDLE_BUNDLE_NAME "die"
         MACOSX_BUNDLE_GUI_IDENTIFIER "com.ntinfo.cdie"
+        MACOSX_BUNDLE_ICON_FILE "die.icns"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "${CDIE_VERSION}"
         MACOSX_BUNDLE_BUNDLE_VERSION "${CDIE_VERSION}")
+    # The application icon (Info.plist CFBundleIconFile), in Contents/Resources.
+    # packaging/macos/die.icns holds the Linux icon PNGs as ic07-ic10 entries.
+    get_filename_component(_cdie_macos_icon "${CMAKE_CURRENT_LIST_DIR}/../../packaging/macos/die.icns" ABSOLUTE)
+    target_sources(cdie_gui PRIVATE "${_cdie_macos_icon}")
+    set_source_files_properties("${_cdie_macos_icon}" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
     set_property(TARGET cdie_gui APPEND PROPERTY LINK_DEPENDS ${CDIE_TRANSLATION_CATALOGS})
     add_custom_command(TARGET cdie_gui POST_BUILD
         COMMAND "${CMAKE_COMMAND}"
@@ -68,7 +74,7 @@ add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/cdie_about_image.c"
         -P "${CMAKE_CURRENT_LIST_DIR}/embed_file.cmake"
     DEPENDS "${CMAKE_CURRENT_LIST_DIR}/images/about.png" "${CMAKE_CURRENT_LIST_DIR}/embed_file.cmake"
     VERBATIM)
-target_sources(cdie_gui PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/cdie_about_image.c" gui_about.c gui_update.c gui_options.c gui_settings.c gui_preferences.c gui_options_extra.c gui_frontend_preferences.c gui_png.c gui_tree.c gui_result_tree.c gui_scan_options.c gui_file_information.c gui_entropy.c gui_hash.c gui_strings.c gui_strings_source.c gui_extractor.c gui_extractor_source.c gui_hex_view.c gui_disasm.c gui_memory_map.c gui_imports.c gui_exports.c gui_resources.c gui_symbols.c ../app/cdie_symbols.c ../app/cdie_resources.c ../app/cdie_exports.c ../app/cdie_imports.c ../app/cdie_memory_map.c ../app/cdie_disasm.c ../app/cdie_strings.c ../app/cdie_hash.c ../app/cdie_entropy.c ../app/cdie_file_info.c)
+target_sources(cdie_gui PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/cdie_about_image.c" gui_about.c gui_update.c gui_options.c gui_settings.c gui_preferences.c gui_options_extra.c gui_frontend_preferences.c gui_tools.c gui_png.c gui_tree.c gui_result_tree.c gui_scan_options.c gui_file_information.c gui_entropy.c gui_hash.c gui_strings.c gui_strings_source.c gui_extractor.c gui_extractor_source.c gui_hex_view.c gui_disasm.c gui_memory_map.c gui_imports.c gui_exports.c gui_resources.c gui_symbols.c ../app/cdie_symbols.c ../app/cdie_resources.c ../app/cdie_exports.c ../app/cdie_imports.c ../app/cdie_memory_map.c ../app/cdie_disasm.c ../app/cdie_strings.c ../app/cdie_hash.c ../app/cdie_entropy.c ../app/cdie_file_info.c)
 target_include_directories(cdie_gui PRIVATE ${CMAKE_CURRENT_LIST_DIR}/..)
 target_link_libraries(cdie_gui PRIVATE xxfclib::die_engine xxwidgets::xxwidgets cdie_ui_translation cdie_settings cdisasm::cdisasm)
 # The "Update database" button runs the updater in-process (CDIE_HAVE_UPDATER).

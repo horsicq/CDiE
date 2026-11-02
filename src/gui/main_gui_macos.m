@@ -73,6 +73,15 @@ static xxwidgets_status refresh_panel_tags(void)
     gui_backend_free(tags);
     return status;
 }
+/* After a database reload the results and file types came from the old
+ * signatures: clear them, as Windows and GTK do, then refresh the tags. */
+static xxwidgets_status reload_panel_tags(void)
+{
+    xxwidgets_status status = xxwidgets_scan_panel_clear(g_panel);
+    if (status == XXWIDGETS_OK) status = xxwidgets_widget_set_enabled(control(XXWIDGETS_SCAN_PANEL_FILE_TYPE), 0);
+    [g_type_path release]; g_type_path = nil;
+    return status == XXWIDGETS_OK ? refresh_panel_tags() : status;
+}
 static xxwidgets_status apply_panel_tag_filters(void)
 {
     size_t include_size = 0, exclude_size = 0;
@@ -117,30 +126,35 @@ static void open_path(NSString *path)
     gui_frontend_remember_file([path UTF8String]);
     g_pending = gui_frontend_scan_after_open() ? ACTION_SCAN : ACTION_NONE;
 }
+/* The window's start and minimum size in cells. A cell is as wide as "M"
+ * (11-12 pt), so the minimum still fits a 1280 pt wide screen; the backend
+ * clamps a larger window to the screen and lays out for what fits. */
+#define MAIN_WINDOW_COLUMNS 116
+#define MAIN_WINDOW_ROWS 34
+#define MAIN_WINDOW_MIN_COLUMNS 104
+#define MAIN_WINDOW_MIN_ROWS 28
 static void layout(void)
 {
+    /* The two tool rows under the panel, seven buttons each. */
+    static xxwidgets_widget **const tools[2][7] = {
+        {&g_options, &g_imports, &g_exports, &g_resources, &g_symbols, &g_extractor, &g_update},
+        {&g_file_information, &g_entropy, &g_hash, &g_strings, &g_hex_view, &g_disasm, &g_memory_map}};
     xxwidgets_rect bounds;
     if (!g_panel || xxwidgets_widget_get_rect(g_window, &bounds) != XXWIDGETS_OK) return;
     int width = bounds.width, height = bounds.height;
     xxwidgets_widget_set_rect(g_path, (xxwidgets_rect){2, 1, width - 17, 2});
     xxwidgets_widget_set_rect(g_browse, (xxwidgets_rect){width - 13, 1, 11, 2});
     /* At least the panel's minimum height (14) in a short window. */
-    xxwidgets_scan_panel_set_rect(g_panel, (xxwidgets_rect){2, 4, width - 4, height - 13 < 14 ? 14 : height - 13});
-    xxwidgets_widget_set_rect(g_options, (xxwidgets_rect){2, height - 8, 16, 2});
-    xxwidgets_widget_set_rect(g_imports, (xxwidgets_rect){20, height - 8, 18, 2});
-    xxwidgets_widget_set_rect(g_exports, (xxwidgets_rect){40, height - 8, 18, 2});
-    xxwidgets_widget_set_rect(g_resources, (xxwidgets_rect){60, height - 8, 22, 2});
-    xxwidgets_widget_set_rect(g_symbols, (xxwidgets_rect){84, height - 8, 18, 2});
-    xxwidgets_widget_set_rect(g_extractor, (xxwidgets_rect){104, height - 8, 22, 2});
-    xxwidgets_widget_set_rect(g_update, (xxwidgets_rect){128, height - 8, 16, 2});
-    xxwidgets_widget_set_rect(g_file_information, (xxwidgets_rect){2, height - 5, 26, 2});
-    xxwidgets_widget_set_rect(g_entropy, (xxwidgets_rect){30, height - 5, 16, 2});
-    xxwidgets_widget_set_rect(g_hash, (xxwidgets_rect){48, height - 5, 14, 2});
-    xxwidgets_widget_set_rect(g_strings, (xxwidgets_rect){64, height - 5, 18, 2});
-    xxwidgets_widget_set_rect(g_hex_view, (xxwidgets_rect){84, height - 5, 18, 2});
-    xxwidgets_widget_set_rect(g_disasm, (xxwidgets_rect){104, height - 5, 18, 2});
-    xxwidgets_widget_set_rect(g_memory_map, (xxwidgets_rect){124, height - 5, 20, 2});
-    xxwidgets_widget_set_rect(g_status, (xxwidgets_rect){2, height - 2, width - 4, 1});
+    xxwidgets_scan_panel_set_rect(g_panel, (xxwidgets_rect){2, 4, width - 4, height - 14 < 14 ? 14 : height - 14});
+    /* Each row shares the width between its buttons, as on GTK, so all of
+     * them stay inside a window of any width. */
+    for (int row = 0; row < 2; ++row)
+        for (int column = 0; column < 7; ++column) {
+            int x = 2 + column * (width - 4) / 7, end = 2 + (column + 1) * (width - 4) / 7;
+            xxwidgets_widget_set_rect(*tools[row][column], (xxwidgets_rect){x, height - 9 + row * 3, end - x - 1, 2});
+        }
+    /* Two rows, as on Windows, for a message too long for one. */
+    xxwidgets_widget_set_rect(g_status, (xxwidgets_rect){2, height - 3, width - 4, 2});
 }
 static void on_event(xxwidgets_app *app, const xxwidgets_event *event, void *user)
 {
@@ -226,8 +240,9 @@ static int do_scan(void)
     free(text);
     if (!path) return 0;
     xxwidgets_widget *combo = control(XXWIDGETS_SCAN_PANEL_FILE_TYPE);
-    xxwidgets_scan_panel_clear(g_panel);
+    /* No file: the results stay, as on Windows. */
     if (![path length]) { NSBeep(); xxwidgets_widget_focus(g_path); return 0; }
+    xxwidgets_scan_panel_clear(g_panel);
     if (!refresh_types(path)) {
         xxwidgets_widget_set_enabled(combo, 0);
         xxwidgets_widget_set_text(g_status, CDIE_TR("Cannot open this file. Check the path and permissions."));
@@ -268,13 +283,26 @@ static int do_scan(void)
 static void do_open(void)
 {
     NSOpenPanel *picker = [NSOpenPanel openPanel];
-    [picker setTitle:cdie_ns_tr(@"Choose a file to scan")];
+    /* Windows' title; current panels show the message, not the title. */
+    [picker setTitle:cdie_ns_tr(@"Select a file to scan")];
+    [picker setMessage:cdie_ns_tr(@"Select a file to scan")];
     [picker setCanChooseDirectories:NO];
     [picker setAllowsMultipleSelection:NO];
     gui_options_values preferences;
     gui_preferences_get(&preferences);
-    if (preferences.file.save_last_directory && preferences.file.last_directory[0])
-        [picker setDirectoryURL:[NSURL fileURLWithPath:string(preferences.file.last_directory) isDirectory:YES]];
+    /* As on Windows, the folder of the file in the path field comes first,
+     * then the last directory when it is kept. */
+    NSString *folder = nil;
+    char current[GUI_PREFERENCE_PATH_MAX];
+    BOOL directory = NO;
+    if (xxwidgets_widget_get_text(g_path, current, sizeof(current), NULL) == XXWIDGETS_OK && current[0]) {
+        NSString *path = [string(current) stringByExpandingTildeInPath];
+        folder = [[NSFileManager defaultManager] fileExistsAtPath:path isDirectory:&directory] && directory ?
+            path : [path stringByDeletingLastPathComponent];
+        if (![folder length] || ![[NSFileManager defaultManager] fileExistsAtPath:folder isDirectory:&directory] || !directory) folder = nil;
+    }
+    if (!folder && preferences.file.save_last_directory && preferences.file.last_directory[0]) folder = string(preferences.file.last_directory);
+    if (folder) [picker setDirectoryURL:[NSURL fileURLWithPath:folder isDirectory:YES]];
     if ([picker runModal] == NSModalResponseOK) open_path([[picker URL] path]);
 }
 static void do_file_information(void)
@@ -520,11 +548,16 @@ static void do_extractor(void)
 static xxwidgets_status browse_database(xxwidgets_widget *dialog, const char *initial, char **path, int *accepted, void *user)
 {
     NSOpenPanel *picker = [NSOpenPanel openPanel];
+    /* The asking page's title and start folder, as on Windows (gui_options.h). */
+    gui_options_page_id page = gui_options_browse_page();
+    char *start = gui_options_browse_start(page, initial);
     (void)dialog; (void)user;
     *path = NULL; *accepted = 0;
     [picker setCanChooseDirectories:YES]; [picker setCanChooseFiles:NO];
-    [picker setTitle:cdie_ns_tr(@"Choose a signature database folder")];
-    if (initial && initial[0]) [picker setDirectoryURL:[NSURL fileURLWithPath:string(initial)]];
+    [picker setTitle:string(gui_options_browse_title(page))];
+    [picker setMessage:string(gui_options_browse_title(page))];
+    if (start) [picker setDirectoryURL:[NSURL fileURLWithPath:string(start) isDirectory:YES]];
+    free(start);
     if ([picker runModal] != NSModalResponseOK) return XXWIDGETS_OK;
     const char *chosen = [[[picker URL] path] UTF8String];
     if (!chosen) return XXWIDGETS_INVALID_ARGUMENT;
@@ -578,7 +611,7 @@ static void do_options(gui_options_page_id page)
     if (status == XXWIDGETS_OK) status = gui_options_dialog(g_window, &host, &g_options_page, &values, &accepted, &reloaded);
     if (status != XXWIDGETS_OK) { report_ui_error("Options", status); return; }
     if (reloaded) {
-        status = refresh_panel_tags();
+        status = reload_panel_tags();
         if (status != XXWIDGETS_OK) { report_ui_error("Refresh signature tags", status); return; }
         ready();
     }
@@ -612,7 +645,7 @@ static gui_update_result do_update(xxwidgets_widget *owner)
     result = gui_update_run(owner, preferences.databases.main_update_url, message, sizeof(message));
     /* Installed, or switched to an up-to-date per-user copy. */
     if (gui_backend_database_generation() != generation) {
-        xxwidgets_status status = refresh_panel_tags();
+        xxwidgets_status status = reload_panel_tags();
         if (status != XXWIDGETS_OK) { report_ui_error("Refresh signature tags", status); return result; }
     }
     xxwidgets_widget_set_text(g_status, message);
@@ -679,6 +712,66 @@ static void run_action(int action)
     }
 }
 
+static int g_memory_settings; /* smoke runs: the settings stay in memory */
+static int g_settings_stored; /* the shared store was read, so a save writes it */
+/* Options are saved on the way out, as on Windows. Once they are in the
+ * shared store (not an unreadable one, nor a CDIE_SETTINGS file), so are the
+ * folders versions before it kept under DatabasePaths: that key is removed
+ * and not read at the next start. */
+static void save_settings(void)
+{
+    gui_options_values values;
+    if (g_memory_settings || !g_settings || !g_window || current_options(&values) != XXWIDGETS_OK) return;
+    if (gui_settings_save(g_settings, &values, g_options_page) && g_settings_stored && !getenv("CDIE_SETTINGS")) {
+        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+        if ([defaults objectForKey:@"DatabasePaths"]) {
+            [defaults removeObjectForKey:@"DatabasePaths"];
+            [defaults synchronize];
+        }
+    }
+}
+/* What every way out does, once: main()'s return, or Quit, Dock > Quit and
+ * logout, where [NSApp terminate:] calls exit() after applicationWillTerminate:. */
+static void finish_session(void)
+{
+    static int finished;
+    if (finished) return;
+    finished = 1;
+    save_settings();
+    gui_frontend_instance_close();
+    gui_settings_close(g_settings); g_settings = NULL;
+    gui_tree_reset();
+    gui_backend_shutdown();
+}
+/* Hidden until the database is loaded and this copy is the only one, as on
+ * Windows; then centred and brought to the front. */
+static void show_main_window(void)
+{
+    NSWindow *window = xxwidgets_widget_native_handle(g_window);
+    [window center];
+    xxwidgets_widget_set_visible(g_window, 1);
+    [window makeKeyAndOrderFront:nil];
+    [NSApp activateIgnoringOtherApps:YES];
+}
+/* A later launch with "Single application" sent its file (Windows:
+ * WM_COPYDATA): set it, remember it, scan when Options say so, and come to
+ * the front. Polled by the main loop, so an open dialog delays it. */
+static void receive_forwarded_file(void)
+{
+    char *path = NULL;
+    NSWindow *window;
+    if (!gui_frontend_instance_poll(g_window, &path) || !path) return;
+    if (path[0] && xxwidgets_widget_set_text(g_path, path) == XXWIDGETS_OK) {
+        gui_frontend_remember_file(path);
+        if (gui_frontend_scan_after_open()) g_pending = ACTION_SCAN;
+    }
+    free(path);
+    window = xxwidgets_widget_native_handle(g_window);
+    if ([window isMiniaturized]) [window deminiaturize:nil];
+    [NSApp activateIgnoringOtherApps:YES];
+    [window makeKeyAndOrderFront:nil];
+}
+
 @interface CDIEApplication : NSObject <NSApplicationDelegate>
 - (void)action:(id)sender;
 - (BOOL)validateMenuItem:(NSMenuItem *)item;
@@ -695,14 +788,20 @@ static void run_action(int action)
     if ([item tag] == ACTION_RECENT) return history_enabled() ? YES : NO;
     return YES;
 }
+/* Quit, Dock > Quit and logout. As on Windows, nothing quits while a dialog,
+ * a picker or a scan holds the main window (the test validateMenuItem: uses):
+ * the Signatures editor would lose an unsaved edit without its question.
+ * Otherwise AppKit goes on to applicationWillTerminate: and exit(), so a
+ * logout is not held up. */
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender
 {
+    NSWindow *window = g_window ? xxwidgets_widget_native_handle(g_window) : nil;
     (void)sender;
-    g_running = 0;
-    xxwidgets_app_quit(g_app, 0);
-    if ([NSApp modalWindow]) [NSApp abortModal];
-    return NSTerminateCancel;
+    if ([window ignoresMouseEvents] || [NSApp modalWindow]) { NSBeep(); return NSTerminateCancel; }
+    return NSTerminateNow;
 }
+- (void)applicationWillTerminate:(NSNotification *)notification
+{ (void)notification; finish_session(); }
 - (BOOL)application:(NSApplication *)sender openFile:(NSString *)filename
 { (void)sender; open_path(filename); return YES; }
 @end
@@ -747,6 +846,14 @@ static void install_menu(CDIEApplication *delegate)
     [help setSubmenu:help_menu]; [menu addItem:help]; [NSApp setHelpMenu:help_menu];
 }
 
+/* Cmd+U does what the disabled Update database button does without an
+ * updater: nothing, as on Windows. Report and Recent keep their beep. */
+static int shortcut_allowed(xxwidgets_widget *window, int action, void *user)
+{
+    (void)window; (void)user;
+    return action != ACTION_UPDATE || gui_update_supported();
+}
+
 static int create_controls(void)
 {
     if (xxwidgets_widget_create(g_app, g_window, XXWIDGETS_EDIT, "", (xxwidgets_rect){2, 1, 75, 2}, &g_path) != XXWIDGETS_OK ||
@@ -766,7 +873,7 @@ static int create_controls(void)
         xxwidgets_widget_create(g_app, g_window, XXWIDGETS_BUTTON, CDIE_TR("Symbols…"), (xxwidgets_rect){124, 26, 18, 2}, &g_symbols) != XXWIDGETS_OK ||
         xxwidgets_widget_create(g_app, g_window, XXWIDGETS_BUTTON, CDIE_TR("Extractor…"), (xxwidgets_rect){104, 26, 22, 2}, &g_extractor) != XXWIDGETS_OK ||
         xxwidgets_widget_create(g_app, g_window, XXWIDGETS_BUTTON, CDIE_TR("Update database"), (xxwidgets_rect){128, 26, 16, 2}, &g_update) != XXWIDGETS_OK ||
-        xxwidgets_widget_create(g_app, g_window, XXWIDGETS_LABEL, CDIE_TR("Loading databases…"), (xxwidgets_rect){2, 29, 88, 1}, &g_status) != XXWIDGETS_OK) return 0;
+        xxwidgets_widget_create(g_app, g_window, XXWIDGETS_LABEL, CDIE_TR("Loading databases…"), (xxwidgets_rect){2, 31, 88, 2}, &g_status) != XXWIDGETS_OK) return 0;
     NSTextField *field = xxwidgets_widget_native_handle(g_path);
     [field setPlaceholderString:cdie_ns_tr(@"Choose or drop a file to scan")];
     [field setAccessibilityLabel:cdie_ns_tr(@"File to scan")];
@@ -774,10 +881,12 @@ static int create_controls(void)
     xxwidgets_widget_set_enabled(g_update, gui_update_supported());
     NSButton *scan = xxwidgets_widget_native_handle(control(XXWIDGETS_SCAN_PANEL_SCAN));
     [scan setKeyEquivalent:@"\r"];
+    /* F1 and F2 as on Windows and Linux, beside Cmd+? and Cmd+,. */
     const xxwidgets_shortcut shortcuts[] = {{"F5", ACTION_SCAN}, {"Cmd+O", ACTION_OPEN}, {"Cmd+R", ACTION_RECENT}, {"Cmd+Shift+R", ACTION_REPORT}, {"Cmd+U", ACTION_UPDATE},
-        {"F1", ACTION_ABOUT}};
+        {"F1", ACTION_ABOUT}, {"F2", ACTION_OPTIONS}};
     /* The custom database is on until saved Options say otherwise. */
     return xxwidgets_scan_panel_set_databases(g_panel, XXWIDGETS_SCAN_DATABASE_CUSTOM) == XXWIDGETS_OK &&
+        xxwidgets_window_set_shortcut_filter(g_window, shortcut_allowed, NULL) == XXWIDGETS_OK &&
         xxwidgets_window_set_shortcuts(g_window, shortcuts, sizeof(shortcuts) / sizeof(shortcuts[0])) == XXWIDGETS_OK;
 }
 
@@ -812,6 +921,7 @@ typedef struct smoke_driver {
     NSWindow *owner;    /* the main window */
     const char *title, *button, *waiting, *reason;
     int action, check, page, folder, font_choose, phase, seen, done, failed, aborted;
+    int quit_probe;     /* once the content is right: Quit must be refused */
     NSTimeInterval started, seen_at;
 } smoke_driver;
 static smoke_driver g_smoke;
@@ -1077,6 +1187,11 @@ static void smoke_tick(void)
         if (content < 0 || (!content && now - g_smoke.seen_at > SMOKE_SETTLE)) { smoke_stop(g_smoke.waiting); return; }
         if (!content) return;
     }
+    if (g_smoke.quit_probe) {
+        /* Quit while the dialog holds the main window: refused, and the dialog stays. */
+        g_smoke.quit_probe = 0;
+        if ([[NSApp delegate] applicationShouldTerminate:NSApp] != NSTerminateCancel) { smoke_stop("Quit is not refused while a dialog is open"); return; }
+    }
     g_smoke.waiting = "the dialog did not close";
     if (g_smoke.action == SMOKE_ESCAPE) { smoke_escape(window); g_smoke.done = 1; return; }
     if (g_smoke.action == SMOKE_CLOSE_BOX) { [window performClose:nil]; g_smoke.done = 1; return; }
@@ -1120,6 +1235,43 @@ static int smoke_main_usable(void)
     NSButton *options = xxwidgets_widget_native_handle(g_options);
     return window && ![window ignoresMouseEvents] && [window canBecomeKeyWindow] && ![window attachedSheet] && ![NSApp modalWindow] &&
         [options isEnabled] && xxwidgets_app_poll(g_app, 0) == XXWIDGETS_OK;
+}
+/* The main window fits the visible part of its screen and, laid out for the
+ * size it got, holds every control inside: nothing is cut off. A screen too
+ * narrow for the window's minimum size is only reported. */
+static int smoke_main_fits(void)
+{
+    NSWindow *window = xxwidgets_widget_native_handle(g_window);
+    NSButton *browse = xxwidgets_widget_native_handle(g_browse);
+    NSScreen *screen;
+    NSRect visible, frame, content;
+    xxwidgets_rect cells;
+    CGFloat cell;
+    if (xxwidgets_app_poll(g_app, 0) != XXWIDGETS_OK) return 0;
+    if (g_layout) { g_layout = 0; layout(); }
+    screen = [window screen] ? [window screen] : [NSScreen mainScreen];
+    visible = [screen visibleFrame]; frame = [window frame]; content = [[window contentView] bounds];
+    /* The cell width, from a control's alignment rect (its cells, without AppKit's bezel). */
+    if (!screen || !browse || xxwidgets_widget_get_rect(g_browse, &cells) != XXWIDGETS_OK || cells.width <= 0) return 0;
+    cell = NSWidth([browse alignmentRectForFrame:[browse frame]]) / cells.width;
+    if (MAIN_WINDOW_MIN_COLUMNS * cell > NSWidth([window contentRectForFrameRect:visible]) + 0.5) {
+        fprintf(stderr, "Cocoa GUI smoke: the screen (%.0f pt) is narrower than the main window's minimum; its fit is not checked\n", NSWidth(visible));
+        return 1;
+    }
+    if (NSWidth(frame) > NSWidth(visible) + 0.5 || NSHeight(frame) > NSHeight(visible) + 0.5) {
+        fprintf(stderr, "Cocoa GUI smoke: the main window (%.0fx%.0f) is larger than the screen's visible area (%.0fx%.0f)\n",
+            NSWidth(frame), NSHeight(frame), NSWidth(visible), NSHeight(visible));
+        return 0;
+    }
+    for (NSView *view in [[window contentView] subviews]) {
+        NSRect slot = [view alignmentRectForFrame:[view frame]];
+        if (![view isHidden] && !NSContainsRect(NSInsetRect(content, -0.5, -0.5), slot)) {
+            fprintf(stderr, "Cocoa GUI smoke: a %s at %.0f,%.0f %.0fx%.0f lies outside the main window's %.0fx%.0f\n",
+                [NSStringFromClass([view class]) UTF8String], NSMinX(slot), NSMinY(slot), NSWidth(slot), NSHeight(slot), NSWidth(content), NSHeight(content));
+            return 0;
+        }
+    }
+    return 1;
 }
 /* Disarms the driver: 1 when the case passed, else its reason goes to stderr. */
 static int smoke_finish(void)
@@ -1194,7 +1346,8 @@ static xxwidgets_status smoke_progress_update(void *user, int stop_requested, xx
  * 23 Resources, 24 Symbols, 26 Extractor. Modal dialogs (smoke_tick): 27 the
  * Report action and menu item do nothing without a report, 28 Automatic
  * rescan enables them, 29 File > Report shows the report (Close), 30 S mark
- * opens Signatures (Close), 31 Log button (Escape), 32 Directory button
+ * opens Signatures (Quit allowed before, refused while it is open; Close),
+ * 31 Log button (Escape), 32 Directory button
  * opens Scan directory in the file's folder (Close), 33 Help > About (Cmd+?)
  * (OK), 34 About Escape, 35 About close box, 36-45 Options on each page in
  * gui_options_page_id order (Cancel; page controls, Choose font state), 46
@@ -1208,7 +1361,8 @@ static xxwidgets_status smoke_progress_update(void *user, int stop_requested, xx
  * Exports, Resources, Symbols, Extractor (Close), 68 Hash Escape, 69-71
  * Exports, Resources and Symbols dialogs on one synthetic row (Close), 72 a
  * progress dialog (Cancel), 73 Updating Database against a stalled loopback
- * address (Cancel; offline). */
+ * address (Cancel; offline). Also 74: the main window fits the screen and
+ * every control lies inside it. */
 static int smoke_test(NSString *path)
 {
     gui_backend_optimization_options saved, changed, actual;
@@ -1225,6 +1379,7 @@ static int smoke_test(NSString *path)
     changed.use_arm_pmull = 2;
     if (gui_backend_set_optimization_options(&changed) || !gui_backend_set_optimization_options(&saved)) return 12;
     if (!gui_backend_signature_count()) { fprintf(stderr, "No bundled signatures loaded\n"); return 1; }
+    if (!smoke_main_fits()) return 74;
     {
         xxwidgets_widget *include_combo = control(XXWIDGETS_SCAN_PANEL_INCLUDE_TAGS);
         xxwidgets_widget *exclude_combo = control(XXWIDGETS_SCAN_PANEL_EXCLUDE_TAGS);
@@ -1469,7 +1624,10 @@ static int smoke_test(NSString *path)
         {
             xxwidgets_event press = {0};
             press.type = XXWIDGETS_EVENT_CLICK; press.widget = results; press.value = (int)i; press.x = 0;
-            if (!gui_tree_event(g_panel, &press) || !smoke_begin("Signatures", SMOKE_BUTTON, SMOKE_CHECK_SIGNATURES, "Close", nil)) return 30;
+            /* Quit is allowed from the main window alone (a smoke run saves nothing). */
+            if (!gui_tree_event(g_panel, &press) || [delegate applicationShouldTerminate:NSApp] != NSTerminateNow ||
+                !smoke_begin("Signatures", SMOKE_BUTTON, SMOKE_CHECK_SIGNATURES, "Close", nil)) return 30;
+            g_smoke.quit_probe = 1;
         }
         message = gui_tree_process(g_window);
         if (!smoke_finish() || message) return 30;
@@ -1530,7 +1688,7 @@ static int smoke_test(NSString *path)
         if (!smoke_finish()) return 51;
         /* 52: Open… cancelled changes nothing. */
         if (xxwidgets_widget_get_text(g_path, before, sizeof(before), NULL) != XXWIDGETS_OK ||
-            !smoke_begin("Choose a file to scan", SMOKE_PANEL, SMOKE_CHECK_NONE, NULL, nil)) return 52;
+            !smoke_begin("Select a file to scan", SMOKE_PANEL, SMOKE_CHECK_NONE, NULL, nil)) return 52;
         g_pending = ACTION_NONE;
         run_action(ACTION_OPEN);
         if (!smoke_finish() || g_pending != ACTION_NONE || xxwidgets_widget_get_text(g_path, after, sizeof(after), NULL) != XXWIDGETS_OK ||
@@ -1706,6 +1864,7 @@ int main(int argc, char **argv)
         if (status != XXWIDGETS_OK) { fprintf(stderr, "%s\n", xxwidgets_status_string(status)); return 1; }
         int result = 0;
         CDIEApplication *delegate = nil;
+        g_memory_settings = smoke;
         size_t translation_line=0;
         char *stored_translation = !translation && !getenv("CDIE_TRANSLATION") ? gui_frontend_stored_language(smoke) : NULL;
         status=cdie_translation_open(g_app,translation ? translation : stored_translation,&translation_line);
@@ -1714,47 +1873,69 @@ int main(int argc, char **argv)
             status = cdie_translation_open(g_app,NULL,&translation_line);
         }
         free(stored_translation);
-        if (status != XXWIDGETS_OK) { fprintf(stderr,"Cannot load translation (line %zu)\n",translation_line); result=1; goto finish; }
-        if (xxwidgets_widget_create(g_app, NULL, XXWIDGETS_WINDOW, gui_backend_app_title(),
-                (xxwidgets_rect){4, 3, 146, 34}, &g_window) != XXWIDGETS_OK || !create_controls()) {
-            result = 1; goto finish;
+        if (status != XXWIDGETS_OK) {
+            fprintf(stderr,"Cannot load translation (line %zu)\n",translation_line);
+            /* Windows' message box, in English (no catalog loaded); a smoke run never waits on one. */
+            if (!smoke) {
+                NSAlert *alert = [[NSAlert alloc] init];
+                [alert setAlertStyle:NSAlertStyleCritical];
+                [alert setMessageText:@"Cannot load PO translation."];
+                [alert setInformativeText:translation_line ?
+                    [NSString stringWithFormat:@"Check --translation FILE and CDIE_TRANSLATION (line %lu).", (unsigned long)translation_line] :
+                    @"Check --translation FILE and CDIE_TRANSLATION."];
+                [NSApp activateIgnoringOtherApps:YES];
+                [alert runModal];
+                [alert release];
+            }
+            result=1; goto finish;
         }
-        xxwidgets_window_set_minimum_size(g_window, 146, 28);
+        /* Created hidden; show_main_window() shows it once it is ready. */
+        xxwidgets_app_set_create_hidden(g_app, 1);
+        status = xxwidgets_widget_create(g_app, NULL, XXWIDGETS_WINDOW, gui_backend_app_title(),
+            (xxwidgets_rect){4, 3, MAIN_WINDOW_COLUMNS, MAIN_WINDOW_ROWS}, &g_window);
+        xxwidgets_app_set_create_hidden(g_app, 0);
+        if (status != XXWIDGETS_OK || !create_controls()) { result = 1; goto finish; }
+        xxwidgets_window_set_minimum_size(g_window, MAIN_WINDOW_MIN_COLUMNS, MAIN_WINDOW_MIN_ROWS);
         if (xxwidgets_window_set_accept_file_drops(g_window, 1) != XXWIDGETS_OK) { result = 1; goto finish; }
-        NSWindow *window = xxwidgets_widget_native_handle(g_window);
         delegate = [[CDIEApplication alloc] init];
         [NSApp setDelegate:delegate];
         install_menu(delegate);
         gui_backend_init();
         if (!smoke) {
             /* Folders saved by earlier versions (main, extra, custom); the
-             * shared settings below win. The extra folder is not used any more. */
+             * shared settings below win. The extra folder is not used any more.
+             * The first save of the settings removes the key (save_settings). */
             NSArray *paths = [[NSUserDefaults standardUserDefaults] arrayForKey:@"DatabasePaths"];
             if ([paths count] == 3 && [paths[0] isKindOfClass:[NSString class]] && [paths[2] isKindOfClass:[NSString class]])
                 gui_backend_set_db_paths([paths[0] UTF8String], [paths[2] UTF8String]);
         }
         int settings_read = 1, settings_databases = 1;
+        xxwidgets_status options_status, tags_status;
         {
             /* Saved Options apply before the first scan; smoke tests keep them in memory. */
             gui_options_values values;
             g_settings = gui_settings_open(smoke, &settings_read);
-            status = current_options(&values);
-            if (status == XXWIDGETS_OK) settings_databases = gui_settings_load(g_settings, &values, &g_options_page);
-            if (status == XXWIDGETS_OK) status = apply_options(&values);
-            if (status != XXWIDGETS_OK) { report_ui_error("Apply saved options", status); result = 1; goto finish; }
+            g_settings_stored = !smoke && settings_read;
+            options_status = current_options(&values);
+            if (options_status == XXWIDGETS_OK) settings_databases = gui_settings_load(g_settings, &values, &g_options_page);
+            if (options_status == XXWIDGETS_OK) options_status = apply_options(&values);
         }
-        status = refresh_panel_tags();
-        if (status != XXWIDGETS_OK) { report_ui_error(CDIE_N_("Load signature tags"), status); result = 1; goto finish; }
+        tags_status = refresh_panel_tags();
         ready(); layout();
         if (!settings_databases) xxwidgets_widget_set_text(g_status, CDIE_TR("The saved signature folders cannot be loaded; the default ones are active."));
         else if (!settings_read) xxwidgets_widget_set_text(g_status, CDIE_TR("Saved options cannot be read; the defaults are used."));
-        if (update_expected) { result = smoke_update(smoke_update_find(update_expected)); goto finish; }
-        if (smoke) { result = smoke_test(startup ?: [[NSBundle mainBundle] executablePath]); goto finish; }
+        /* As on Windows and Linux, the window opens with what did load and the
+         * status line says what did not; only a smoke run stops. */
+        if (options_status != XXWIDGETS_OK) report_ui_error("Apply saved options", options_status);
+        if (tags_status != XXWIDGETS_OK) report_ui_error(CDIE_N_("Load signature tags"), tags_status);
+        if (smoke && (options_status != XXWIDGETS_OK || tags_status != XXWIDGETS_OK)) { result = 1; goto finish; }
+        if (update_expected) { show_main_window(); result = smoke_update(smoke_update_find(update_expected)); goto finish; }
+        if (smoke) { show_main_window(); result = smoke_test(startup ?: [[NSBundle mainBundle] executablePath]); goto finish; }
         {
             int instance=gui_frontend_instance_start(g_window,startup?[startup UTF8String]:NULL);
             if(instance<=0){if(instance<0){fprintf(stderr,"Cannot acquire application instance lock.\n");result=1;}goto finish;}
         }
-        [window center]; [window makeKeyAndOrderFront:nil]; [NSApp activateIgnoringOtherApps:YES];
+        show_main_window();
         xxwidgets_widget_focus(g_path);
         if (startup) open_path(startup);
         while (g_running) {
@@ -1763,6 +1944,7 @@ int main(int argc, char **argv)
                 if (status != XXWIDGETS_OK) { result = 1; break; }
                 if (!g_running) break;
                 if (g_layout) { g_layout = 0; layout(); }
+                receive_forwarded_file();
                 const char *message = gui_tree_process(g_window);
                 if (message) xxwidgets_widget_set_text(g_status, message);
                 int action = g_pending; g_pending = ACTION_NONE;
@@ -1770,14 +1952,7 @@ int main(int argc, char **argv)
             }
         }
 finish:
-        if (!smoke && g_settings && g_window) {
-            gui_options_values values;
-            if(current_options(&values)==XXWIDGETS_OK)(void)gui_settings_save(g_settings,&values,g_options_page);
-        }
-        gui_frontend_instance_close();
-        gui_settings_close(g_settings);
-        gui_tree_reset();
-        gui_backend_shutdown();
+        finish_session();
         [g_type_path release]; g_type_path = nil;
         if (g_panel) xxwidgets_scan_panel_destroy(g_panel);
         (cdie_translation_close(), xxwidgets_app_destroy(g_app));

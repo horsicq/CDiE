@@ -2,6 +2,7 @@
 #include "gui_options_extra.h"
 #include "gui_error.h"
 #include "app/cdie_translation.h"
+#include "app/cdie_paths.h"
 #include <xxwidgets/xxwidgets_combobox.h>
 #ifdef validate
 #undef validate
@@ -236,9 +237,13 @@ static xxwidgets_status process(void*state)
             CDIE_TR("No font chooser is available; type the family and size."));}
     if(pending==2){char url[GUI_PREFERENCE_URL_MAX];if(c->id==GUI_OPTIONS_ONLINE)strcpy(url,"https://www.virustotal.com/gui/my-apikey");else if(xxwidgets_widget_get_text(p->fields[1].control,url,sizeof(url),NULL)!=XXWIDGETS_OK)return XXWIDGETS_OK;return open_page(p,url);}
     if(pending==1){extra_field*f=&p->fields[c->id==GUI_OPTIONS_APPEARANCE?4:0];char initial[GUI_PREFERENCE_PATH_MAX];if(xxwidgets_widget_get_text(f->control,initial,sizeof(initial),NULL)!=XXWIDGETS_OK)return XXWIDGETS_OK;
-        if(c->id==GUI_OPTIONS_APPEARANCE)s=xxwidgets_file_dialog(p->dialog,XXWIDGETS_FILE_DIALOG_OPEN,CDIE_TR("Choose translation"),initial,&path,&accepted);
-        else if(c->host->browse)s=c->host->browse(p->dialog,initial,&path,&accepted,c->host->user);
-        else s=XXWIDGETS_UNAVAILABLE;
+        if(c->id==GUI_OPTIONS_APPEARANCE){
+            /* No catalog chosen yet: start among the bundled ones (on macOS
+             * inside the application bundle, which the picker cannot browse). */
+            char*bundled=!initial[0]||!strcmp(initial,"System")?cdie_translations_dir():NULL;
+            s=xxwidgets_file_dialog(p->dialog,XXWIDGETS_FILE_DIALOG_OPEN,CDIE_TR("Choose translation"),bundled?bundled:initial,&path,&accepted);
+            xx_rt_free(bundled);}
+        else s=gui_options_browse_for(c->host,GUI_OPTIONS_INFO,p->dialog,initial,&path,&accepted);
         if(s==XXWIDGETS_OK&&accepted&&path)s=xxwidgets_widget_set_text(f->control,path);free(path);
         return s==XXWIDGETS_OK?s:page_failure(p,CDIE_N_("No chooser opened; type the path."),s);}
     return s;

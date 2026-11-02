@@ -9,4 +9,7 @@ typedef struct gui_options_extra_values {
     const gui_options_host *host;
 } gui_options_extra_values;
 xxwidgets_status gui_options_extra_page(xxwidgets_options_page *page, const char *title, gui_options_extra_values *values);
+/* host->browse on behalf of page (see gui_options_browse_page). */
+xxwidgets_status gui_options_browse_for(const gui_options_host *host, gui_options_page_id page, xxwidgets_widget *dialog,
+                                        const char *initial, char **path, int *accepted);
 #endif

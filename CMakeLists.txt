@@ -497,6 +497,10 @@ if(CDIE_DATABASE_DIR AND (NOT CDIE_DATABASE_DIR STREQUAL "NONE") AND EXISTS "${C
 
     # The source is a live working copy, so editor and tooling directories sit
     # alongside the signatures; they must not be republished to end users.
+    # macOS installs only die.app, which carries its own copy in
+    # Contents/Resources (src/gui/bundle_resources.cmake); nothing beside the
+    # bundle would read a second one.
+    if(NOT APPLE)
     install(DIRECTORY "${CDIE_DATABASE_DIR}/db/" DESTINATION "${CDIE_DATABASE_DESTINATION}/db"
         PATTERN ".vscode" EXCLUDE
         PATTERN "_ai_provenance" EXCLUDE
@@ -510,6 +514,7 @@ if(CDIE_DATABASE_DIR AND (NOT CDIE_DATABASE_DIR STREQUAL "NONE") AND EXISTS "${C
                 PATTERN ".git*" EXCLUDE)
         endif()
     endforeach()
+    endif()
 
     if(EXISTS "${CDIE_DATABASE_DIR}/db_extra")
         message(STATUS "cdie: ignoring ${CDIE_DATABASE_DIR}/db_extra (cdie uses only db and db_custom)")
@@ -518,8 +523,9 @@ else()
     message(STATUS "cdie: no signature database packaged (set CDIE_DATABASE_DIR to bundle one)")
 endif()
 
-# The "?" descriptions sit beside the databases, where the frontends look.
-if(CDIE_INFO_DIR AND (NOT CDIE_INFO_DIR STREQUAL "NONE") AND EXISTS "${CDIE_INFO_DIR}/html")
+# The "?" descriptions sit beside the databases, where the frontends look
+# (on macOS inside die.app only, as the databases).
+if(NOT APPLE AND CDIE_INFO_DIR AND (NOT CDIE_INFO_DIR STREQUAL "NONE") AND EXISTS "${CDIE_INFO_DIR}/html")
     install(DIRECTORY "${CDIE_INFO_DIR}/html/" DESTINATION "${CDIE_DATABASE_DESTINATION}/info/html"
         FILES_MATCHING PATTERN "*.html")
 endif()
@@ -715,17 +721,20 @@ if(CDIE_XGETTEXT_EXECUTABLE AND TARGET cdie_ui_translation)
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         COMMENT "Extracting combined CDiE and xxwidgets translation catalog")
 endif()
+# The GUI loads the catalog named in Options; "Choose translation" starts in
+# cdie_translations_dir() (src/app/cdie_paths.c), which finds each of these:
+# translations/ beside die (Windows, the build tree, the FHS lib/cdie tree),
+# share/cdie/translations beside bin/ (the Linux portable/install tree), and
+# Contents/Resources/translations inside die.app (staged by the bundle build,
+# so nothing is installed beside the bundle).
 if(CDIE_INSTALL_LAYOUT STREQUAL "FHS")
-    # The GUI loads a catalog from the path given in Options; nothing searches
-    # a fixed folder. Keep them where the build tree and the Windows package
-    # have them (and the macOS bundle's Resources): translations/ beside die.
     install(DIRECTORY translations/ DESTINATION "${CDIE_BINARY_DESTINATION}/translations"
         FILES_MATCHING PATTERN "*.po" PATTERN "*.pot")
 elseif(UNIX AND NOT APPLE)
     include(GNUInstallDirs)
     install(DIRECTORY translations/ DESTINATION "${CMAKE_INSTALL_DATADIR}/cdie/translations"
         FILES_MATCHING PATTERN "*.po" PATTERN "*.pot")
-else()
+elseif(NOT APPLE)
     install(DIRECTORY translations/ DESTINATION translations
         FILES_MATCHING PATTERN "*.po" PATTERN "*.pot")
 endif()

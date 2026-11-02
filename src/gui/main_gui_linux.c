@@ -48,7 +48,7 @@ enum { ACTION_NONE, ACTION_SCAN, ACTION_REPORT, ACTION_QUIT, ACTION_OPTIONS, ACT
     ACTION_DATABASE_PATHS, ACTION_FONTS, ACTION_ABOUT, ACTION_RECENT, ACTION_UPDATE, ACTION_TOOL_BASE = 100 };
 typedef struct tui_app {
     xxwidgets_app *app;
-    xxwidgets_widget *window, *path, *status, *browse, *update, *options, *about, *tools[12];
+    xxwidgets_widget *window, *path, *status, *recent, *browse, *update, *options, *about, *tools[12];
     xxwidgets_scan_panel *panel;
     char *type_path;
     gui_options_page_id options_page;
@@ -218,7 +218,8 @@ static int scan(tui_app *ui, int smoke)
     if (ok) cdie_translation_snprintf(message, sizeof(message), CDIE_N_("Scan complete (%s). %zu detections."), type ? type : "Unknown", xxwidgets_scan_panel_count(ui->panel));
     else cdie_translation_snprintf(message, sizeof(message), CDIE_N_("%s"), cancelled ? CDIE_TR("Scan cancelled.") : CDIE_TR("Scan failed."));
     set_status(ui, message);
-    if (ok) { gui_frontend_remember_file(path); (void)xxwidgets_widget_focus(control(ui, XXWIDGETS_SCAN_PANEL_RESULTS)); }
+    /* The focus stays where it was, as on Windows. */
+    if (ok) gui_frontend_remember_file(path);
     (void)xxwidgets_widget_set_enabled(control(ui, XXWIDGETS_SCAN_PANEL_FILE_TYPE), 1);
 cleanup:
     gui_backend_free(type);
@@ -237,21 +238,32 @@ static void layout(tui_app *ui)
 {
     xxwidgets_rect bounds;
     if (xxwidgets_widget_get_rect(ui->window, &bounds) != XXWIDGETS_OK) return;
-    int w = bounds.width, h = bounds.height;
-    (void)xxwidgets_widget_set_rect(ui->path, (xxwidgets_rect){2, 1, w - 40, 2});
-    (void)xxwidgets_widget_set_rect(ui->update, (xxwidgets_rect){w - 36, 1, 20, 2});
-    (void)xxwidgets_widget_set_rect(ui->browse, (xxwidgets_rect){w - 14, 1, 12, 2});
+    int w = bounds.width, h = bounds.height, panel = h - 14 < 14 ? 14 : h - 14;
+    xxwidgets_rect log_rect, report_rect;
+    /* As on Windows: Recent files (a down arrow), the path, then "...". */
+    (void)xxwidgets_widget_set_rect(ui->recent, (xxwidgets_rect){2, 1, 6, 2});
+    (void)xxwidgets_widget_set_rect(ui->path, (xxwidgets_rect){9, 1, w - 18, 2});
+    (void)xxwidgets_widget_set_rect(ui->browse, (xxwidgets_rect){w - 8, 1, 6, 2});
     /* The panel keeps its minimum height (14) in a short window. */
-    (void)xxwidgets_scan_panel_set_rect(ui->panel, (xxwidgets_rect){2, 4, w - 4, h - 12 < 14 ? 14 : h - 12});
-    /* The tools, Options and About: two rows of seven under the panel. */
+    (void)xxwidgets_scan_panel_set_rect(ui->panel, (xxwidgets_rect){2, 4, w - 4, panel});
+    /* Update database in the panel's lower button row, after Log and short of
+     * the report button, as on Windows. */
+    if (xxwidgets_widget_get_rect(control(ui, XXWIDGETS_SCAN_PANEL_LOG), &log_rect) == XXWIDGETS_OK &&
+        xxwidgets_widget_get_rect(control(ui, XXWIDGETS_SCAN_PANEL_REPORT), &report_rect) == XXWIDGETS_OK) {
+        int x = log_rect.x + log_rect.width + 1, room = report_rect.x - 1 - x;
+        if (room > 0) (void)xxwidgets_widget_set_rect(ui->update, (xxwidgets_rect){x, log_rect.y, room < 20 ? room : 20, 2});
+    }
+    /* Under the panel, as on Windows: the status line (two rows, for long
+     * messages), then Options, About, Imports ... Extractor, then File
+     * Information ... Memory Map, in two rows of seven. */
+    (void)xxwidgets_widget_set_rect(ui->status, (xxwidgets_rect){2, h - 9, w - 4, 2});
     for (int i = 0; i < 14; ++i) {
-        xxwidgets_widget *button = i < 12 ? ui->tools[i] : i == 12 ? ui->options : ui->about;
+        xxwidgets_widget *button = i == 0 ? ui->options : i == 1 ? ui->about : i < 7 ? ui->tools[i + 5] : ui->tools[i - 7];
         int row = i / 7, col = i % 7;
         int x = 2 + col * (w - 4) / 7;
         int end = 2 + (col + 1) * (w - 4) / 7;
-        (void)xxwidgets_widget_set_rect(button, (xxwidgets_rect){x, h - 7 + row * 3, end - x - 1, 2});
+        (void)xxwidgets_widget_set_rect(button, (xxwidgets_rect){x, h - 6 + row * 3, end - x - 1, 2});
     }
-    (void)xxwidgets_widget_set_rect(ui->status, (xxwidgets_rect){2, h - 1, w - 4, 1});
 }
 static void on_event(xxwidgets_app *app, const xxwidgets_event *event, void *user)
 {
@@ -267,13 +279,17 @@ static void on_event(xxwidgets_app *app, const xxwidgets_event *event, void *use
         if (event->value == ACTION_QUIT) ui->running = 0; else ui->pending = event->value;
     } else if (event->type == XXWIDGETS_EVENT_ACTIVATE && event->widget == ui->path) ui->pending = ACTION_SCAN;
     else if (event->type == XXWIDGETS_EVENT_CHANGE && event->widget == ui->path) {
-        (void)xxwidgets_scan_panel_clear(ui->panel);
+        /* As on Windows: the results stay; the file types describe the last
+         * scanned file, so they wait for the next scan. */
         (void)xxwidgets_widget_set_enabled(control(ui, XXWIDGETS_SCAN_PANEL_FILE_TYPE), 0);
-    } else if (event->type == XXWIDGETS_EVENT_SELECT && event->widget == control(ui, XXWIDGETS_SCAN_PANEL_FILE_TYPE)) ui->pending = ACTION_SCAN;
-    else if (gui_tree_event(ui->panel, event)) {
+    } else if (event->type == XXWIDGETS_EVENT_SELECT && event->widget == control(ui, XXWIDGETS_SCAN_PANEL_FILE_TYPE)) {
+        size_t size = 0;
+        if (xxwidgets_widget_get_text(ui->path, NULL, 0, &size) == XXWIDGETS_OK && size > 1) ui->pending = ACTION_SCAN;
+    } else if (gui_tree_event(ui->panel, event)) {
         /* S or ? on a result row: shown after polling returns. */
     } else if (event->type == XXWIDGETS_EVENT_CLICK) {
         if (event->widget == ui->browse) ui->pending = ACTION_BROWSE;
+        else if (event->widget == ui->recent) ui->pending = ACTION_RECENT;
         else if (event->widget == ui->update) ui->pending = ACTION_UPDATE;
         else if (event->widget == ui->options) ui->pending = ACTION_OPTIONS;
         else if (event->widget == ui->about) ui->pending = ACTION_ABOUT;
@@ -282,32 +298,56 @@ static void on_event(xxwidgets_app *app, const xxwidgets_event *event, void *use
         else for (int i = 0; i < 12; ++i) if (event->widget == ui->tools[i]) ui->pending = ACTION_TOOL_BASE + i;
     }
 }
+/* Ctrl+U does what its button does, so nothing without an updater, as on
+ * Windows. Report and Recent files say why on the status line (run_action). */
+static int shortcut_allowed(xxwidgets_widget *window, int action, void *user)
+{
+    (void)window; (void)user;
+    return action != ACTION_UPDATE || gui_update_supported();
+}
 static int create_controls(tui_app *ui, const char *path)
 {
-    /* The tools take the Windows keys, in tool_names order. */
-    static const xxwidgets_shortcut shortcuts[] = {{"F5", ACTION_SCAN}, {"Ctrl+R", ACTION_RECENT}, {"Ctrl+Shift+R", ACTION_REPORT}, {"Ctrl+Q", ACTION_QUIT}, {"Ctrl+O", ACTION_BROWSE}, {"F1", ACTION_ABOUT}, {"F2", ACTION_OPTIONS}, {"F3", ACTION_DATABASE_PATHS}, {"F4", ACTION_FONTS}, {"Ctrl+U", ACTION_UPDATE},
+    /* The Windows keys, the tools in tool_names order; F3 (also Ctrl+Shift+D)
+     * and F4 open Options on Scan and Fonts, Ctrl+Q quits. */
+    static const xxwidgets_shortcut shortcuts[] = {{"F5", ACTION_SCAN}, {"Ctrl+R", ACTION_RECENT}, {"Ctrl+Shift+R", ACTION_REPORT}, {"Ctrl+Q", ACTION_QUIT}, {"Ctrl+O", ACTION_BROWSE}, {"F1", ACTION_ABOUT}, {"F2", ACTION_OPTIONS}, {"Ctrl+Shift+D", ACTION_DATABASE_PATHS}, {"F3", ACTION_DATABASE_PATHS}, {"F4", ACTION_FONTS}, {"Ctrl+U", ACTION_UPDATE},
         {"Ctrl+I", ACTION_TOOL_BASE + 0}, {"Ctrl+E", ACTION_TOOL_BASE + 1}, {"Ctrl+H", ACTION_TOOL_BASE + 2}, {"Ctrl+Shift+S", ACTION_TOOL_BASE + 3}, {"Ctrl+Shift+X", ACTION_TOOL_BASE + 4}, {"Ctrl+Shift+A", ACTION_TOOL_BASE + 5},
         {"Ctrl+M", ACTION_TOOL_BASE + 6}, {"Ctrl+Shift+I", ACTION_TOOL_BASE + 7}, {"Ctrl+Shift+E", ACTION_TOOL_BASE + 8}, {"Ctrl+Shift+U", ACTION_TOOL_BASE + 9}, {"Ctrl+Shift+Y", ACTION_TOOL_BASE + 10}, {"Ctrl+Shift+T", ACTION_TOOL_BASE + 11}};
     if (xxwidgets_widget_create(ui->app, NULL, XXWIDGETS_WINDOW, gui_backend_app_title(), (xxwidgets_rect){4, 3, 132, 34}, &ui->window) != XXWIDGETS_OK ||
-        xxwidgets_widget_create(ui->app, ui->window, XXWIDGETS_EDIT, path ? path : "", (xxwidgets_rect){2, 1, 92, 2}, &ui->path) != XXWIDGETS_OK ||
-        xxwidgets_widget_create(ui->app, ui->window, XXWIDGETS_BUTTON, CDIE_TR("Update database"), (xxwidgets_rect){96, 1, 20, 2}, &ui->update) != XXWIDGETS_OK ||
-        xxwidgets_widget_create(ui->app, ui->window, XXWIDGETS_BUTTON, CDIE_TR("Browse"), (xxwidgets_rect){118, 1, 12, 2}, &ui->browse) != XXWIDGETS_OK ||
-        xxwidgets_scan_panel_create(ui->window, (xxwidgets_rect){2, 4, 128, 21}, &ui->panel) != XXWIDGETS_OK ||
-        xxwidgets_widget_create(ui->app, ui->window, XXWIDGETS_BUTTON, CDIE_TR("Options"), (xxwidgets_rect){2, 26, 18, 2}, &ui->options) != XXWIDGETS_OK ||
-        xxwidgets_widget_create(ui->app, ui->window, XXWIDGETS_BUTTON, CDIE_TR("About"), (xxwidgets_rect){2, 29, 16, 2}, &ui->about) != XXWIDGETS_OK ||
-        xxwidgets_widget_create(ui->app, ui->window, XXWIDGETS_LABEL, "", (xxwidgets_rect){2, 33, 128, 1}, &ui->status) != XXWIDGETS_OK) return 0;
+        xxwidgets_widget_create(ui->app, ui->window, XXWIDGETS_EDIT, path ? path : "", (xxwidgets_rect){9, 1, 114, 2}, &ui->path) != XXWIDGETS_OK ||
+        /* A down arrow, as a history list, as on Windows; ">" belongs to the report. */
+        xxwidgets_widget_create(ui->app, ui->window, XXWIDGETS_BUTTON, "\xE2\x96\xBC", (xxwidgets_rect){2, 1, 6, 2}, &ui->recent) != XXWIDGETS_OK ||
+        xxwidgets_widget_create(ui->app, ui->window, XXWIDGETS_BUTTON, CDIE_TR("..."), (xxwidgets_rect){124, 1, 6, 2}, &ui->browse) != XXWIDGETS_OK ||
+        xxwidgets_scan_panel_create(ui->window, (xxwidgets_rect){2, 4, 128, 20}, &ui->panel) != XXWIDGETS_OK ||
+        xxwidgets_widget_create(ui->app, ui->window, XXWIDGETS_BUTTON, CDIE_TR("Update database"), (xxwidgets_rect){22, 22, 20, 2}, &ui->update) != XXWIDGETS_OK ||
+        xxwidgets_widget_create(ui->app, ui->window, XXWIDGETS_LABEL, "", (xxwidgets_rect){2, 25, 128, 2}, &ui->status) != XXWIDGETS_OK ||
+        xxwidgets_widget_create(ui->app, ui->window, XXWIDGETS_BUTTON, CDIE_TR("Options"), (xxwidgets_rect){2, 28, 18, 2}, &ui->options) != XXWIDGETS_OK ||
+        xxwidgets_widget_create(ui->app, ui->window, XXWIDGETS_BUTTON, CDIE_TR("About"), (xxwidgets_rect){2, 28, 18, 2}, &ui->about) != XXWIDGETS_OK) return 0;
     for (int i = 0; i < 12; ++i)
-        if (xxwidgets_widget_create(ui->app, ui->window, XXWIDGETS_BUTTON, CDIE_TR(tool_names[i]), (xxwidgets_rect){2, 26, 18, 2}, &ui->tools[i]) != XXWIDGETS_OK) return 0;
+        if (xxwidgets_widget_create(ui->app, ui->window, XXWIDGETS_BUTTON, CDIE_TR(tool_names[i]), (xxwidgets_rect){2, 28, 18, 2}, &ui->tools[i]) != XXWIDGETS_OK) return 0;
     char *tags = gui_backend_used_tags();
     if (!tags) return 0;
     xxwidgets_status s = xxwidgets_scan_panel_set_available_tags(ui->panel, tags); gui_backend_free(tags);
+    /* Windows' defaults: Deep, Heuristic and Verbose; the file types are
+     * enabled from the start (Automatic). */
     if (s != XXWIDGETS_OK || xxwidgets_window_set_shortcuts(ui->window, shortcuts, sizeof(shortcuts)/sizeof(shortcuts[0])) != XXWIDGETS_OK ||
-        xxwidgets_scan_panel_set_flags(ui->panel, XXWIDGETS_SCAN_DEEP | XXWIDGETS_SCAN_HEURISTIC | XXWIDGETS_SCAN_VERBOSE | XXWIDGETS_SCAN_FORMAT) != XXWIDGETS_OK ||
+        xxwidgets_window_set_shortcut_filter(ui->window, shortcut_allowed, NULL) != XXWIDGETS_OK ||
+        xxwidgets_scan_panel_set_flags(ui->panel, XXWIDGETS_SCAN_DEEP | XXWIDGETS_SCAN_HEURISTIC | XXWIDGETS_SCAN_VERBOSE) != XXWIDGETS_OK ||
         xxwidgets_scan_panel_set_databases(ui->panel, XXWIDGETS_SCAN_DATABASE_CUSTOM) != XXWIDGETS_OK ||
-        xxwidgets_widget_set_enabled(control(ui, XXWIDGETS_SCAN_PANEL_FILE_TYPE), 0) != XXWIDGETS_OK ||
         xxwidgets_widget_set_enabled(ui->update, gui_update_supported()) != XXWIDGETS_OK ||
         xxwidgets_window_set_minimum_size(ui->window, 120, 31) != XXWIDGETS_OK ||
         xxwidgets_window_set_accept_file_drops(ui->window, 1) != XXWIDGETS_OK) return 0;
+    /* The tooltips Windows has; the backend may have none (no-op). */
+    (void)xxwidgets_widget_set_tooltip(ui->recent, CDIE_TR("Recent files (Ctrl+R)"));
+    (void)xxwidgets_widget_set_tooltip(control(ui, XXWIDGETS_SCAN_PANEL_REPORT), CDIE_TR("Scan report (Ctrl+Shift+R)"));
+    {
+        /* Windows names the path box after its "File name" label; here it
+         * has no label, so the name is a placeholder and for screen readers. */
+        GtkWidget *entry = GTK_WIDGET(xxwidgets_widget_native_handle(ui->path));
+        if (GTK_IS_ENTRY(entry)) {
+            gtk_entry_set_placeholder_text(GTK_ENTRY(entry), CDIE_TR("File name"));
+            atk_object_set_name(gtk_widget_get_accessible(entry), CDIE_TR("File name"));
+        }
+    }
     layout(ui); (void)xxwidgets_widget_focus(ui->path);
     set_status(ui, gui_backend_signature_count() ? CDIE_TR("Choose a file, drop one here, or enter its path.") :
         CDIE_TR("No signatures loaded. Choose the main folder in Options > Scan (F3).")); return 1;
@@ -383,6 +423,8 @@ static xxwidgets_status apply_options(tui_app *ui, const gui_options_values *val
     }
     if (status == XXWIDGETS_OK) status = gui_frontend_apply_preferences(ui->app, values);
     if (status == XXWIDGETS_OK) gtk_window_set_keep_above(GTK_WINDOW(xxwidgets_widget_native_handle(ui->window)), values->appearance.stay_on_top != 0);
+    /* As on Windows, Recent files is disabled while no history is kept. */
+    if (status == XXWIDGETS_OK) status = xxwidgets_widget_set_enabled(ui->recent, values->file.save_recent_files != 0);
     return status;
 }
 
@@ -391,9 +433,12 @@ static int reload_tags(tui_app *ui)
     char message[160];
     char *tags = gui_backend_used_tags();
     xxwidgets_status status;
+    /* File types of a scanned file wait for the next scan; Automatic alone
+     * (nothing scanned yet, as at startup) stays enabled. */
+    int scanned = ui->type_path != NULL;
     free(ui->type_path); ui->type_path = NULL;
     status = xxwidgets_scan_panel_clear(ui->panel);
-    if (status == XXWIDGETS_OK) status = xxwidgets_widget_set_enabled(control(ui, XXWIDGETS_SCAN_PANEL_FILE_TYPE), 0);
+    if (status == XXWIDGETS_OK && scanned) status = xxwidgets_widget_set_enabled(control(ui, XXWIDGETS_SCAN_PANEL_FILE_TYPE), 0);
     if (status == XXWIDGETS_OK) status = tags ? xxwidgets_scan_panel_set_available_tags(ui->panel, tags) : XXWIDGETS_OUT_OF_MEMORY;
     gui_backend_free(tags);
     cdie_translation_snprintf(message, sizeof(message), CDIE_N_("Database reloaded: %d signatures. Press F5 to scan."), gui_backend_signature_count());
@@ -468,11 +513,30 @@ static void about_dialog(tui_app *ui)
     if (about) (void)xxwidgets_about_dialog_destroy(about);
     if (status != XXWIDGETS_OK) report_window_error(ui, CDIE_TR("About"), status);
 }
+/* Starts a chooser at the file in the path box (UTF-8; relative ones from the
+ * working directory), selected in its folder, or in a folder the box names;
+ * 0 when the box names neither. */
+static int chooser_start_file(GtkWidget *dialog, const char *path)
+{
+    gchar *filename = path && path[0] ? g_filename_from_utf8(path, -1, NULL, NULL, NULL) : NULL;
+    int started = 0;
+    if (filename) {
+        gchar *cwd = g_get_current_dir();
+        gchar *absolute = g_path_is_absolute(filename) ? g_strdup(filename) : g_build_filename(cwd, filename, NULL);
+        if (g_file_test(absolute, G_FILE_TEST_IS_REGULAR)) started = gtk_file_chooser_set_filename(GTK_FILE_CHOOSER(dialog), absolute);
+        else started = g_file_test(absolute, G_FILE_TEST_IS_DIR) && gtk_file_chooser_set_current_folder(GTK_FILE_CHOOSER(dialog), absolute);
+        g_free(absolute); g_free(cwd); g_free(filename);
+    }
+    return started;
+}
 static void browse(tui_app *ui)
 {
-    GtkWidget *dialog = gtk_file_chooser_dialog_new(CDIE_TR("Open file"), GTK_WINDOW(xxwidgets_widget_native_handle(ui->window)), GTK_FILE_CHOOSER_ACTION_OPEN, CDIE_TR("Cancel"), GTK_RESPONSE_CANCEL, CDIE_TR("Open"), GTK_RESPONSE_ACCEPT, NULL);
-    /* As on Windows and macOS: start in the last directory when it is kept. */
-    (void)chooser_start_last(dialog);
+    GtkWidget *dialog = gtk_file_chooser_dialog_new(CDIE_TR("Select a file to scan"), GTK_WINDOW(xxwidgets_widget_native_handle(ui->window)), GTK_FILE_CHOOSER_ACTION_OPEN, CDIE_TR("Cancel"), GTK_RESPONSE_CANCEL, CDIE_TR("Open"), GTK_RESPONSE_ACCEPT, NULL);
+    char *current = read_path(ui);
+    /* As on Windows: the file in the path box, else the last directory when
+     * it is kept. */
+    if (!chooser_start_file(dialog, current)) (void)chooser_start_last(dialog);
+    free(current);
     if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
         gchar *filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
         /* The path box and the scan take UTF-8, as the database Browse does. */
@@ -565,8 +629,23 @@ int main(int argc, char **argv)
             status = cdie_translation_open(ui.app,NULL,&line);
         }
         free(stored_translation);
-        if (status != XXWIDGETS_OK) { fprintf(stderr,"Cannot load translation (line %zu): %s\n",line,xxwidgets_status_string(status)); result=1; goto cleanup; }
+        if (status != XXWIDGETS_OK) {
+            fprintf(stderr,"Cannot load translation (line %zu): %s\n",line,xxwidgets_status_string(status));
+            if (!smoke) {
+                /* As on Windows, a box too, in English: no translation is loaded. */
+                GtkWidget *box = gtk_message_dialog_new(NULL, GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK, "%s",
+                    "Cannot load PO translation. Check --translation FILE and CDIE_TRANSLATION.");
+                gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(box), "Line %lu: %s", (unsigned long)line, xxwidgets_status_string(status));
+                gtk_window_set_title(GTK_WINDOW(box), "cdie");
+                (void)gtk_dialog_run(GTK_DIALOG(box));
+                gtk_widget_destroy(box);
+            }
+            result=1; goto cleanup;
+        }
     }
+    /* The window icon from the icon theme, under the .desktop file's Icon=
+     * name (installed by the FHS layout, the deb and the AppImage). */
+    gtk_window_set_default_icon_name("io.github.horsicq.cdie");
     if (smoke) (void)xxwidgets_app_set_create_hidden(ui.app, 1);
     if (!create_controls(&ui, path)) { fprintf(stderr, "Cannot create GUI controls.\n"); result = 1; goto cleanup; }
     ui.options_page = GUI_OPTIONS_SCAN;
@@ -595,6 +674,19 @@ int main(int argc, char **argv)
         status = xxwidgets_app_poll(ui.app, 30);
         if (status != XXWIDGETS_OK) { result = 1; break; }
         if (ui.needs_layout) { ui.needs_layout = 0; layout(&ui); }
+        {
+            /* A later launch's file ("Single application"), as WM_COPYDATA on
+             * Windows: the path, history, a scan if wanted, and to the front. */
+            char *forwarded = NULL;
+            if (gui_frontend_instance_poll(ui.window, &forwarded) && forwarded) {
+                if (xxwidgets_widget_set_text(ui.path, forwarded) == XXWIDGETS_OK) {
+                    gui_frontend_remember_file(forwarded);
+                    if (gui_frontend_scan_after_open()) ui.pending = ACTION_SCAN;
+                }
+                gtk_window_present(GTK_WINDOW(xxwidgets_widget_native_handle(ui.window)));
+            }
+            free(forwarded);
+        }
         const char *message = gui_tree_process(ui.window);
         if (message) set_status(&ui, message);
         int action = ui.pending; ui.pending = ACTION_NONE;

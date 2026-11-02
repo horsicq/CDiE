@@ -46,6 +46,15 @@ static inline const char *gui_error_file_reason(const char *path)
     return size ? NULL : CDIE_TR("The file is empty.");
 }
 
+/* The status line for a file that cannot be scanned: one sentence on every
+ * platform, with what the file system says when it says anything. */
+static inline void gui_error_open_status(char *buffer, size_t capacity, const char *path)
+{
+    const char *reason = gui_error_file_reason(path);
+    cdie_translation_snprintf(buffer, capacity, CDIE_N_("Cannot open this file. %s"),
+                              reason ? reason : CDIE_TR("Check the path and permissions."));
+}
+
 /* "headline\n\nreason\n\nDetails: detail" for a tool that cannot open or read
  * path. headline is an untranslated format, marked with CDIE_N_, with one %s
  * for the path; detail is the reader's own message (NULL or empty for none).

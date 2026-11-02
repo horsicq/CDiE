@@ -4,6 +4,7 @@
 #include "gui_backend.h"
 #include "app/cdie_translation.h"
 #include <xxfclib/rt/xx_rt.h>
+#include <xxfclib/fs/xx_fs.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -16,10 +17,61 @@ typedef struct options_session {
     char previous_paths[GUI_DB_COUNT][GUI_PREFERENCE_PATH_MAX];
     int committed, reloaded;
 } options_session;
+static gui_options_page_id browse_page = GUI_OPTIONS_SCAN;
+gui_options_page_id gui_options_browse_page(void) { return browse_page; }
+const char *gui_options_browse_title(gui_options_page_id page)
+{
+    return page == GUI_OPTIONS_INFO ? CDIE_TR("Select the info database folder") : CDIE_TR("Select the database folder");
+}
+char *gui_options_browse_start(gui_options_page_id page, const char *initial)
+{
+    /* An empty signature slot is the default database: start where it was found. */
+    const char *source = initial && initial[0] ? initial :
+        page == GUI_OPTIONS_SCAN && gui_backend_main_db_path()[0] ? gui_backend_main_db_path() : NULL;
+    size_t length = source ? strlen(source) : 0;
+    char *start = length ? malloc(length + 1) : NULL;
+    if (!start) return NULL;
+    memcpy(start, source, length + 1);
+    while (start[0] && !xx_fs_is_dir(start)) {
+        char *cut = strrchr(start, '/');
+#ifdef _WIN32
+        char *other = strrchr(start, '\\');
+        if (other && (!cut || other > cut)) cut = other;
+        if (cut == start + 2 && start[1] == ':') { cut[1] = 0; if (!xx_fs_is_dir(start)) start[0] = 0; break; }
+#endif
+        if (!cut) start[0] = 0;
+        else if (cut == start) { cut[1] = 0; break; }
+        else *cut = 0;
+    }
+    if (!start[0]) { free(start); return NULL; }
+    return start;
+}
+xxwidgets_status gui_options_browse_folder(xxwidgets_widget *dialog, const char *initial, char **path, int *accepted, void *user)
+{
+    char *start;
+    xxwidgets_status status;
+    (void)user;
+    if (!path || !accepted) return XXWIDGETS_INVALID_ARGUMENT;
+    *path = NULL; *accepted = 0;
+    start = gui_options_browse_start(browse_page, initial);
+    status = xxwidgets_file_dialog(dialog, XXWIDGETS_FILE_DIALOG_FOLDER, gui_options_browse_title(browse_page), start, path, accepted);
+    free(start);
+    return status;
+}
+xxwidgets_status gui_options_browse_for(const gui_options_host *host, gui_options_page_id page, xxwidgets_widget *dialog,
+                                        const char *initial, char **path, int *accepted)
+{
+    xxwidgets_status status;
+    if (!host || !host->browse) return XXWIDGETS_UNAVAILABLE;
+    browse_page = page;
+    status = host->browse(dialog, initial, path, accepted, host->user);
+    browse_page = GUI_OPTIONS_SCAN;
+    return status;
+}
 static xxwidgets_status browse_database(xxwidgets_widget *dialog,const char*initial,char**path,int*accepted,void*user)
 {
     options_session*s=user;
-    return s->host->browse?s->host->browse(dialog,initial,path,accepted,s->host->user):XXWIDGETS_UNAVAILABLE;
+    return gui_options_browse_for(s->host,GUI_OPTIONS_SCAN,dialog,initial,path,accepted);
 }
 static void optimization_to_page(const gui_backend_optimization_options *from, const gui_backend_optimization_capabilities *features,
                                  xxwidgets_optimization_page_values *to)

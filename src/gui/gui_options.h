@@ -61,4 +61,17 @@ void gui_preferences_set(const gui_options_values *values);
 xxwidgets_status gui_options_dialog(xxwidgets_widget *owner, const gui_options_host *host, gui_options_page_id *page,
                                     gui_options_values *values, int *accepted, int *databases_reloaded);
 
+/* Database folder pickers. Scan (signatures) and Info both call host->browse;
+ * while it runs, gui_options_browse_page() names the asking page, so one
+ * callback can title the picker for it (gui_options_browse_title, translated).
+ * gui_options_browse_start is the folder to open: the one in the box, else for
+ * Scan the loaded main database; a folder that does not exist (yet) opens at
+ * its nearest existing parent. malloc'd; NULL lets the system choose.
+ * gui_options_browse_folder is a complete host->browse on these rules, over
+ * xxwidgets' folder dialog (XXWIDGETS_FILE_DIALOG_FOLDER). */
+gui_options_page_id gui_options_browse_page(void);
+const char *gui_options_browse_title(gui_options_page_id page);
+char *gui_options_browse_start(gui_options_page_id page, const char *initial);
+xxwidgets_status gui_options_browse_folder(xxwidgets_widget *dialog, const char *initial, char **path, int *accepted, void *user);
+
 #endif

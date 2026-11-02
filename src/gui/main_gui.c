@@ -72,6 +72,7 @@
 #include "gui_resources.h"
 #include "gui_symbols.h"
 #include "gui_extractor.h"
+#include "gui_tools.h"
 #include "gui_update.h"
 #include "gui_error.h"
 #include "resource.h"
@@ -375,8 +376,13 @@ static void do_scan(void)
     if (status != XXWIDGETS_OK) {
         clear_scan();
         xxwidgets_widget_set_enabled(g_type, 0);
+        /* A file the system will not open says why, in the words GTK and macOS use. */
+        if (gui_error_file_reason(path)) {
+            char text[512];
+            gui_error_open_status(text, sizeof(text), path);
+            xxwidgets_widget_set_text(g_status, text);
+        } else report_ui_error(CDIE_N_("Load file types"), status);
         HeapFree(GetProcessHeap(), 0, path);
-        report_ui_error(CDIE_N_("Load file types"), status);
         return;
     }
     clear_scan();
@@ -471,211 +477,38 @@ static void do_browse(void)
     xx_str_wfree(filter_name);
 }
 
-static void do_file_information(void)
+/* The tools share one table (gui_tools.c): the same titles, "no file" hints
+ * and "<Tool>: <reason>" failures as the GTK and macOS frontends. */
+static void do_tool(gui_tool_id id)
 {
     size_t size = 0;
     char *path;
+    const char *message;
     xxwidgets_status status = xxwidgets_widget_get_text(g_path, NULL, 0, &size);
     if (status != XXWIDGETS_OK) { report_ui_error(CDIE_N_("Read file path"), status); return; }
     path = HeapAlloc(GetProcessHeap(), 0, size ? size : 1);
     if (!path) { report_ui_error(CDIE_N_("Read file path"), XXWIDGETS_OUT_OF_MEMORY); return; }
     status = xxwidgets_widget_get_text(g_path, path, size ? size : 1, NULL);
-    if (status == XXWIDGETS_OK && !path[0]) {
-        xxwidgets_widget_set_text(g_status, CDIE_TR("Choose a PE, ELF or Mach-O file to inspect."));
-        xxwidgets_widget_focus(g_path);
-    } else if (status == XXWIDGETS_OK) status = gui_file_information_show(g_window, path);
+    if (status != XXWIDGETS_OK) report_ui_error(CDIE_N_("Read file path"), status);
+    else if ((message = gui_tool_run(g_window, id, path)) != NULL) {
+        xxwidgets_widget_set_text(g_status, message);
+        if (!path[0]) xxwidgets_widget_focus(g_path);
+    }
     HeapFree(GetProcessHeap(), 0, path);
-    if (status != XXWIDGETS_OK) report_ui_error("File Information", status);
 }
 
-static void do_entropy(void)
-{
-    size_t size = 0;
-    char *path;
-    xxwidgets_status status = xxwidgets_widget_get_text(g_path, NULL, 0, &size);
-    if (status != XXWIDGETS_OK) { report_ui_error(CDIE_N_("Read file path"), status); return; }
-    path = HeapAlloc(GetProcessHeap(), 0, size ? size : 1);
-    if (!path) { report_ui_error(CDIE_N_("Read file path"), XXWIDGETS_OUT_OF_MEMORY); return; }
-    status = xxwidgets_widget_get_text(g_path, path, size ? size : 1, NULL);
-    if (status == XXWIDGETS_OK && !path[0]) {
-        xxwidgets_widget_set_text(g_status, CDIE_TR("Choose a file to calculate entropy."));
-        xxwidgets_widget_focus(g_path);
-    } else if (status == XXWIDGETS_OK) status = gui_entropy_show(g_window, path);
-    HeapFree(GetProcessHeap(), 0, path);
-    if (status != XXWIDGETS_OK) report_ui_error("Entropy", status);
-}
-
-static void do_hash(void)
-{
-    size_t size = 0;
-    char *path;
-    xxwidgets_status status = xxwidgets_widget_get_text(g_path, NULL, 0, &size);
-    if (status != XXWIDGETS_OK) { report_ui_error(CDIE_N_("Read file path"), status); return; }
-    path = HeapAlloc(GetProcessHeap(), 0, size ? size : 1);
-    if (!path) { report_ui_error(CDIE_N_("Read file path"), XXWIDGETS_OUT_OF_MEMORY); return; }
-    status = xxwidgets_widget_get_text(g_path, path, size ? size : 1, NULL);
-    if (status == XXWIDGETS_OK && !path[0]) {
-        xxwidgets_widget_set_text(g_status, CDIE_TR("Choose a file to calculate hashes."));
-        xxwidgets_widget_focus(g_path);
-    } else if (status == XXWIDGETS_OK) status = gui_hash_show(g_window, path);
-    HeapFree(GetProcessHeap(), 0, path);
-    if (status != XXWIDGETS_OK) report_ui_error("Hash", status);
-}
-
-static void do_strings(void)
-{
-    size_t size = 0;
-    char *path;
-    xxwidgets_status status = xxwidgets_widget_get_text(g_path, NULL, 0, &size);
-    if (status != XXWIDGETS_OK) { report_ui_error(CDIE_N_("Read file path"), status); return; }
-    path = HeapAlloc(GetProcessHeap(), 0, size ? size : 1);
-    if (!path) { report_ui_error(CDIE_N_("Read file path"), XXWIDGETS_OUT_OF_MEMORY); return; }
-    status = xxwidgets_widget_get_text(g_path, path, size ? size : 1, NULL);
-    if (status == XXWIDGETS_OK && !path[0]) {
-        xxwidgets_widget_set_text(g_status, CDIE_TR("Choose a file to extract strings."));
-        xxwidgets_widget_focus(g_path);
-    } else if (status == XXWIDGETS_OK) status = gui_strings_show(g_window, path);
-    HeapFree(GetProcessHeap(), 0, path);
-    if (status != XXWIDGETS_OK) report_ui_error("Strings", status);
-}
-
-static void do_hex_view(void)
-{
-    size_t size = 0;
-    char *path;
-    xxwidgets_status status = xxwidgets_widget_get_text(g_path, NULL, 0, &size);
-    if (status != XXWIDGETS_OK) { report_ui_error(CDIE_N_("Read file path"), status); return; }
-    path = HeapAlloc(GetProcessHeap(), 0, size ? size : 1);
-    if (!path) { report_ui_error(CDIE_N_("Read file path"), XXWIDGETS_OUT_OF_MEMORY); return; }
-    status = xxwidgets_widget_get_text(g_path, path, size ? size : 1, NULL);
-    if (status == XXWIDGETS_OK && !path[0]) {
-        xxwidgets_widget_set_text(g_status, CDIE_TR("Choose a file to view its bytes."));
-        xxwidgets_widget_focus(g_path);
-    } else if (status == XXWIDGETS_OK) status = gui_hex_view_show(g_window, path);
-    HeapFree(GetProcessHeap(), 0, path);
-    if (status != XXWIDGETS_OK) report_ui_error("Hex View", status);
-}
-
-static void do_disasm(void)
-{
-    size_t size = 0;
-    char *path;
-    xxwidgets_status status = xxwidgets_widget_get_text(g_path, NULL, 0, &size);
-    if (status != XXWIDGETS_OK) { report_ui_error(CDIE_N_("Read file path"), status); return; }
-    path = HeapAlloc(GetProcessHeap(), 0, size ? size : 1);
-    if (!path) { report_ui_error(CDIE_N_("Read file path"), XXWIDGETS_OUT_OF_MEMORY); return; }
-    status = xxwidgets_widget_get_text(g_path, path, size ? size : 1, NULL);
-    if (status == XXWIDGETS_OK && !path[0]) {
-        xxwidgets_widget_set_text(g_status, CDIE_TR("Choose a file to disassemble."));
-        xxwidgets_widget_focus(g_path);
-    } else if (status == XXWIDGETS_OK) status = gui_disasm_show(g_window, path);
-    HeapFree(GetProcessHeap(), 0, path);
-    if (status != XXWIDGETS_OK) report_ui_error("Disasm", status);
-}
-
-static void do_memory_map(void)
-{
-    size_t size = 0;
-    char *path;
-    xxwidgets_status status = xxwidgets_widget_get_text(g_path, NULL, 0, &size);
-    if (status != XXWIDGETS_OK) { report_ui_error(CDIE_N_("Read file path"), status); return; }
-    path = HeapAlloc(GetProcessHeap(), 0, size ? size : 1);
-    if (!path) { report_ui_error(CDIE_N_("Read file path"), XXWIDGETS_OUT_OF_MEMORY); return; }
-    status = xxwidgets_widget_get_text(g_path, path, size ? size : 1, NULL);
-    if (status == XXWIDGETS_OK && !path[0]) {
-        xxwidgets_widget_set_text(g_status, CDIE_TR("Choose a file to map."));
-        xxwidgets_widget_focus(g_path);
-    } else if (status == XXWIDGETS_OK) status = gui_memory_map_show(g_window, path);
-    HeapFree(GetProcessHeap(), 0, path);
-    if (status != XXWIDGETS_OK) report_ui_error("Memory Map", status);
-}
-
-static void do_imports(void)
-{
-    size_t size = 0;
-    char *path;
-    xxwidgets_status status = xxwidgets_widget_get_text(g_path, NULL, 0, &size);
-    if (status != XXWIDGETS_OK) { report_ui_error(CDIE_N_("Read file path"), status); return; }
-    path = HeapAlloc(GetProcessHeap(), 0, size ? size : 1);
-    if (!path) { report_ui_error(CDIE_N_("Read file path"), XXWIDGETS_OUT_OF_MEMORY); return; }
-    status = xxwidgets_widget_get_text(g_path, path, size ? size : 1, NULL);
-    if (status == XXWIDGETS_OK && !path[0]) {
-        xxwidgets_widget_set_text(g_status, CDIE_TR("Choose a file to inspect imports."));
-        xxwidgets_widget_focus(g_path);
-    } else if (status == XXWIDGETS_OK) status = gui_imports_show(g_window, path);
-    HeapFree(GetProcessHeap(), 0, path);
-    if (status != XXWIDGETS_OK) report_ui_error("Imports", status);
-}
-
-static void do_exports(void)
-{
-    size_t size = 0;
-    char *path;
-    xxwidgets_status status = xxwidgets_widget_get_text(g_path, NULL, 0, &size);
-    if (status != XXWIDGETS_OK) { report_ui_error(CDIE_N_("Read file path"), status); return; }
-    path = HeapAlloc(GetProcessHeap(), 0, size ? size : 1);
-    if (!path) { report_ui_error(CDIE_N_("Read file path"), XXWIDGETS_OUT_OF_MEMORY); return; }
-    status = xxwidgets_widget_get_text(g_path, path, size ? size : 1, NULL);
-    if (status == XXWIDGETS_OK && !path[0]) {
-        xxwidgets_widget_set_text(g_status, CDIE_TR("Choose a file to inspect exports."));
-        xxwidgets_widget_focus(g_path);
-    } else if (status == XXWIDGETS_OK) status = gui_exports_show(g_window, path);
-    HeapFree(GetProcessHeap(), 0, path);
-    if (status != XXWIDGETS_OK) report_ui_error("Exports", status);
-}
-
-static void do_resources(void)
-{
-    size_t size = 0;
-    char *path;
-    xxwidgets_status status = xxwidgets_widget_get_text(g_path, NULL, 0, &size);
-    if (status != XXWIDGETS_OK) { report_ui_error(CDIE_N_("Read file path"), status); return; }
-    path = HeapAlloc(GetProcessHeap(), 0, size ? size : 1);
-    if (!path) { report_ui_error(CDIE_N_("Read file path"), XXWIDGETS_OUT_OF_MEMORY); return; }
-    status = xxwidgets_widget_get_text(g_path, path, size ? size : 1, NULL);
-    if (status == XXWIDGETS_OK && !path[0]) {
-        xxwidgets_widget_set_text(g_status, CDIE_TR("Choose a file to inspect resources."));
-        xxwidgets_widget_focus(g_path);
-    } else if (status == XXWIDGETS_OK) status = gui_resources_show(g_window, path);
-    HeapFree(GetProcessHeap(), 0, path);
-    if (status != XXWIDGETS_OK) report_ui_error("Resources", status);
-}
-
-static void do_symbols(void)
-{
-    size_t size = 0;
-    char *path;
-    xxwidgets_status status = xxwidgets_widget_get_text(g_path, NULL, 0, &size);
-    if (status != XXWIDGETS_OK) { report_ui_error(CDIE_N_("Read file path"), status); return; }
-    path = HeapAlloc(GetProcessHeap(), 0, size ? size : 1);
-    if (!path) { report_ui_error(CDIE_N_("Read file path"), XXWIDGETS_OUT_OF_MEMORY); return; }
-    status = xxwidgets_widget_get_text(g_path, path, size ? size : 1, NULL);
-    if (status == XXWIDGETS_OK && !path[0]) {
-        xxwidgets_widget_set_text(g_status, CDIE_TR("Choose a file to inspect symbols."));
-        xxwidgets_widget_focus(g_path);
-    } else if (status == XXWIDGETS_OK) status = gui_symbols_show(g_window, path);
-    HeapFree(GetProcessHeap(), 0, path);
-    if (status != XXWIDGETS_OK) report_ui_error("Symbols", status);
-}
-
-/* All settings live in one Options window (gui_options.c): a page list on
- * the left and the reusable xxwidgets forms on the right. */
-static void do_extractor(void)
-{
-    size_t size = 0;
-    char *path;
-    xxwidgets_status status = xxwidgets_widget_get_text(g_path, NULL, 0, &size);
-    if (status != XXWIDGETS_OK) { report_ui_error(CDIE_N_("Read file path"), status); return; }
-    path = HeapAlloc(GetProcessHeap(), 0, size ? size : 1);
-    if (!path) { report_ui_error(CDIE_N_("Read file path"), XXWIDGETS_OUT_OF_MEMORY); return; }
-    status = xxwidgets_widget_get_text(g_path, path, size ? size : 1, NULL);
-    if (status == XXWIDGETS_OK && !path[0]) {
-        xxwidgets_widget_set_text(g_status, CDIE_TR("Choose a file to extract embedded files."));
-        xxwidgets_widget_focus(g_path);
-    } else if (status == XXWIDGETS_OK) status = gui_extractor_show(g_window, path);
-    HeapFree(GetProcessHeap(), 0, path);
-    if (status != XXWIDGETS_OK) report_ui_error("Extractor", status);
-}
+static void do_file_information(void) { do_tool(GUI_TOOL_FILE_INFORMATION); }
+static void do_entropy(void) { do_tool(GUI_TOOL_ENTROPY); }
+static void do_hash(void) { do_tool(GUI_TOOL_HASH); }
+static void do_strings(void) { do_tool(GUI_TOOL_STRINGS); }
+static void do_hex_view(void) { do_tool(GUI_TOOL_HEX_VIEW); }
+static void do_disasm(void) { do_tool(GUI_TOOL_DISASM); }
+static void do_memory_map(void) { do_tool(GUI_TOOL_MEMORY_MAP); }
+static void do_imports(void) { do_tool(GUI_TOOL_IMPORTS); }
+static void do_exports(void) { do_tool(GUI_TOOL_EXPORTS); }
+static void do_resources(void) { do_tool(GUI_TOOL_RESOURCES); }
+static void do_symbols(void) { do_tool(GUI_TOOL_SYMBOLS); }
+static void do_extractor(void) { do_tool(GUI_TOOL_EXTRACTOR); }
 
 /* All settings live in one Options window (gui_options.c): a page list on
  * the left and the reusable xxwidgets forms on the right. */
@@ -747,44 +580,23 @@ static int CALLBACK browse_database_event(HWND window, UINT message, LPARAM para
     return 0;
 }
 
-/* Scan and Info share this picker; Options' page list says which one asks. */
-static int options_page_selected(HWND dialog, const char *page)
-{
-    HWND list = FindWindowExW(dialog, NULL, L"ListBox", NULL);
-    WCHAR text[128], *expected = xx_str_utf8_to_unicode(CDIE_TR(page));
-    LRESULT selected = list ? SendMessageW(list, LB_GETCURSEL, 0, 0) : LB_ERR;
-    int match = expected && selected != LB_ERR && SendMessageW(list, LB_GETTEXTLEN, (WPARAM)selected, 0) < 128 &&
-        SendMessageW(list, LB_GETTEXT, (WPARAM)selected, (LPARAM)text) != LB_ERR && !lstrcmpW(text, expected);
-    xx_str_wfree(expected);
-    return match;
-}
-
+/* Scan and Info share this picker; gui_options says which page asks, and the
+ * title and start folder follow its rules (the same on every platform). */
 static xxwidgets_status browse_database(xxwidgets_widget *dialog, const char *initial, char **path, int *accepted, void *user)
 {
     BROWSEINFOW picker;
     LPITEMIDLIST item;
     WCHAR folder[MAX_PATH], start[MAX_PATH] = {0};
-    int info = options_page_selected(native(dialog), "Info");
-    WCHAR *title = xx_str_utf8_to_unicode(info ? CDIE_TR("Select the info database folder") : CDIE_TR("Select the database folder"));
-    /* An empty signature slot is the default database: start where it was found. */
-    WCHAR *wide = initial && initial[0] ? xx_str_utf8_to_unicode(initial) :
-        !info && gui_backend_main_db_path()[0] ? xx_str_utf8_to_unicode(gui_backend_main_db_path()) : NULL;
+    gui_options_page_id page = gui_options_browse_page();
+    WCHAR *title = xx_str_utf8_to_unicode(gui_options_browse_title(page));
+    char *first = gui_options_browse_start(page, initial);
+    WCHAR *wide = first ? xx_str_utf8_to_unicode(first) : NULL;
     xxwidgets_status status = XXWIDGETS_OK;
     (void)user;
     *path = NULL; *accepted = 0;
-    if (wide && lstrlenW(wide) < MAX_PATH) {
-        /* A folder that does not exist (yet): its nearest existing parent. */
-        DWORD attributes;
-        lstrcpyW(start, wide);
-        while (start[0] && ((attributes = GetFileAttributesW(start)) == INVALID_FILE_ATTRIBUTES || !(attributes & FILE_ATTRIBUTE_DIRECTORY))) {
-            WCHAR *cut = NULL;
-            for (WCHAR *s = start; *s; ++s) if (*s == L'\\' || *s == L'/') cut = s;
-            if (!cut) start[0] = 0;
-            else if (cut == start + 2 && start[1] == L':') { cut[1] = 0; if (GetFileAttributesW(start) == INVALID_FILE_ATTRIBUTES) start[0] = 0; break; }
-            else *cut = 0;
-        }
-    }
+    if (wide && lstrlenW(wide) < MAX_PATH) lstrcpyW(start, wide);
     xx_str_wfree(wide);
+    free(first);
     g_browseSelection[0] = 0;
     ZeroMemory(&picker, sizeof(picker));
     picker.hwndOwner = native(dialog);
@@ -1289,8 +1101,11 @@ static int create_controls(void)
         !create_control(&g_path, XXWIDGETS_EDIT, "", IDC_EDIT_PATH) ||
         /* A down arrow, as a history list; ">" belongs to the report. */
         !create_control(&g_recent, XXWIDGETS_BUTTON, "\xE2\x96\xBC", IDC_BTN_RECENT) ||
-        !create_control(&g_browse, XXWIDGETS_BUTTON, CDIE_N_("..."), IDC_BTN_BROWSE) ||
-        !create_control(&g_status, XXWIDGETS_LABEL, "", IDC_STATUS) ||
+        !create_control(&g_browse, XXWIDGETS_BUTTON, CDIE_N_("..."), IDC_BTN_BROWSE)) return 0;
+    /* Tab follows creation order (IsDialogMessage): the scan panel, which is
+     * next on screen, comes before the tool buttons below it. */
+    if (xxwidgets_scan_panel_create(g_window, panel_bounds, &g_panel) != XXWIDGETS_OK) return 0;
+    if (!create_control(&g_status, XXWIDGETS_LABEL, "", IDC_STATUS) ||
         !create_control(&g_options, XXWIDGETS_BUTTON, CDIE_N_("Options"), IDC_BTN_OPTIONS) ||
         !create_control(&g_aboutButton, XXWIDGETS_BUTTON, CDIE_N_("About"), IDC_BTN_ABOUT) ||
         !create_control(&g_fileInformationButton, XXWIDGETS_BUTTON, CDIE_N_("File Information"), IDC_BTN_FILE_INFORMATION) ||
@@ -1309,8 +1124,7 @@ static int create_controls(void)
         !create_control(&g_exit, XXWIDGETS_BUTTON, CDIE_N_("Exit"), IDC_BTN_EXIT)) return 0;
     /* A build without the updater keeps the button, disabled. */
     if (!gui_update_supported() && xxwidgets_widget_set_enabled(g_updateButton, 0) != XXWIDGETS_OK) return 0;
-    if (xxwidgets_scan_panel_create(g_window, panel_bounds, &g_panel) != XXWIDGETS_OK) return 0;
-    g_type = xxwidgets_scan_panel_control(g_panel, XXWIDGETS_SCAN_PANEL_FILE_TYPE);
+    g_type =xxwidgets_scan_panel_control(g_panel, XXWIDGETS_SCAN_PANEL_FILE_TYPE);
     g_typeLabel = xxwidgets_scan_panel_control(g_panel, XXWIDGETS_SCAN_PANEL_FILE_TYPE_LABEL);
     g_flags = xxwidgets_scan_panel_control(g_panel, XXWIDGETS_SCAN_PANEL_FLAGS);
     g_databases = xxwidgets_scan_panel_control(g_panel, XXWIDGETS_SCAN_PANEL_DATABASES);
@@ -1465,7 +1279,8 @@ enum { SMOKE_SCAN_CANCEL = 20, SMOKE_SCAN_OK, SMOKE_FONTS_CANCEL, SMOKE_FONTS_OK
        SMOKE_STRINGS_CONFIG, SMOKE_DISK_CANCEL, SMOKE_STRINGS_FILE, SMOKE_PAGE_CANCEL, SMOKE_COLORS_OK, SMOKE_SCAN_MISSING_DB,
        SMOKE_PICKERS, SMOKE_LOG, SMOKE_INFO, SMOKE_DIRECTORY, SMOKE_RECENT, SMOKE_RECENT_EMPTY, SMOKE_SIGNATURE_CONFIRM,
        SMOKE_UPDATE_CANCEL, SMOKE_UPDATE_FAILED, SMOKE_PROGRESS_CANCEL, SMOKE_TOOL_RESIZE, SMOKE_UNEXPECTED, SMOKE_TOOL_INNER,
-       SMOKE_SCAN_PAGE };
+       SMOKE_SCAN_PAGE, SMOKE_UPDATE_QUESTION };
+static const WCHAR *g_smokeAnswer; /* SMOKE_UPDATE_QUESTION: the button to press */
 static const WCHAR *g_smokePage;
 static int g_smokePageState, g_smokeContextChecked;
 static HWND g_smokeNestedParent;
@@ -2329,6 +2144,11 @@ optimization_done:;
         /* A worker's progress: bars, the elapsed time and Cancel, which stops it. */
         if (!FindWindowExW(window, NULL, PROGRESS_CLASSW, NULL) || !smoke_label(window, L"Elapsed")) smoke_fail_at(__LINE__, window, NULL);
         smoke_click(window, L"Cancel");
+    } else if (g_smokeAction == SMOKE_UPDATE_QUESTION) {
+        /* The question before an available update is installed: Yes and No. */
+        if (!smoke_label(window, L"Install it now?") || !smoke_child(window, L"Button", L"Yes", 1) ||
+            !smoke_child(window, L"Button", L"No", 1)) smoke_fail_at(__LINE__, window, NULL);
+        smoke_click(window, g_smokeAnswer ? g_smokeAnswer : L"No");
     } else if (g_smokeAction == SMOKE_HASH || g_smokeAction == SMOKE_TOOL_RESIZE) {
         HWND rows = NULL;
         EnumChildWindows(window, smoke_hash_rows, (LPARAM)&rows);
@@ -3930,14 +3750,18 @@ static int is_smoke_requested(void)
     LocalFree(args); return requested;
 }
 
-/* --smoke-update installed|current|failed: 1 + the index of the expected
- * result in g_updateSmokeResults, 0 when absent, -1 when malformed. */
-static const gui_update_result g_updateSmokeResults[] = {GUI_UPDATE_INSTALLED, GUI_UPDATE_CURRENT, GUI_UPDATE_FAILED};
+/* --smoke-update installed|current|failed|box-current|ask-no|ask-yes: 1 + the
+ * index of the expected result in g_updateSmokeResults, 0 when absent, -1
+ * when malformed. The last three run with the main window as the owner, as
+ * on macOS: the "No updates." box is closed, the question answered No or Yes. */
+static const gui_update_result g_updateSmokeResults[] = {GUI_UPDATE_INSTALLED, GUI_UPDATE_CURRENT, GUI_UPDATE_FAILED,
+                                                         GUI_UPDATE_CURRENT, GUI_UPDATE_CANCELLED, GUI_UPDATE_INSTALLED};
+enum { UPDATE_SMOKE_BOX_CURRENT = 4, UPDATE_SMOKE_ASK_NO, UPDATE_SMOKE_ASK_YES };
 static int g_updateSmoke;
 
 static int update_smoke_requested(void)
 {
-    static const WCHAR *const names[] = {L"installed", L"current", L"failed"};
+    static const WCHAR *const names[] = {L"installed", L"current", L"failed", L"box-current", L"ask-no", L"ask-yes"};
     int argc = 0, requested = 0;
     WCHAR **args = CommandLineToArgvW(GetCommandLineW(), &argc);
     if (!args) return -1;
@@ -3965,7 +3789,7 @@ static int run_update_smoke(void)
     gui_update_result expected = g_updateSmokeResults[g_updateSmoke - 1], result;
     char status_text[512], line[640];
     DWORD written;
-    int passed;
+    int passed, dialogs = 1;
     /* The startup text must not pass for the outcome. */
     xxwidgets_widget_set_text(g_status, "");
     g_pending = ACTION_NONE;
@@ -3974,11 +3798,21 @@ static int run_update_smoke(void)
         if (g_pending != ACTION_UPDATE) return smoke_failed(__LINE__);
         g_pending = ACTION_NONE;
     }
-    result = do_update_database(NULL);
+    if (g_updateSmoke >= UPDATE_SMOKE_BOX_CURRENT) {
+        xxwidgets_widget_set_visible(g_window, 1);
+        /* The text dialog is application-modal; the question is owned by the main window only. */
+        if (!smoke_begin_ex(L"Update database", g_updateSmoke == UPDATE_SMOKE_BOX_CURRENT ? SMOKE_UPDATE_FAILED : SMOKE_UPDATE_QUESTION,
+                            g_updateSmoke == UPDATE_SMOKE_BOX_CURRENT))
+            return smoke_failed(__LINE__);
+        if (g_updateSmoke == UPDATE_SMOKE_BOX_CURRENT) g_smokeExpectPart = L"No updates.";
+        else g_smokeAnswer = g_updateSmoke == UPDATE_SMOKE_ASK_YES ? L"Yes" : L"No";
+        result = do_update_database(g_window);
+        dialogs = smoke_finish();
+    } else result = do_update_database(NULL);
     if (xxwidgets_widget_get_text(g_status, status_text, sizeof(status_text), NULL) != XXWIDGETS_OK) status_text[0] = 0;
     xx_rt_snprintf(line, sizeof(line), "smoke-update: %s %s\r\n", gui_update_result_name(result), status_text);
     WriteFile(GetStdHandle(STD_ERROR_HANDLE), line, (DWORD)lstrlenA(line), &written, NULL);
-    passed = result == expected && (result != GUI_UPDATE_INSTALLED || (gui_backend_signature_count() > 0 && status_text[0]));
+    passed = dialogs && result == expected && (result != GUI_UPDATE_INSTALLED || (gui_backend_signature_count() > 0 && status_text[0]));
     return passed ? 0 : 1;
 }
 
@@ -4128,7 +3962,9 @@ int gui_run(void)
         }
     }
     base = xx_str_utf8_to_unicode(gui_backend_app_title());
-#if defined(_WIN64)
+#if defined(_WIN64) && CDIE_GUI_ARM_TARGET
+    cdie_translation_swprintf(title, sizeof(title)/sizeof(title[0]), CDIE_N_(L"%s (ARM64)"), base ? base : L"cdie");
+#elif defined(_WIN64)
     cdie_translation_swprintf(title, sizeof(title)/sizeof(title[0]), CDIE_N_(L"%s (x64)"), base ? base : L"cdie");
 #else
     cdie_translation_swprintf(title, sizeof(title)/sizeof(title[0]), CDIE_N_(L"%s (x86)"), base ? base : L"cdie");
@@ -4218,7 +4054,7 @@ int gui_run(void)
             if (status == XXWIDGETS_OK && accepted) {
                 xxwidgets_widget_set_text(g_path, path); gui_frontend_remember_file(path);
                 if (gui_frontend_scan_after_open()) do_scan();
-            }
+            } else if (status != XXWIDGETS_OK) report_ui_error(CDIE_N_("Recent files"), status);
             break;
         }
         case ACTION_OPTIONS: do_settings(g_optionsPage); break;
