@@ -6,6 +6,12 @@
 void gui_frontend_get_preferences(gui_options_values *values);
 xxwidgets_status gui_frontend_apply_preferences(xxwidgets_app *app, const gui_options_values *values);
 int gui_frontend_scan_after_open(void);
+/* View/Advanced, shared with Detect It Easy: the main window's Advanced view.
+ * set_advanced changes the in-memory preferences only; the frontend's
+ * gui_settings_save writes the key when it differs from the store, so
+ * toggling twice writes nothing. */
+int gui_frontend_advanced(void);
+void gui_frontend_set_advanced(int advanced);
 void gui_frontend_remember_file(const char *path);
 xxwidgets_status gui_frontend_recent_dialog(xxwidgets_widget *owner, char *path, size_t capacity, int *accepted);
 char *gui_frontend_stored_language(int memory_only); /* free() by caller; NULL = System */

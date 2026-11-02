@@ -35,7 +35,19 @@ int gui_hex_view_open(const char *path, xx_io_device **out, char **error)
     }
     *out = device; return 1;
 }
+static xxwidgets_status show_hex(xxwidgets_widget *owner, const char *path, int at, uint64_t offset, uint64_t length);
+
 xxwidgets_status gui_hex_view_show(xxwidgets_widget *owner, const char *path)
+{
+    return show_hex(owner, path, 0, 0, 0);
+}
+
+xxwidgets_status gui_hex_view_show_at(xxwidgets_widget *owner, const char *path, uint64_t offset, uint64_t length)
+{
+    return show_hex(owner, path, 1, offset, length);
+}
+
+static xxwidgets_status show_hex(xxwidgets_widget *owner, const char *path, int at, uint64_t offset, uint64_t length)
 {
     xx_io_device *device = NULL;
     char *error = NULL;
@@ -50,7 +62,12 @@ xxwidgets_status gui_hex_view_show(xxwidgets_widget *owner, const char *path)
     {
         xxwidgets_hex_options options;
         gui_hex_view_get_options(&options);
-        status = xxwidgets_hexview_dialog_with_options(owner, CDIE_TR("Hex View"), path, device, &options);
+        /* A range the file no longer holds (it shrank since the facts were
+         * read) opens at the start rather than not at all. */
+        uint64_t size = (uint64_t)xx_io_total_size(device);
+        if (at && offset <= size && length <= size - offset)
+            status = xxwidgets_hexview_dialog_at(owner, CDIE_TR("Hex View"), path, device, &options, offset, length);
+        else status = xxwidgets_hexview_dialog_with_options(owner, CDIE_TR("Hex View"), path, device, &options);
     }
     xx_io_close(device);
     return status;

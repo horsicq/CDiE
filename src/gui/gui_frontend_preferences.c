@@ -104,6 +104,21 @@ int gui_frontend_scan_after_open(void)
     return values.scan.scan_after_open;
 }
 
+int gui_frontend_advanced(void)
+{
+    gui_options_values values;
+    gui_preferences_get(&values);
+    return values.appearance.advanced != 0;
+}
+
+void gui_frontend_set_advanced(int advanced)
+{
+    gui_options_values values;
+    gui_preferences_get(&values);
+    values.appearance.advanced = advanced != 0;
+    gui_preferences_set(&values);
+}
+
 char *gui_frontend_executable_directory(void)
 {
     char *path = NULL, *slash;

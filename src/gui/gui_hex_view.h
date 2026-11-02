@@ -8,6 +8,10 @@
 int gui_hex_view_open(const char *path, xx_io_device **device, char **error);
 /* Opens the viewer with the session's Hex preferences. */
 xxwidgets_status gui_hex_view_show(xxwidgets_widget *owner, const char *path);
+/* As gui_hex_view_show, opened at offset with length bytes selected (0: just
+ * there), e.g. a gui_backend_facts overlay; a range past the end of the file
+ * opens at the start. */
+xxwidgets_status gui_hex_view_show_at(xxwidgets_widget *owner, const char *path, uint64_t offset, uint64_t length);
 /* Session Hex preferences: bytes per row, bold non-zero bytes and font. They
  * start at xxwidgets_hex_options_init; the viewer stays read-only. */
 void gui_hex_view_get_options(xxwidgets_hex_options *options);

@@ -161,7 +161,19 @@ xxwidgets_status gui_file_information_show(xxwidgets_widget *owner, const char *
     return gui_file_information_show_slice(owner, path, CDIE_FILE_INFO_SLICE_AUTO);
 }
 
+static xxwidgets_status show_information(xxwidgets_widget *owner, const char *path, int slice, const char *selector);
+
 xxwidgets_status gui_file_information_show_slice(xxwidgets_widget *owner, const char *path, int slice)
+{
+    return show_information(owner, path, slice, NULL);
+}
+
+xxwidgets_status gui_file_information_show_at(xxwidgets_widget *owner, const char *path, const char *selector)
+{
+    return show_information(owner, path, CDIE_FILE_INFO_SLICE_AUTO, selector);
+}
+
+static xxwidgets_status show_information(xxwidgets_widget *owner, const char *path, int slice, const char *selector)
 {
     information_job job = {0};
     xx_pd_struct progress = xx_pd_init();
@@ -180,8 +192,8 @@ xxwidgets_status gui_file_information_show_slice(xxwidgets_widget *owner, const 
     joined = xx_thread_join(thread, NULL); xx_mutex_destroy(job.lock);
     if (!joined) status = XXWIDGETS_PLATFORM_ERROR;
     else if (status == XXWIDGETS_OK && job.ok)
-        status = xxwidgets_file_information_dialog(owner, CDIE_TR("File Information"), job.data->path, job.data->file_type,
-            job.data->size, job.data->items, job.data->count);
+        status = xxwidgets_file_information_dialog_at(owner, CDIE_TR("File Information"), job.data->path, job.data->file_type,
+            job.data->size, job.data->items, job.data->count, selector);
     else if (status == XXWIDGETS_OK && !job.work.is_stop)
         status = gui_error_show_file(owner, CDIE_TR("File Information"), CDIE_N_("Cannot read the file information of %s."), path, job.error);
     gui_file_information_free(job.data); gui_backend_free(job.error);

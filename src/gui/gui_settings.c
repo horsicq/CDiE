@@ -671,6 +671,7 @@ static int specs_ready(void)
     static const struct { const char *key; size_t offset; } bools[] = {
         {"View/StayOnTop", offsetof(gui_options_values, appearance.stay_on_top)},
         {"View/SingleApplication", offsetof(gui_options_values, appearance.single_application)},
+        {"View/Advanced", offsetof(gui_options_values, appearance.advanced)},
         {"File/SaveLastDirectory", offsetof(gui_options_values, file.save_last_directory)},
         {"File/SaveRecentFiles", offsetof(gui_options_values, file.save_recent_files)},
         {"File/SaveBackup", offsetof(gui_options_values, file.save_backup)},

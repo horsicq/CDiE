@@ -26,4 +26,8 @@ void gui_file_information_free(gui_file_information_data *data);
  * then displays the reusable xxwidgets modal browser. */
 xxwidgets_status gui_file_information_show(xxwidgets_widget *owner, const char *path);
 xxwidgets_status gui_file_information_show_slice(xxwidgets_widget *owner, const char *path, int slice);
+/* As gui_file_information_show, opened at the first structure named selector
+ * (a DataStruct name such as "IMAGE_SECTION_HEADER", or a gui_backend_facts
+ * *_selector); the first structure when the file has none of that name. */
+xxwidgets_status gui_file_information_show_at(xxwidgets_widget *owner, const char *path, const char *selector);
 #endif

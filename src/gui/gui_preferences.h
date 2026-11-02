@@ -7,6 +7,7 @@
 
 typedef struct gui_appearance_preferences {
     int stay_on_top, single_application;
+    int advanced; /* View/Advanced: the main window's Advanced view (shared with Detect It Easy) */
     char style[64], qss[GUI_PREFERENCE_PATH_MAX], language[GUI_PREFERENCE_PATH_MAX];
 } gui_appearance_preferences;
 typedef struct gui_file_preferences {
