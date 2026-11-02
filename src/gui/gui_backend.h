@@ -43,6 +43,15 @@ extern "C" {
  * versions is never loaded. */
 enum { GUI_DB_MAIN = 0, GUI_DB_CUSTOM = 1, GUI_DB_COUNT = 2 };
 
+/* File-type choices Qt's XFormats exposes but xxfclib's compact scanner enum
+ * does not.  They intentionally live outside XFileType; scans map them to
+ * Binary, matching diec --filetype for these generic views. */
+enum {
+    GUI_FILE_TYPE_TEXT = 1001,
+    GUI_FILE_TYPE_UNICODE,
+    GUI_FILE_TYPE_7ZIP
+};
+
 /* Resolves db/db_custom next to the executable, then in the macOS bundle's
  * Resources directory. Loads both once and sorts them, regardless of the
  * toggle, because the "Databases" toggle gates whether the custom database

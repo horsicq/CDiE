@@ -482,8 +482,15 @@ int gui_backend_set_optimization_options(const gui_backend_optimization_options 
 typedef struct gui_file_types_context {
     gui_backend_file_type_fn pTypeFn;
     void *pUserData;
-    int bStarted;
+    XFileType types[64];
+    size_t count;
 } gui_file_types_context;
+
+static int gui_archive_file_type(int type)
+{
+    return type == XFT_ZIP || type == XFT_JAR || type == XFT_APK || type == XFT_IPA ||
+        type == XFT_NPM || type == XFT_MACHOFAT || type == XFT_RAR || type == XFT_ISO9660;
+}
 
 /* Broad database categories do not identify separate concrete format readers. */
 static int gui_concrete_file_type(XFileType type)
@@ -493,15 +500,50 @@ static int gui_concrete_file_type(XFileType type)
         type != XFT_CLI_ASSEMBLY;
 }
 
-static void gui_emit_file_type(XFileType type, void *pUserData)
+static int gui_selectable_file_type(int type)
 {
-    gui_file_types_context *pContext = (gui_file_types_context *)pUserData;
-    if (!pContext->bStarted) {
-        pContext->pTypeFn(0, "Automatic", pContext->pUserData);
-        pContext->bStarted = 1;
+    return type == GUI_FILE_TYPE_TEXT || type == GUI_FILE_TYPE_UNICODE || type == GUI_FILE_TYPE_7ZIP ||
+        (type > 0 && type < XFT_COUNT && (gui_concrete_file_type((XFileType)type) || type == XFT_ARCHIVE));
+}
+
+static int gui_scan_file_type(int type)
+{
+    return type == GUI_FILE_TYPE_TEXT || type == GUI_FILE_TYPE_UNICODE || type == GUI_FILE_TYPE_7ZIP ? XFT_BINARY : type;
+}
+
+static void gui_collect_file_type(XFileType type, void *pUserData)
+{
+    gui_file_types_context *context = (gui_file_types_context *)pUserData;
+    size_t i;
+    for (i = 0; i < context->count; ++i) if (context->types[i] == type) return;
+    if (context->count < sizeof(context->types) / sizeof(context->types[0])) context->types[context->count++] = type;
+}
+
+static void gui_extra_file_types(const char *path, int *text, int *unicode, int *seven_zip, int *rar)
+{
+    static const unsigned char seven_zip_magic[6] = {0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c};
+    static const unsigned char rar_magic[6] = {0x52, 0x61, 0x72, 0x21, 0x1a, 0x07};
+    unsigned char buffer[65536];
+    xx_io_device *device = xx_io_file_open(path, "rb");
+    ssize_t count;
+    size_t i, plain = 0, pairs = 0, zero_pairs = 0;
+    *text = *unicode = *seven_zip = *rar = 0;
+    if (!device) return;
+    count = xx_io_read(device, buffer, sizeof(buffer));
+    xx_io_close(device);
+    if (count <= 0) return;
+    if (count >= 6 && !xx_rt_memcmp(buffer, seven_zip_magic, sizeof(seven_zip_magic))) *seven_zip = 1;
+    if (count >= 7 && !xx_rt_memcmp(buffer, rar_magic, sizeof(rar_magic)) &&
+        (buffer[6] == 0 || (count >= 8 && buffer[6] == 1 && buffer[7] == 0))) *rar = 1;
+    if (count >= 2 && ((buffer[0] == 0xff && buffer[1] == 0xfe) || (buffer[0] == 0xfe && buffer[1] == 0xff))) *unicode = 1;
+    for (i = 0; i < (size_t)count; ++i)
+        if (buffer[i] == '\t' || buffer[i] == '\r' || buffer[i] == '\n' || buffer[i] >= 0x20) ++plain;
+    for (i = 0; i + 1 < (size_t)count; i += 2) {
+        ++pairs;
+        if ((buffer[i] == 0 && buffer[i + 1] >= 0x20) || (buffer[i + 1] == 0 && buffer[i] >= 0x20)) ++zero_pairs;
     }
-    if (gui_concrete_file_type(type))
-        pContext->pTypeFn((int)type, xft_to_string(type), pContext->pUserData);
+    if (plain == (size_t)count) *text = 1;
+    if (pairs >= 2 && zero_pairs * 4 >= pairs * 3) *unicode = *text = 1;
 }
 
 int gui_backend_file_types(const char *pUtf8Path, gui_backend_file_type_fn pTypeFn, void *pUserData)
@@ -510,8 +552,35 @@ int gui_backend_file_types(const char *pUtf8Path, gui_backend_file_type_fn pType
     if (!g_bInited) return 0;
     context.pTypeFn = pTypeFn;
     context.pUserData = pUserData;
-    context.bStarted = 0;
-    return die_engine_detect_file_types(pUtf8Path, pTypeFn ? gui_emit_file_type : NULL, &context);
+    context.count = 0;
+    if (!die_engine_detect_file_types(pUtf8Path, pTypeFn ? gui_collect_file_type : NULL, &context)) return 0;
+    if (pTypeFn) {
+        size_t i;
+        int has_apk = 0, has_archive = 0, has_archive_type = 0, has_rar = 0;
+        int text = 0, unicode = 0, seven_zip = 0, rar = 0;
+        pTypeFn(0, "Automatic", pUserData);
+        for (i = 0; i < context.count; ++i) {
+            if (context.types[i] == XFT_APK) has_apk = 1;
+            if (context.types[i] == XFT_ARCHIVE) has_archive = 1;
+            if (context.types[i] == XFT_RAR) has_rar = 1;
+            if (gui_archive_file_type(context.types[i])) has_archive_type = 1;
+        }
+        for (i = 0; i < context.count; ++i) {
+            int type = context.types[i];
+            if (type == XFT_JAR && has_apk) continue; /* Qt lists APK as ZIP, never JAR. */
+            if (gui_concrete_file_type((XFileType)type) || type == XFT_ARCHIVE)
+                pTypeFn(type, xft_to_string((XFileType)type), pUserData);
+        }
+        gui_extra_file_types(pUtf8Path, &text, &unicode, &seven_zip, &rar);
+        if (rar && !has_rar)
+            pTypeFn(XFT_RAR, xft_to_string(XFT_RAR), pUserData);
+        if (!has_archive && (seven_zip || rar || has_archive_type))
+            pTypeFn(XFT_ARCHIVE, xft_to_string(XFT_ARCHIVE), pUserData);
+        if (text) pTypeFn(GUI_FILE_TYPE_TEXT, "Text", pUserData);
+        if (unicode) pTypeFn(GUI_FILE_TYPE_UNICODE, "Unicode", pUserData);
+        if (seven_zip) pTypeFn(GUI_FILE_TYPE_7ZIP, "7-Zip", pUserData);
+    }
+    return 1;
 }
 
 int gui_backend_scan(const char *pUtf8Path, char **ppResultText, char **ppTypeName)
@@ -592,44 +661,26 @@ static const char *type_name(xx_format_type_t type)
 
 static void copy_field(char *field, size_t capacity, const char *text)
 {
-    xx_rt_snprintf(field, capacity, "%s", text && xx_rt_strcmp(text, "Unknown") ? text : "");
+    xx_rt_snprintf(field, capacity, "%s", text ? text : "");
 }
 
 /* The format parser's view of the main input, as DIE shows it above the
  * tree, for the executable families the engine's readers cover. */
-static void describe_input(const char *path, const xx_scan_result *result, gui_backend_scan_info *info)
+static void describe_input(const char *path, int selected_type, const xx_scan_result *result, gui_backend_scan_info *info)
 {
-    xx_pe pe;
-    xx_elf elf;
-    xx_macho macho;
-    Abstractformat *format = NULL;
-    xx_io_device *device;
-    xx_endian_t endian;
-    xx_arch_t arch;
-    int bits;
-    (void)result;
-    if (!(device = xx_io_file_open(path, "rb"))) return;
-    xx_rt_memset(&pe, 0, sizeof(pe)); xx_rt_memset(&elf, 0, sizeof(elf)); xx_rt_memset(&macho, 0, sizeof(macho));
-    xx_pe_init(&pe, device, 0);
-    xx_elf_init(&elf, device, 0);
-    xx_macho_init(&macho, device, 0);
-    {
-        /* The first reader that accepts the file. */
-        Abstractformat *candidates[3] = {&pe.format, &elf.format, &macho.format};
-        for (int i = 0; i < 3 && !format; ++i)
-            if (candidates[i]->check_is_valid && candidates[i]->check_is_valid(candidates[i], NULL)) format = candidates[i];
-    }
-    if (format && (!format->handle_base_info || format->handle_base_info(format, NULL))) {
-        endian = format->get_endian ? format->get_endian(format) : format->endian;
-        arch = format->get_arch ? format->get_arch(format) : format->arch;
-        copy_field(info->endianness, sizeof(info->endianness), endian == XX_ENDIAN_LITTLE ? "LE" : endian == XX_ENDIAN_BIG ? "BE" : "");
-        bits = arch_bits(arch);
-        if (bits) xx_rt_snprintf(info->mode, sizeof(info->mode), "%d-bit", bits);
-        copy_field(info->architecture, sizeof(info->architecture), arch_name(arch));
-        copy_field(info->type, sizeof(info->type), type_name(format->get_type ? format->get_type(format) : format->format_type));
-    }
-    xx_pe_destroy(&pe); xx_elf_destroy(&elf); xx_macho_destroy(&macho);
-    xx_io_close(device);
+    gui_backend_facts facts;
+    int type_id = selected_type;
+    xx_rt_memset(info->endianness, 0, sizeof(info->endianness));
+    xx_rt_memset(info->mode, 0, sizeof(info->mode));
+    xx_rt_memset(info->architecture, 0, sizeof(info->architecture));
+    xx_rt_memset(info->type, 0, sizeof(info->type));
+    if (!type_id && result) type_id = result->fileType;
+    if (!gui_backend_file_facts(path, type_id, &facts)) return;
+    copy_field(info->endianness, sizeof(info->endianness), facts.endianness);
+    copy_field(info->mode, sizeof(info->mode), facts.mode);
+    copy_field(info->architecture, sizeof(info->architecture), facts.architecture);
+    copy_field(info->type, sizeof(info->type), facts.type);
+    gui_backend_facts_free(&facts);
 }
 
 static char *join_errors(const xx_scan_result *result)
@@ -734,6 +785,7 @@ static int scan_results_impl(const char *pUtf8Path, int nTypeId,
     int i;
     uint8_t digest[XX_BLAKE2SP_DIGEST_SIZE];
     int64_t input_size = 0;
+    int engine_type;
     int identity_valid = 0, hit = 0;
 
     if (ppResultText != NULL) {
@@ -745,10 +797,10 @@ static int scan_results_impl(const char *pUtf8Path, int nTypeId,
     }
 
     if ((!g_bInited) || (pUtf8Path == NULL) || (pUtf8Path[0] == 0) ||
-        nTypeId < 0 || nTypeId >= XFT_COUNT ||
-        (nTypeId != 0 && !gui_concrete_file_type((XFileType)nTypeId))) {
+        nTypeId < 0 || (nTypeId != 0 && !gui_selectable_file_type(nTypeId))) {
         return 0;
     }
+    engine_type = gui_scan_file_type(nTypeId);
 
     xx_scan_options options = g_options;
     xx_rt_memset(&result, 0, sizeof(result));
@@ -757,7 +809,7 @@ static int scan_results_impl(const char *pUtf8Path, int nTypeId,
         if (xx_pd_is_stopped(pProgress)) return 0;
         if (identity_valid) hit = cached_result(pUtf8Path, nTypeId, digest, input_size, &result);
     }
-    if (!hit && !scan_configured(pUtf8Path, nTypeId, &options, &result, pProgress)) {
+    if (!hit && !scan_configured(pUtf8Path, engine_type, &options, &result, pProgress)) {
         xx_scan_result_free(&result);
         return 0;
     }
@@ -786,7 +838,7 @@ static int scan_results_impl(const char *pUtf8Path, int nTypeId,
     if (tree_fn && !gui_result_tree_emit(&result, g_options.hide_unknown, tree_fn, pUserData))
         goto scan_allocation_failed;
     if (pInfo) {
-        describe_input(pUtf8Path, &result, pInfo);
+        describe_input(pUtf8Path, nTypeId, &result, pInfo);
         pInfo->log = join_errors(&result);
         if (!pInfo->log) goto scan_allocation_failed;
     }
@@ -864,9 +916,10 @@ int gui_backend_run_signature(const char *path, int type_id, const char *signatu
     char *detected;
     int ok, i;
     if (text) *text = NULL;
-    if (!g_bInited || !path || !path[0] || !source || !text || type_id < 0 || type_id >= XFT_COUNT ||
-        (type_id && !gui_concrete_file_type((XFileType)type_id)))
+    if (!g_bInited || !path || !path[0] || !source || !text || type_id < 0 ||
+        (type_id && !gui_selectable_file_type(type_id)))
         return 0;
+    type_id = gui_scan_file_type(type_id);
     xx_buf_init(&log);
     xx_buf_init(&out);
     xx_rt_memset(&config, 0, sizeof(config));
@@ -1082,6 +1135,11 @@ typedef struct facts_types {
 static void facts_type(XFileType type, void *user)
 {
     facts_types *types = (facts_types *)user;
+    if (types->wanted == XFT_ARCHIVE && gui_archive_file_type(type)) types->found = 1;
+    if (type == XFT_ARCHIVE) {
+        if ((int)type == types->wanted) types->found = 1;
+        return;
+    }
     if (!gui_concrete_file_type(type)) return;
     if (!types->first) types->first = (int)type;
     if (types->count < FACTS_MAX_TYPES) types->list[types->count++] = (int)type;
@@ -1091,7 +1149,8 @@ static void facts_type(XFileType type, void *user)
 static int facts_page(int type)
 {
     switch (type) {
-    case XFT_ZIP: case XFT_JAR: case XFT_APK: case XFT_IPA: case XFT_NPM: case XFT_RAR: case XFT_ISO9660:
+    case XFT_ZIP: case XFT_JAR: case XFT_APK: case XFT_IPA: case XFT_NPM: case XFT_MACHOFAT:
+    case XFT_RAR: case XFT_ISO9660: case XFT_ARCHIVE:
         return GUI_FACTS_PAGE_ARCHIVE;
     case XFT_DEX: return GUI_FACTS_PAGE_DEX;
     case XFT_MSDOS: return GUI_FACTS_PAGE_MSDOS;
@@ -1166,6 +1225,31 @@ static void facts_engine_row(gui_backend_facts *facts, xx_endian_t endian, xx_ar
     if (bits) xx_rt_snprintf(facts->mode, sizeof(facts->mode), "%d-bit", bits);
     copy_field(facts->architecture, sizeof(facts->architecture), arch_name(arch));
     copy_field(facts->type, sizeof(facts->type), type_name(type));
+}
+
+static void facts_qt_row(gui_backend_facts *facts, const char *endian, const char *mode,
+    const char *arch, const char *type)
+{
+    copy_field(facts->endianness, sizeof(facts->endianness), endian);
+    copy_field(facts->mode, sizeof(facts->mode), mode);
+    copy_field(facts->architecture, sizeof(facts->architecture), arch);
+    copy_field(facts->type, sizeof(facts->type), type);
+}
+
+static const char *facts_linear_arch(uint16_t cpu)
+{
+    switch (cpu) {
+    case 0x01: return "80286";
+    case 0x02: return "80386";
+    case 0x03: return "80486";
+    case 0x04: return "80586";
+    case 0x20: return "i860";
+    case 0x21: return "N11";
+    case 0x40: return "R2000";
+    case 0x41: return "R6000";
+    case 0x42: return "R4000";
+    default: return "Unknown";
+    }
 }
 
 static void facts_format_row(gui_backend_facts *facts, Abstractformat *format)
@@ -1472,6 +1556,67 @@ static void facts_other(gui_backend_facts *facts, xx_io_device *device)
             }
         }
     }
+    switch (facts->type_id) {
+    case XFT_BINARY:
+        facts_qt_row(facts, "Unknown", "Unknown", "NOEXEC", "Unknown");
+        break;
+    case GUI_FILE_TYPE_TEXT: case GUI_FILE_TYPE_UNICODE:
+        facts_qt_row(facts, "Unknown", "Unknown", "", "");
+        break;
+    case GUI_FILE_TYPE_7ZIP:
+        facts_qt_row(facts, "LE", "Data", "", "Archive");
+        break;
+    case XFT_ARCHIVE: case XFT_ZIP: case XFT_RAR:
+        facts_qt_row(facts, "Unknown", "Data", "NOEXEC", "Archive");
+        break;
+    case XFT_JAR: case XFT_APK:
+        facts_qt_row(facts, "Unknown", "Data", "Universal", "Package");
+        break;
+    case XFT_PDF:
+        facts_qt_row(facts, "Unknown", "Unknown", "NOEXEC", "Document");
+        break;
+    case XFT_MACHOFAT:
+        {
+            unsigned char magic[4];
+            const char *endian = "Unknown";
+            if (xx_io_read_at(device, 0, magic, sizeof(magic))) {
+                if ((magic[0] == 0xca && magic[1] == 0xfe && magic[2] == 0xba && (magic[3] == 0xbe || magic[3] == 0xbf)))
+                    endian = "BE";
+                else if ((magic[0] == 0xbe || magic[0] == 0xbf) && magic[1] == 0xba && magic[2] == 0xfe && magic[3] == 0xca)
+                    endian = "LE";
+            }
+            facts_qt_row(facts, endian, "Unknown", "", "");
+        }
+        break;
+    case XFT_DEX:
+        facts_qt_row(facts, map && map->endian == XX_ENDIAN_LITTLE ? "LE" :
+            map && map->endian == XX_ENDIAN_BIG ? "BE" : "Unknown", "32-bit", "Dalvik", "Main module");
+        break;
+    case XFT_NE:
+        if (format) {
+            const xx_ne *ne = (const xx_ne *)format;
+            uint16_t ip = (uint16_t)(ne->initial_cs_ip & 0xffffu);
+            uint16_t cs = (uint16_t)(ne->initial_cs_ip >> 16);
+            facts->base_address = 0x10000u;
+            facts->entry_point = 0x10000u + (uint64_t)cs * 0x10000u + ip;
+            facts_qt_row(facts, "LE", "16SEG", ne->target_os == 4 || ne->target_os == 5 ? "386" : "286",
+                ne->flags & 0x8000u ? "DLL" : "EXE");
+        }
+        break;
+    case XFT_LE: case XFT_LX:
+        if (format) {
+            const xx_linear_executable *linear = (const xx_linear_executable *)format;
+            facts->base_address = 0;
+            facts->entry_point = UINT32_MAX;
+            if (linear->start_object && linear->start_object <= linear->object_count)
+                facts->entry_point = linear->objects[linear->start_object - 1].base_address + linear->entry_offset;
+            facts_qt_row(facts, "LE", facts->type_id == XFT_LE ? "16SEG" : "32-bit",
+                facts_linear_arch(linear->cpu_type), "EXE");
+        }
+        break;
+    default:
+        break;
+    }
     switch (facts->page) {
     case GUI_FACTS_PAGE_COM: /* XCOM: loaded at 0100, MODE_16, 8086, EXE */
         facts->base_bits = facts->entry_bits = 16;
@@ -1503,13 +1648,18 @@ int gui_backend_file_facts(const char *path, int type_id, gui_backend_facts *fac
     facts_types types;
     xx_io_device *device;
     int64_t size;
+    int text = 0, unicode = 0, seven_zip = 0, rar = 0;
     int ok = 1;
     if (!facts) return 0;
     xx_rt_memset(facts, 0, sizeof(*facts));
     facts->entry_point_offset = facts->overlay_offset = -1;
-    if (!path || !*path || type_id < 0 || type_id >= XFT_COUNT || (type_id && !gui_concrete_file_type((XFileType)type_id))) return 0;
+    if (!path || !*path || type_id < 0 || (type_id && !gui_selectable_file_type(type_id))) return 0;
     types.wanted = type_id; types.found = 0; types.first = 0; types.count = 0;
-    if (!die_engine_detect_file_types(path, facts_type, &types) || !types.first || (type_id && !types.found)) return 0;
+    if (!die_engine_detect_file_types(path, facts_type, &types) || !types.first) return 0;
+    gui_extra_file_types(path, &text, &unicode, &seven_zip, &rar);
+    if (rar && type_id == XFT_RAR) types.found = 1;
+    if ((seven_zip || rar) && type_id == XFT_ARCHIVE) types.found = 1;
+    if (type_id && type_id < XFT_COUNT && !types.found) return 0;
     if (!(device = xx_io_file_open(path, "rb"))) return 0;
     size = xx_io_total_size(device);
     if (size < 0) { xx_io_close(device); return 0; }
@@ -1517,11 +1667,19 @@ int gui_backend_file_facts(const char *path, int type_id, gui_backend_facts *fac
         int i;
         type_id = types.first;
         for (i = 0; i < types.count; ++i)
-            if (facts_type_valid(types.list[i], device)) { type_id = types.list[i]; break; }
+                if (facts_type_valid(types.list[i], device)) { type_id = types.list[i]; break; }
+        if (type_id == XFT_BINARY) {
+            if (seven_zip) type_id = GUI_FILE_TYPE_7ZIP;
+            else if (rar) type_id = XFT_RAR;
+            else if (unicode) type_id = GUI_FILE_TYPE_UNICODE;
+            else if (text) type_id = GUI_FILE_TYPE_TEXT;
+        }
     }
     facts->type_id = type_id;
-    copy_field(facts->type_name, sizeof(facts->type_name), xft_to_string((XFileType)type_id));
-    facts->page = facts_page(type_id);
+    copy_field(facts->type_name, sizeof(facts->type_name),
+        type_id == GUI_FILE_TYPE_TEXT ? "Text" : type_id == GUI_FILE_TYPE_UNICODE ? "Unicode" :
+        type_id == GUI_FILE_TYPE_7ZIP ? "7-Zip" : xft_to_string((XFileType)type_id));
+    facts->page = type_id == GUI_FILE_TYPE_7ZIP ? GUI_FACTS_PAGE_ARCHIVE : facts_page(type_id);
     facts->file_size = (uint64_t)size;
     facts->base_bits = facts_size_bits(facts->file_size);
     facts->entry_bits = 32;

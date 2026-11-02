@@ -8,6 +8,7 @@ typedef struct gui_file_information_data {
     int64_t size;
     xxwidgets_data_struct_item *items;
     size_t count, capacity, bytes, field_capacity;
+    int truncated, skipping;
 } gui_file_information_data;
 
 /* Worker-safe native DataStructs collection, independent of signature state.

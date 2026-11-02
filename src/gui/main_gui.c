@@ -128,6 +128,7 @@ static int g_bFlagAggr, g_bFlagHideUnknown, g_bFlagFormat;
 static int g_bDbCustom = 1;
 static void smoke_trace(const char *text);
 static void smoke_last_message(char *text, size_t size);
+static void hook_settings_changed(void *user);
 
 static HWND native(xxwidgets_widget *widget)
 {
@@ -224,28 +225,7 @@ static xxwidgets_status refresh_panel_tags(void)
 
 static xxwidgets_status apply_panel_tag_filters(void)
 {
-    SIZE_T nInclude = 0, nExclude = 0;
-    char *pInclude = NULL, *pExclude = NULL;
-    xxwidgets_status status = xxwidgets_scan_panel_get_include_tags(g_panel, NULL, 0, &nInclude);
-    if (status == XXWIDGETS_OK)
-        status = xxwidgets_scan_panel_get_exclude_tags(g_panel, NULL, 0, &nExclude);
-    if (status != XXWIDGETS_OK) return status;
-
-    pInclude = (char *)HeapAlloc(GetProcessHeap(), 0, nInclude ? nInclude : 1);
-    pExclude = (char *)HeapAlloc(GetProcessHeap(), 0, nExclude ? nExclude : 1);
-    if (!pInclude || !pExclude) {
-        if (pInclude) HeapFree(GetProcessHeap(), 0, pInclude);
-        if (pExclude) HeapFree(GetProcessHeap(), 0, pExclude);
-        return XXWIDGETS_OUT_OF_MEMORY;
-    }
-    status = xxwidgets_scan_panel_get_include_tags(g_panel, pInclude, nInclude ? nInclude : 1, NULL);
-    if (status == XXWIDGETS_OK)
-        status = xxwidgets_scan_panel_get_exclude_tags(g_panel, pExclude, nExclude ? nExclude : 1, NULL);
-    if (status == XXWIDGETS_OK && !gui_backend_set_tag_filters(pInclude, pExclude))
-        status = XXWIDGETS_OUT_OF_MEMORY;
-    HeapFree(GetProcessHeap(), 0, pInclude);
-    HeapFree(GetProcessHeap(), 0, pExclude);
-    return status;
+    return gui_main_store_tag_filters(g_panel);
 }
 
 static xxwidgets_status sync_panel_options(void)
@@ -310,7 +290,6 @@ static xxwidgets_status selected_file_type(int *type_id)
 static xxwidgets_status refresh_file_types(const char *path)
 {
     xx_meta_string *records = NULL;
-    gui_backend_facts facts;
     xxwidgets_status status;
     char *new_path;
     int keep = g_typePath && !lstrcmpA(g_typePath, path);
@@ -324,16 +303,7 @@ static xxwidgets_status refresh_file_types(const char *path)
     if (status != XXWIDGETS_OK) { xx_str_free(new_path); return status; }
     if (g_typePath) xx_str_free(g_typePath);
     g_typePath = new_path;
-    memset(&facts, 0, sizeof(facts));
-    if (gui_backend_file_facts(path, gui_main_file_types_scan_id(&g_fileTypes), &facts)) {
-        (void)xxwidgets_file_header_set_file_size(g_header, facts.file_size);
-        if (facts.base_bits)
-            (void)xxwidgets_file_header_set_address(g_header, XXWIDGETS_FILE_HEADER_BASE_ADDRESS, facts.base_address, facts.base_bits);
-        if (facts.entry_bits)
-            (void)xxwidgets_file_header_set_address(g_header, XXWIDGETS_FILE_HEADER_ENTRY_POINT, facts.entry_point, facts.entry_bits);
-    }
-    gui_backend_facts_free(&facts);
-    return XXWIDGETS_OK;
+    return gui_main_apply_file_facts(g_main, path, gui_main_file_types_scan_id(&g_fileTypes));
 }
 
 /* Opens path as the loaded file: its types, size and addresses; the scan bar
@@ -722,6 +692,9 @@ static gui_update_result do_update_database(xxwidgets_widget *owner)
         if (status != XXWIDGETS_OK) { report_ui_error("Refresh signature tags", status); return result; }
     }
     note_message(message);
+    /* gui_update_run shows failures and "up to date"; an installed database
+     * says so in a message, as on Linux and macOS. */
+    if (owner && result == GUI_UPDATE_INSTALLED) show_error(message);
     return result;
 }
 
@@ -823,7 +796,8 @@ static void do_open(void)
     char *path = read_path(CDIE_N_("Read file name"));
     if (!path) return;
     if (gui_frontend_scan_after_open()) do_scan();
-    else if (path[0]) (void)load_file(path);
+    else if (!path[0]) { MessageBeep(MB_ICONASTERISK); xxwidgets_widget_focus(g_path); }
+    else if (load_file(path)) gui_frontend_remember_file(path);
     HeapFree(GetProcessHeap(), 0, path);
 }
 
@@ -855,8 +829,9 @@ static xxwidgets_status current_options(gui_options_values *values);
 /* The hooks of the shared dispatcher (gui_main_actions.h). */
 static void hook_browse(void *user) { (void)user; do_browse(); }
 static void hook_recent(void *user) { (void)user; do_recent(); }
-/* Return in the path field scans it, as it always did. */
-static void hook_open_path(void *user) { (void)user; do_scan(); }
+/* Return in the path field opens it (spec 1.5), scanned when Options say so,
+ * as on Linux and macOS. */
+static void hook_open_path(void *user) { (void)user; do_open(); }
 /* The dispatcher picked the type (g_fileTypes); do_scan scans with it. */
 static void hook_scan(void *user, int type_id) { (void)user; (void)type_id; do_scan(); }
 static void hook_report(void *user) { (void)user; do_report(); }
@@ -970,6 +945,7 @@ static void on_event(xxwidgets_app *app, const xxwidgets_event *event, void *use
                 event->widget == g_includeTags || event->widget == g_excludeTags)) {
         xxwidgets_status status = read_panel_options();
         if (status != XXWIDGETS_OK) report_ui_error(CDIE_N_("Read scan options"), status);
+        else if (event->widget == g_includeTags || event->widget == g_excludeTags) hook_settings_changed(NULL);
     }
 }
 
@@ -2359,8 +2335,16 @@ optimization_done:;
             smoke_click(window, L"Close");
             return FALSE;
         }
-        /* Modified: the second Close discards. */
-        smoke_click(window, L"Close");
+        /* The first Close is consumed by the editor's warning. Wait for that
+         * state before sending the second one: rapid timer ticks otherwise
+         * collapse both clicks into one close_requested flag (the old W/M8
+         * action-47 flake). */
+        if (g_smokePhase == 4) {
+            if (!smoke_label(window, L"Unsaved changes. Close again to discard them.")) return FALSE;
+            g_smokePhase = 6;
+            smoke_click(window, L"Close");
+        }
+        /* Phase 6 waits for the editor to return to its caller. */
     } else if (g_smokeAction == SMOKE_SIGNATURES_CANCEL) {
         HWND edit = smoke_child(window, L"Edit", NULL, 1);
         if (!edit || !SetWindowTextW(edit, L"Smoke test cancelled database path")) smoke_fail_at(__LINE__, window, edit);
@@ -3094,19 +3078,11 @@ static int smoke_live(xxwidgets_widget *widget)
     return smoke_shown(widget) && IsWindowEnabled(native(widget));
 }
 
-/* A visible button of the main window with this caption (the old tool rows). */
-static int smoke_main_button(const WCHAR *caption)
-{
-    return smoke_child(native(g_window), L"Button", caption, 1) != NULL;
-}
-
 /* Every control of a view (DIE_LOOK.md 3b.5): present, visible and enabled
- * as the view and the file state say; the old tool rows, the scan panel's
- * own File type and labels gone. */
+ * as the view and the file state say; the scan panel's own File type and
+ * labels are gone. */
 static unsigned int smoke_view_controls(int advanced, int loaded)
 {
-    static const WCHAR *const old_tools[] = {L"File Information", L"Entropy", L"Hash", L"Strings", L"Hex View", L"Disasm",
-        L"Memory Map", L"Imports", L"Exports", L"Resources", L"Symbols", L"Extractor"};
     xxwidgets_widget *always[] = {g_path, g_browse, g_results, g_advanced, g_shortcutsButton, g_options, g_aboutButton, g_exit};
     xxwidgets_widget *with_file[] = {g_type, g_flags, g_databases, g_scan, g_signaturesButton, g_directoryButton, g_logButton,
                                      g_facts[0], g_facts[1], g_facts[2], g_facts[3], g_msec};
@@ -3125,7 +3101,6 @@ static unsigned int smoke_view_controls(int advanced, int loaded)
     for (i = 0; i < sizeof(with_file) / sizeof(with_file[0]); ++i)
         if (!smoke_shown(with_file[i]) || !IsWindowEnabled(native(with_file[i])) != !loaded) return __LINE__ * 100 + (unsigned int)i;
     for (i = 0; i < sizeof(hidden) / sizeof(hidden[0]); ++i) if (smoke_shown(hidden[i])) return __LINE__ * 100 + (unsigned int)i;
-    for (i = 0; i < sizeof(old_tools) / sizeof(old_tools[0]); ++i) if (smoke_main_button(old_tools[i])) return __LINE__ * 100 + (unsigned int)i;
     /* The tag filters stay in the scan bar (Q3); Update database is shown
      * above Shortcuts, enabled only with an updater (Q2). */
     if (!smoke_shown(g_includeTags) || !smoke_shown(g_excludeTags) || !smoke_shown(g_reportButton)) return __LINE__;
@@ -4069,6 +4044,8 @@ int gui_run(void)
     }
     status = refresh_panel_tags();
     if (status != XXWIDGETS_OK) report_ui_error(CDIE_N_("Load signature tags"), status);
+    else if ((status = gui_main_restore_tag_filters(g_panel)) != XXWIDGETS_OK)
+        report_ui_error(CDIE_N_("Load tag filters"), status);
     apply_flags_to_backend();
     {
         /* The stored view (View/Advanced, shared with Qt DIE), then Qt's

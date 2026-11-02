@@ -102,7 +102,7 @@ typedef struct settings_snapshot {
     struct settings_snapshot *next;
 } settings_snapshot;
 
-#define SPEC_CAPACITY (96 + 3 * XX_SCAN_COLOR_COUNT + 3 * XXWIDGETS_DISASM_COLOR_COUNT)
+#define SPEC_CAPACITY (98 + 3 * XX_SCAN_COLOR_COUNT + 3 * XXWIDGETS_DISASM_COLOR_COUNT)
 static setting_spec specs[SPEC_CAPACITY];
 static size_t spec_count;
 static gui_options_values defaults;
@@ -727,6 +727,8 @@ static int specs_ready(void)
     spec_member("LastDirectory", SK_LAST_DIRECTORY, MEMBER(file.last_directory));
     spec_member(KEY_RECENT, SK_RECENT, MEMBER(file.recent_files));
     spec_member("Scan/Engine", SK_ENGINE, MEMBER(scan.engine));
+    spec_member("Scan/IncludeTags", SK_TEXT, MEMBER(scan.include_tags));
+    spec_member("Scan/ExcludeTags", SK_TEXT, MEMBER(scan.exclude_tags));
     for (i = 0; i < 6; ++i) {
         if (i < 4) xx_rt_snprintf(key, sizeof(key), "View/Font/%s", font_roles[i]);
         spec = spec_add(i < 4 ? key : i == 4 ? "Hex/Font" : "Disasm/Font", SK_FONT);

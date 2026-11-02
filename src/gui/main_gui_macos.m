@@ -99,6 +99,7 @@ static int g_smoke_run;            /* --smoke-test / --smoke-update: errors go t
  * dialog shown after polling returns (show_errors); g_message keeps the last
  * informational line (update result, scan summary) for the smoke tests. */
 static char g_error[1024], g_message[640], g_scan_type[128];
+static void save_settings(void);
 
 static NSString *string(const char *text)
 {
@@ -150,6 +151,7 @@ static xxwidgets_status refresh_panel_tags(void)
     if (!tags) return XXWIDGETS_OUT_OF_MEMORY;
     status = xxwidgets_scan_panel_set_available_tags(g_panel, tags);
     gui_backend_free(tags);
+    if (status == XXWIDGETS_OK) status = gui_main_restore_tag_filters(g_panel);
     apply_loaded_state();
     return status;
 }
@@ -168,25 +170,7 @@ static xxwidgets_status reload_panel_tags(void)
 }
 static xxwidgets_status apply_panel_tag_filters(void)
 {
-    size_t include_size = 0, exclude_size = 0;
-    char *include_tags = NULL, *exclude_tags = NULL;
-    xxwidgets_status status = xxwidgets_scan_panel_get_include_tags(g_panel, NULL, 0, &include_size);
-    if (status == XXWIDGETS_OK)
-        status = xxwidgets_scan_panel_get_exclude_tags(g_panel, NULL, 0, &exclude_size);
-    if (status != XXWIDGETS_OK) return status;
-    include_tags = malloc(include_size ? include_size : 1);
-    exclude_tags = malloc(exclude_size ? exclude_size : 1);
-    if (!include_tags || !exclude_tags) {
-        free(include_tags); free(exclude_tags);
-        return XXWIDGETS_OUT_OF_MEMORY;
-    }
-    status = xxwidgets_scan_panel_get_include_tags(g_panel, include_tags, include_size ? include_size : 1, NULL);
-    if (status == XXWIDGETS_OK)
-        status = xxwidgets_scan_panel_get_exclude_tags(g_panel, exclude_tags, exclude_size ? exclude_size : 1, NULL);
-    if (status == XXWIDGETS_OK && !gui_backend_set_tag_filters(include_tags, exclude_tags))
-        status = XXWIDGETS_OUT_OF_MEMORY;
-    free(include_tags); free(exclude_tags);
-    return status;
+    return gui_main_store_tag_filters(g_panel);
 }
 /* The operation name is translated as on Windows; UTF-8 throughout (an
  * NSString %s would read a translated name in the system encoding). The
@@ -225,7 +209,6 @@ static int history_enabled(void);
 static int load_file(const char *path, int keep_choice)
 {
     xx_meta_string *records = NULL;
-    struct stat info;
     xxwidgets_status status;
     if (!path || !path[0]) return 0;
     if (!gui_main_file_types_load(&g_types, path, keep_choice)) {
@@ -241,7 +224,7 @@ static int load_file(const char *path, int keep_choice)
     status = gui_main_file_types_records(&g_types, &records);
     if (status == XXWIDGETS_OK) status = xxwidgets_file_header_set_file_types(g_header, records, g_types.count, g_types.selected);
     gui_main_file_types_free_records(records, g_types.count);
-    if (status == XXWIDGETS_OK && !stat(path, &info)) status = xxwidgets_file_header_set_file_size(g_header, (uint64_t)info.st_size);
+    if (status == XXWIDGETS_OK) status = gui_main_apply_file_facts(g_main, path, gui_main_file_types_scan_id(&g_types));
     if (status == XXWIDGETS_OK) status = xxwidgets_file_name_bar_set_loaded_path(g_bar, path);
     if (status != XXWIDGETS_OK) report_ui_error(CDIE_N_("File type"), status);
     if (![g_type_path isEqualToString:string(path)]) { [g_type_path release]; g_type_path = [string(path) copy]; }
@@ -289,6 +272,7 @@ static void on_event(xxwidgets_app *app, const xxwidgets_event *event, void *use
         (event->widget == control(XXWIDGETS_SCAN_PANEL_INCLUDE_TAGS) || event->widget == control(XXWIDGETS_SCAN_PANEL_EXCLUDE_TAGS))) {
         xxwidgets_status status = apply_panel_tag_filters();
         if (status != XXWIDGETS_OK) report_ui_error(CDIE_N_("Read tag filters"), status);
+        else save_settings();
         return;
     }
     /* S or ? on a result row, and the scan bar's Signatures, Directory and
@@ -487,7 +471,9 @@ static gui_update_result do_update(xxwidgets_widget *owner)
         if (status != XXWIDGETS_OK) { report_ui_error("Refresh signature tags", status); return result; }
     }
     snprintf(g_message, sizeof(g_message), "%s", message);
-    if (owner && (result == GUI_UPDATE_FAILED || result == GUI_UPDATE_RELOAD_FAILED)) queue_error(message);
+    /* gui_update_run already shows failures and "up to date" over owner; an
+     * installed database says so in a message, as on Windows and Linux. */
+    if (owner && result == GUI_UPDATE_INSTALLED) queue_error(message);
     return result;
 }
 
@@ -715,13 +701,14 @@ static int shortcut_allowed(xxwidgets_widget *window, int action, void *user)
 /* The hooks of the shared dispatcher (gui_main_actions.h). */
 static void hook_browse(void *user) { (void)user; do_open(); }
 static void hook_recent(void *user) { (void)user; do_recent(); }
-/* Return in the path field: load and scan what was typed. */
+/* Return in the path field opens what was typed (spec 1.5), scanned when
+ * Options say so, as on Windows and Linux. No path: do_scan beeps. */
 static void hook_open_path(void *user)
 {
     char path[4096];
     (void)user;
-    if (field_path(path, sizeof(path))[0]) gui_frontend_remember_file(path);
-    do_scan();
+    if (!field_path(path, sizeof(path))[0] || gui_frontend_scan_after_open()) { (void)do_scan(); return; }
+    if (load_file(path, g_type_path && !strcmp([g_type_path UTF8String] ?: "", path))) gui_frontend_remember_file(path);
 }
 static void hook_scan(void *user, int type_id) { (void)user; (void)type_id; /* do_scan reads g_types */ do_scan(); }
 static void hook_report(void *user) { (void)user; do_report(); }

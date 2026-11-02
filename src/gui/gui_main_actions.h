@@ -45,6 +45,15 @@ int gui_main_file_types_scan_id(const gui_main_file_types *types);
 xxwidgets_status gui_main_file_types_records(const gui_main_file_types *types, xx_meta_string **records);
 void gui_main_file_types_free_records(xx_meta_string *records, size_t count);
 
+/* Refreshes every file-dependent value in the Advanced view for type_id:
+ * the header, engine row and per-format page.  type_id 0 resolves exactly as
+ * the backend's automatic scan. */
+xxwidgets_status gui_main_apply_file_facts(xxwidgets_die_main_panel *panel, const char *path, int type_id);
+/* Restores/stores the Qt-compatible Scan/IncludeTags and Scan/ExcludeTags
+ * values around set_available_tags. Store also applies them to the backend. */
+xxwidgets_status gui_main_restore_tag_filters(xxwidgets_scan_panel *panel);
+xxwidgets_status gui_main_store_tag_filters(xxwidgets_scan_panel *panel);
+
 typedef struct gui_main_hooks {
     void *user;
     /* NULL hooks make their action do nothing. */
@@ -68,8 +77,7 @@ typedef struct gui_main_hooks {
 
 /* Carries out action for the loaded file path ("" or NULL: none). Returns 1
  * when the action was one of the shared ones (done, or deliberately
- * nothing), 0 when the frontend must handle it (PATH_EDITED, and the Phase
- * 2/3 actions ENTRY_POINT, FORMAT, FORMAT_ARROW, DEMANGLE, VirusTotal). */
+ * nothing), 0 when the frontend must handle it (PATH_EDITED and DEMANGLE). */
 int gui_main_run_action(xxwidgets_widget *owner, xxwidgets_die_main_panel *panel, const char *path, const xxwidgets_die_action *action,
                         const gui_main_hooks *hooks);
 

@@ -11,8 +11,8 @@
 #include <xxfclib/terminal/xx_terminal.h>
 #include <limits.h>
 
-#define INFO_MAX_STRUCTURES 65536U
-#define INFO_MAX_FIELDS 262144U
+#define INFO_MAX_STRUCTURES 1048576U
+#define INFO_MAX_FIELDS 4194304U
 #define INFO_MAX_OUTPUT (64U * 1024U * 1024U)
 
 typedef struct info_reader {

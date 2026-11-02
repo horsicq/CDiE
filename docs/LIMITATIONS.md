@@ -144,6 +144,14 @@ worth stating outright:
 
 ## GUI Hex View
 
+The native GUI deliberately starts scans with Deep, Heuristic, Verbose and
+Overlay enabled. This differs from the current Qt GUI defaults; it preserves
+cdie's established default chosen for this port. The Advanced File type list
+also includes Qt's generic Archive, Text, Unicode, 7-Zip and RAR choices while
+keeping the most specific concrete detected format selected. Generic Text,
+Unicode and 7-Zip choices run the Binary signature pass, as `diec --filetype`
+does for those categories.
+
 Hex View is a read-only file browser in the Windows/macOS GUI. It reuses the
 shared hex control with 64 KiB windows, 64-bit physical offsets, Go/paging,
 Refresh, selection, encoding and row-width controls, copying and byte export.
@@ -326,9 +334,12 @@ Other formats and Mach-O Fat containers return an unsupported-format error
 for those structure operations. The DataStructs schema differs from Qt's
 XFileInfo report. Entropy and legacy XFileInfo method selectors remain
 unavailable through `--struct`; `Hash` / `Hash#ALGORITHM` and `Strings` are handled separately
-as a whole-file byte operation. Structure reports are bounded to 65,536
-visited/emitted structures, 262,144 visited fields and 64 MiB of output per
-file; exceeding a bound fails without a partial report.
+as a whole-file byte operation. Structure reports are bounded to 1,048,576
+visited/emitted structures, 4,194,304 visited fields and 64 MiB of output per
+file; exceeding a console report bound fails without a partial report. The GUI
+separately retains up to 64 MiB of model data (and at most 262,144 structures);
+if a larger valid file has more rows it displays the prefix that fits instead
+of showing nothing.
 
 `--hash` and `-S Hash` currently expose CRC32, MD5, SHA1 and SHA256. CRC32 is
 ISO-HDLC/ZIP. MD4, SHA224, SHA384 and SHA512 are not implemented by this command;

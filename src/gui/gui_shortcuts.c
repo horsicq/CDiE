@@ -9,8 +9,8 @@ typedef struct gui_shortcut_row {
     const char *keys[GUI_SHORTCUTS_PLATFORM_COUNT]; /* Windows, Linux, macOS */
 } gui_shortcut_row;
 
-/* DIE_LOOK.md 2.4. The tools keep their keys in both views; macOS binds none
- * of them (as before). Qt's Ctrl+E full screen is left out: Ctrl+E is
+/* DIE_LOOK.md 2.4. The tools keep their keys in both views; on macOS the
+ * File menu binds them ('@': shown in the dialog, not bound again). Qt's Ctrl+E full screen is left out: Ctrl+E is
  * Entropy here. Tool names are gui_tools' titles, in gui_tool_id order. */
 static const gui_shortcut_row rows[] = {
     {GUI_SHORTCUT_OPEN, CDIE_N_("Open file"), {"Ctrl+O", "Ctrl+O", "Cmd+O"}},
@@ -23,18 +23,18 @@ static const gui_shortcut_row rows[] = {
     {GUI_SHORTCUT_DATABASE_PATHS, CDIE_N_("Database folders"), {"Ctrl+Shift+D;F3", "Ctrl+Shift+D;F3", "Cmd+Shift+D"}},
     {GUI_SHORTCUT_FONTS, CDIE_N_("Fonts"), {"F4", "F4", ""}},
     {GUI_SHORTCUT_UPDATE, CDIE_N_("Update database"), {"Ctrl+U", "Ctrl+U", "Cmd+U"}},
-    {GUI_SHORTCUT_TOOL_FIRST + 0, CDIE_N_("File Information"), {"Ctrl+I", "Ctrl+I", ""}},
-    {GUI_SHORTCUT_TOOL_FIRST + 1, CDIE_N_("Entropy"), {"Ctrl+E", "Ctrl+E", ""}},
-    {GUI_SHORTCUT_TOOL_FIRST + 2, CDIE_N_("Hash"), {"Ctrl+H", "Ctrl+H", ""}},
-    {GUI_SHORTCUT_TOOL_FIRST + 3, CDIE_N_("Strings"), {"Ctrl+Shift+S", "Ctrl+Shift+S", ""}},
-    {GUI_SHORTCUT_TOOL_FIRST + 4, CDIE_N_("Hex View"), {"Ctrl+Shift+X", "Ctrl+Shift+X", ""}},
-    {GUI_SHORTCUT_TOOL_FIRST + 5, CDIE_N_("Disasm"), {"Ctrl+Shift+A", "Ctrl+Shift+A", ""}},
-    {GUI_SHORTCUT_TOOL_FIRST + 6, CDIE_N_("Memory Map"), {"Ctrl+M", "Ctrl+M", ""}},
-    {GUI_SHORTCUT_TOOL_FIRST + 7, CDIE_N_("Imports"), {"Ctrl+Shift+I", "Ctrl+Shift+I", ""}},
-    {GUI_SHORTCUT_TOOL_FIRST + 8, CDIE_N_("Exports"), {"Ctrl+Shift+E", "Ctrl+Shift+E", ""}},
-    {GUI_SHORTCUT_TOOL_FIRST + 9, CDIE_N_("Resources"), {"Ctrl+Shift+U", "Ctrl+Shift+U", ""}},
-    {GUI_SHORTCUT_TOOL_FIRST + 10, CDIE_N_("Symbols"), {"Ctrl+Shift+Y", "Ctrl+Shift+Y", ""}},
-    {GUI_SHORTCUT_TOOL_FIRST + 11, CDIE_N_("Extractor"), {"Ctrl+Shift+T", "Ctrl+Shift+T", ""}},
+    {GUI_SHORTCUT_TOOL_FIRST + 0, CDIE_N_("File Information"), {"Ctrl+I", "Ctrl+I", "@Cmd+I"}},
+    {GUI_SHORTCUT_TOOL_FIRST + 1, CDIE_N_("Entropy"), {"Ctrl+E", "Ctrl+E", "@Cmd+E"}},
+    {GUI_SHORTCUT_TOOL_FIRST + 2, CDIE_N_("Hash"), {"Ctrl+H", "Ctrl+H", "@Cmd+Shift+H"}},
+    {GUI_SHORTCUT_TOOL_FIRST + 3, CDIE_N_("Strings"), {"Ctrl+Shift+S", "Ctrl+Shift+S", "@Cmd+Shift+S"}},
+    {GUI_SHORTCUT_TOOL_FIRST + 4, CDIE_N_("Hex View"), {"Ctrl+Shift+X", "Ctrl+Shift+X", "@Cmd+Shift+X"}},
+    {GUI_SHORTCUT_TOOL_FIRST + 5, CDIE_N_("Disasm"), {"Ctrl+Shift+A", "Ctrl+Shift+A", "@Cmd+Shift+A"}},
+    {GUI_SHORTCUT_TOOL_FIRST + 6, CDIE_N_("Memory Map"), {"Ctrl+M", "Ctrl+M", "@Cmd+Shift+M"}},
+    {GUI_SHORTCUT_TOOL_FIRST + 7, CDIE_N_("Imports"), {"Ctrl+Shift+I", "Ctrl+Shift+I", "@Cmd+Shift+I"}},
+    {GUI_SHORTCUT_TOOL_FIRST + 8, CDIE_N_("Exports"), {"Ctrl+Shift+E", "Ctrl+Shift+E", "@Cmd+Shift+E"}},
+    {GUI_SHORTCUT_TOOL_FIRST + 9, CDIE_N_("Resources"), {"Ctrl+Shift+U", "Ctrl+Shift+U", "@Cmd+Shift+U"}},
+    {GUI_SHORTCUT_TOOL_FIRST + 10, CDIE_N_("Symbols"), {"Ctrl+Shift+Y", "Ctrl+Shift+Y", "@Cmd+Shift+Y"}},
+    {GUI_SHORTCUT_TOOL_FIRST + 11, CDIE_N_("Extractor"), {"Ctrl+Shift+T", "Ctrl+Shift+T", "@Cmd+Shift+T"}},
 };
 
 #define ROW_COUNT (sizeof(rows) / sizeof(rows[0]))

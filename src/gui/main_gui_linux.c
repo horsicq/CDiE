@@ -176,7 +176,6 @@ static int scan(tui_app *ui, int type_id, int smoke);
 static int open_file(tui_app *ui, const char *path, int scan_after)
 {
     xx_meta_string *records = NULL;
-    gui_backend_facts facts;
     xxwidgets_status status;
     char *copy;
     int same;
@@ -200,14 +199,8 @@ static int open_file(tui_app *ui, const char *path, int scan_after)
     status = gui_main_file_types_records(&ui->types, &records);
     if (status == XXWIDGETS_OK) status = xxwidgets_file_header_set_file_types(ui->header, records, ui->types.count, ui->types.selected);
     gui_main_file_types_free_records(records, ui->types.count);
-    memset(&facts, 0, sizeof(facts));
-    if (status == XXWIDGETS_OK && gui_backend_file_facts(path, 0, &facts)) {
-        status = xxwidgets_file_header_set_file_size(ui->header, facts.file_size);
-        /* The Advanced view's values; formats without them keep the fields empty. */
-        if (facts.base_bits) (void)xxwidgets_file_header_set_address(ui->header, XXWIDGETS_FILE_HEADER_BASE_ADDRESS, facts.base_address, facts.base_bits);
-        if (facts.entry_bits) (void)xxwidgets_file_header_set_address(ui->header, XXWIDGETS_FILE_HEADER_ENTRY_POINT, facts.entry_point, facts.entry_bits);
-    }
-    gui_backend_facts_free(&facts);
+    if (status == XXWIDGETS_OK)
+        status = gui_main_apply_file_facts(ui->main_panel, path, gui_main_file_types_scan_id(&ui->types));
     if (status == XXWIDGETS_OK) status = xxwidgets_file_name_bar_set_loaded_path(ui->bar, path);
     if (status != XXWIDGETS_OK) { free(copy); unload(ui); report_error(ui, CDIE_TR("Open file"), status); return 0; }
     free(ui->loaded); ui->loaded = copy;
@@ -289,6 +282,7 @@ static void apply_stored_view(tui_app *ui)
     (void)xxwidgets_die_main_panel_set_advanced(ui->main_panel, gui_frontend_advanced());
     default_size(ui);
 }
+static void save_settings(tui_app *ui);
 
 static void on_event(xxwidgets_app *app, const xxwidgets_event *event, void *user)
 {
@@ -309,6 +303,12 @@ static void on_event(xxwidgets_app *app, const xxwidgets_event *event, void *use
         gui_shortcut_action shortcut = gui_shortcuts_action(event->value, SHORTCUT_BASE);
         if (shortcut == GUI_SHORTCUT_EXIT) ui->running = 0;
         else if (shortcut != GUI_SHORTCUT_NONE) ui->shortcut = shortcut;
+    } else if (event->type == XXWIDGETS_EVENT_CHANGE &&
+        (event->widget == xxwidgets_scan_panel_control(ui->panel, XXWIDGETS_SCAN_PANEL_INCLUDE_TAGS) ||
+         event->widget == xxwidgets_scan_panel_control(ui->panel, XXWIDGETS_SCAN_PANEL_EXCLUDE_TAGS))) {
+        xxwidgets_status status = gui_main_store_tag_filters(ui->panel);
+        if (status == XXWIDGETS_OK) save_settings(ui);
+        else report_error(ui, CDIE_TR("Read tag filters"), status);
     } else if (gui_tree_event(ui->panel, event)) {
         /* Signatures, Directory, Log, and S or ? on a result row: shown
          * by gui_tree_process after polling returns. */
@@ -454,6 +454,7 @@ static int reload_tags(tui_app *ui)
     status = xxwidgets_scan_panel_clear(ui->panel);
     gui_tree_reset();
     if (status == XXWIDGETS_OK) status = tags ? xxwidgets_scan_panel_set_available_tags(ui->panel, tags) : XXWIDGETS_OUT_OF_MEMORY;
+    if (status == XXWIDGETS_OK) status = gui_main_restore_tag_filters(ui->panel);
     gui_backend_free(tags);
     /* The tags enable their combos even with no file loaded. */
     (void)xxwidgets_die_main_panel_set_loaded(ui->main_panel, ui->loaded != NULL);
@@ -663,6 +664,7 @@ static const char *load_settings(tui_app *ui, int memory_only)
     if (status == XXWIDGETS_OK) databases = gui_settings_load(ui->settings, &values, &ui->options_page);
     if (status == XXWIDGETS_OK) status = apply_options(ui, &values);
     if (status == XXWIDGETS_OK && !gui_backend_db_paths_current("", "")) reload_tags(ui);
+    if (status == XXWIDGETS_OK) status = gui_main_restore_tag_filters(ui->panel);
     /* View/Advanced (DIE_LOOK.md 2.1), read once before the window shows. */
     apply_stored_view(ui);
     if (status != XXWIDGETS_OK) { report_error(ui, CDIE_TR("Apply saved options"), status); return NULL; }

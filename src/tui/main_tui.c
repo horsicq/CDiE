@@ -227,6 +227,8 @@ static int layout(tui_app *ui)
     return 1;
 }
 
+static char *read_tags(xxwidgets_scan_panel *panel, int include);
+
 static void on_event(xxwidgets_app *app, const xxwidgets_event *event, void *user)
 {
     tui_app *ui = user;
@@ -241,6 +243,16 @@ static void on_event(xxwidgets_app *app, const xxwidgets_event *event, void *use
     else if (event->type == XXWIDGETS_EVENT_CHANGE && event->widget == ui->path) {
         (void)xxwidgets_scan_panel_clear(ui->panel);
         (void)xxwidgets_widget_set_enabled(control(ui, XXWIDGETS_SCAN_PANEL_FILE_TYPE), 0);
+    } else if (event->type == XXWIDGETS_EVENT_CHANGE &&
+        (event->widget == control(ui, XXWIDGETS_SCAN_PANEL_INCLUDE_TAGS) || event->widget == control(ui, XXWIDGETS_SCAN_PANEL_EXCLUDE_TAGS))) {
+        char *include_tags = read_tags(ui->panel, 1), *exclude_tags = read_tags(ui->panel, 0);
+        if (include_tags && exclude_tags && strlen(include_tags) < sizeof(ui->stored.scan.include_tags) &&
+            strlen(exclude_tags) < sizeof(ui->stored.scan.exclude_tags) && gui_backend_set_tag_filters(include_tags, exclude_tags)) {
+            strcpy(ui->stored.scan.include_tags, include_tags);
+            strcpy(ui->stored.scan.exclude_tags, exclude_tags);
+            (void)gui_settings_save(ui->settings, &ui->stored, ui->options_page);
+        }
+        free(include_tags); free(exclude_tags);
     } else if (event->type == XXWIDGETS_EVENT_SELECT && event->widget == control(ui, XXWIDGETS_SCAN_PANEL_FILE_TYPE))
         ui->pending = ACTION_SCAN;
     else if (gui_tree_event(ui->panel, event)) {
@@ -413,6 +425,8 @@ static void options_dialog(tui_app *ui)
         if (!tags) { set_status(ui, xxwidgets_status_string(XXWIDGETS_OUT_OF_MEMORY)); return; }
         status = xxwidgets_scan_panel_clear(ui->panel);
         if (status == XXWIDGETS_OK) status = xxwidgets_scan_panel_set_available_tags(ui->panel, tags);
+        if (status == XXWIDGETS_OK) status = xxwidgets_scan_panel_set_tag_filters(ui->panel,
+            ui->stored.scan.include_tags, ui->stored.scan.exclude_tags);
         gui_backend_free(tags);
         if (status != XXWIDGETS_OK) { set_status(ui, xxwidgets_status_string(status)); return; }
         cdie_translation_snprintf(message, sizeof(message), CDIE_N_("Database reloaded: %d signatures. Choose a file and press Scan."),
@@ -462,6 +476,8 @@ static int create_controls(tui_app *ui, const char *startup, int smoke)
         return 0;
     }
     gui_backend_free(tags);
+    if (xxwidgets_scan_panel_set_tag_filters(ui->panel, ui->stored.scan.include_tags, ui->stored.scan.exclude_tags) != XXWIDGETS_OK ||
+        !gui_backend_set_tag_filters(ui->stored.scan.include_tags, ui->stored.scan.exclude_tags)) return 0;
     if (xxwidgets_window_set_shortcuts(ui->window, shortcuts, sizeof(shortcuts) / sizeof(shortcuts[0])) != XXWIDGETS_OK ||
         xxwidgets_scan_panel_set_flags(ui->panel, XXWIDGETS_SCAN_DEEP | XXWIDGETS_SCAN_HEURISTIC | XXWIDGETS_SCAN_VERBOSE | XXWIDGETS_SCAN_FORMAT) != XXWIDGETS_OK ||
         xxwidgets_widget_set_enabled(control(ui, XXWIDGETS_SCAN_PANEL_FILE_TYPE), 0) != XXWIDGETS_OK ||

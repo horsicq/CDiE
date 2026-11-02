@@ -14,6 +14,7 @@ typedef struct gui_scan_page_values {
     unsigned int modes;
     int scan_after_open, recursive, profiling, sort, use_cache, highlight;
     char engine[16];
+    char include_tags[4096], exclude_tags[4096];
     xx_scan_color_options colors, dark_colors;
 } gui_scan_page_values;
 xxwidgets_status gui_scan_options_page(xxwidgets_options_page *page, const char *title, gui_scan_page_values *values);

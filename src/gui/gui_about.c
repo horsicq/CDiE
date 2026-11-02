@@ -64,7 +64,7 @@ xxwidgets_status gui_about_create(const unsigned char *png, size_t png_size, xxw
     if (status == XXWIDGETS_OK)
         status = xxwidgets_about_dialog_add_item(about, XXWIDGETS_ABOUT_ITEM_INFO, "Copyright (C) 2006-2008 Hellsp@wn", NULL, NULL);
     /* __DATE__ is "Mmm dd yyyy": the copyright runs to the build year. */
-    xx_rt_snprintf(line, sizeof(line), "Copyright (C) 2012-%s Hors", __DATE__ + 7);
+    xx_rt_snprintf(line, sizeof(line), "Copyright (C) 2012-%s Hors", &__DATE__[7]);
     if (status == XXWIDGETS_OK) status = xxwidgets_about_dialog_add_item(about, XXWIDGETS_ABOUT_ITEM_INFO, line, NULL, NULL);
     for (i = 0; status == XXWIDGETS_OK && i < sizeof(info) / sizeof(info[0]); ++i)
         status = xxwidgets_about_dialog_add_item(about, XXWIDGETS_ABOUT_ITEM_INFO, info[i][0], info[i][1], info[i][2]);

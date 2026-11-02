@@ -12,6 +12,7 @@
 #include <string.h>
 
 #define GUI_INFO_MAX_BYTES (64U * 1024U * 1024U)
+#define GUI_INFO_MAX_STRUCTURES 4096U
 
 static char *copy_text(gui_file_information_data *data, const char *text)
 {
@@ -39,11 +40,17 @@ static int collect_structure(const char *name, const xx_data_struct *item, void 
 {
     gui_file_information_data *data = user;
     xxwidgets_data_struct_item *target;
+    data->skipping = 0;
+    if (data->truncated) { data->skipping = 1; return 0; }
+    if (data->count >= GUI_INFO_MAX_STRUCTURES) { data->truncated = data->skipping = 1; return 0; }
     if (data->count == data->capacity) {
         size_t capacity = data->capacity ? data->capacity * 2 : 32;
         size_t bytes = (capacity - data->capacity) * sizeof(*data->items);
         xxwidgets_data_struct_item *items;
-        if (capacity > 65536 || bytes > GUI_INFO_MAX_BYTES - data->bytes) return 0;
+        if (capacity > 262144 || bytes > GUI_INFO_MAX_BYTES - data->bytes) {
+            data->truncated = data->skipping = 1;
+            return 0;
+        }
         items = realloc(data->items, capacity * sizeof(*items));
         if (!items) return 0;
         memset(items + data->capacity, 0, bytes);
@@ -52,13 +59,18 @@ static int collect_structure(const char *name, const xx_data_struct *item, void 
     target = &data->items[data->count++];
     target->name = copy_text(data, name); target->data_struct = *item;
     data->field_capacity = 0;
-    return target->name != NULL;
+    if (!target->name) {
+        memset(target, 0, sizeof(*target)); --data->count;
+        data->truncated = data->skipping = 1;
+    }
+    return data->truncated ? 0 : 1;
 }
 static int collect_field(const xx_data_struct_record *record, void *user)
 {
     gui_file_information_data *data = user;
     xxwidgets_data_struct_item *item;
     xxwidgets_data_struct_field *field;
+    if (data->skipping || data->truncated) return 0;
     if (!data->count) return 0;
     item = &data->items[data->count - 1];
     if (item->field_count == data->field_capacity) {
@@ -67,7 +79,7 @@ static int collect_field(const xx_data_struct_record *record, void *user)
         size_t capacity = data->field_capacity ? data->field_capacity * 2 : 4;
         size_t bytes = (capacity - data->field_capacity) * sizeof(*field);
         xxwidgets_data_struct_field *fields;
-        if (capacity > 262144 || bytes > GUI_INFO_MAX_BYTES - data->bytes) return 0;
+        if (capacity > 262144 || bytes > GUI_INFO_MAX_BYTES - data->bytes) { data->truncated = 1; return 0; }
         fields = realloc((void *)item->fields, capacity * sizeof(*fields));
         if (!fields) return 0;
         memset(fields + data->field_capacity, 0, bytes);
@@ -81,7 +93,13 @@ static int collect_field(const xx_data_struct_record *record, void *user)
     field->name = copy_wide(data, record->name); field->type = copy_wide(data, record->type);
     field->raw = copy_wide(data, record->raw_value); field->value = copy_wide(data, record->display_value);
     field->comment = copy_wide(data, record->comment);
-    return field->name && field->type && field->raw && field->value && field->comment;
+    if (!field->name || !field->type || !field->raw || !field->value || !field->comment) {
+        free((void *)field->name); free((void *)field->type); free((void *)field->raw);
+        free((void *)field->value); free((void *)field->comment);
+        memset(field, 0, sizeof(*field)); --item->field_count;
+        data->truncated = 1;
+    }
+    return data->truncated ? 0 : 1;
 }
 static int end_structure(void *user) { (void)user; return 1; }
 
@@ -117,7 +135,8 @@ int gui_file_information_read_slice(const char *path, int slice, xx_pd_struct *p
     data = calloc(1, sizeof(*data));
     if (!data) return 0;
     if (!cdie_file_info_visit_slice(path, slice, NULL, 0, &visitor, data, progress, error)) {
-        gui_file_information_free(data); return 0;
+        if (!data->truncated || !data->count) { gui_file_information_free(data); return 0; }
+        gui_backend_free(*error); *error = NULL;
     }
     *out = data;
     return 1;
