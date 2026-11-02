@@ -108,6 +108,11 @@ set -euo pipefail
 #                                ~/Library/Keychains (as "security
 #                                create-keychain" takes it). When none of
 #                                these exists neither identity is used.
+#   X_PRIVATE_NOTARIZE_KEYCHAIN_PATH
+#                                optional file-based keychain for the notary
+#                                profile; unset keeps notarytool's default
+#   X_PRIVATE_NOTARIZE_TIMEOUT   optional wait limit, for example 30m; unset
+#                                keeps notarytool's default wait behavior
 #   X_PRIVATE_NOTARIZE_KEYCHAIN_PROFILE, or all three of
 #   X_PRIVATE_NOTARIZE_LOGIN, X_PRIVATE_NOTARIZE_PWD, X_PRIVATE_NOTARIZE_TEAMID
 #                                notarize and staple. The zip (and the die.app
@@ -139,6 +144,8 @@ INSTALLER_CERT="${X_PRIVATE_CERT_INSTALL:-}"
 APP_ENTITLEMENTS="${X_PRIVATE_APP_ENTITLEMENTS:-}"
 KEYCHAIN_PATH="${X_PRIVATE_KEYCHAIN_PATH:-}"
 NOTARY_PROFILE="${X_PRIVATE_NOTARIZE_KEYCHAIN_PROFILE:-}"
+NOTARY_KEYCHAIN_PATH="${X_PRIVATE_NOTARIZE_KEYCHAIN_PATH:-}"
+NOTARY_TIMEOUT="${X_PRIVATE_NOTARIZE_TIMEOUT:-}"
 NOTARY_LOGIN="${X_PRIVATE_NOTARIZE_LOGIN:-}"
 NOTARY_PASSWORD="${X_PRIVATE_NOTARIZE_PWD:-}"
 NOTARY_TEAM_ID="${X_PRIVATE_NOTARIZE_TEAMID:-}"
@@ -163,7 +170,7 @@ usage() {
     echo "  MACOS_ADHOC_SIGN=1 (default: ad hoc seal without a Developer ID) or 0 (no codesign)"
     echo "  MACOS_PKG_IDENTIFIER, KEEP_WORK_ROOT=1"
     echo "  X_PRIVATE_CERT_APP, X_PRIVATE_APP_ENTITLEMENTS, X_PRIVATE_CERT_INSTALL, X_PRIVATE_KEYCHAIN_PATH"
-    echo "  X_PRIVATE_NOTARIZE_KEYCHAIN_PROFILE"
+    echo "  X_PRIVATE_NOTARIZE_KEYCHAIN_PROFILE, X_PRIVATE_NOTARIZE_KEYCHAIN_PATH, X_PRIVATE_NOTARIZE_TIMEOUT"
     echo "  X_PRIVATE_NOTARIZE_LOGIN / X_PRIVATE_NOTARIZE_PWD / X_PRIVATE_NOTARIZE_TEAMID"
 }
 
@@ -535,17 +542,24 @@ notarize_file() {
     local result=0
     local submission_id=""
     local auth_args=()
+    local submit_args=()
     local accepted='"status"[[:space:]]*:[[:space:]]*"Accepted"'
     local id_pattern='"id"[[:space:]]*:[[:space:]]*"([^"]+)"'
 
     name="$(basename "${artifact}")"
     if [[ "${NOTARY_MODE}" == "profile" ]]; then
         auth_args=(--keychain-profile "${NOTARY_PROFILE}")
+        if [[ -n "${NOTARY_KEYCHAIN_PATH}" ]]; then
+            auth_args+=(--keychain "${NOTARY_KEYCHAIN_PATH}")
+        fi
     else
         auth_args=(--apple-id "${NOTARY_LOGIN}" --password "${NOTARY_PASSWORD}" --team-id "${NOTARY_TEAM_ID}")
     fi
+    if [[ -n "${NOTARY_TIMEOUT}" ]]; then
+        submit_args=(--timeout "${NOTARY_TIMEOUT}")
+    fi
     echo "Submitting ${name} for notarization and waiting for Apple's answer..."
-    answer="$(xcrun notarytool submit "${artifact}" "${auth_args[@]}" --wait --output-format json)" || result=$?
+    answer="$(xcrun notarytool submit "${artifact}" "${auth_args[@]}" --wait ${submit_args[@]+"${submit_args[@]}"} --output-format json)" || result=$?
     printf '%s\n' "${answer}"
     if [[ ${result} == 0 && "${answer}" =~ ${accepted} ]]; then
         return 0

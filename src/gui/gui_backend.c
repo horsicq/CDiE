@@ -18,6 +18,10 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
+/* localtime_r in strict C99. */
+#if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
+#define _POSIX_C_SOURCE 200809L
+#endif
 
 /* gui_backend.c - drives the scan engine for the native GUIs. It is the mirror
  * of main_console.c's scan path: same option defaults, same db resolution, same
@@ -1069,8 +1073,10 @@ int gui_backend_signature_entry(int index, const char **display, const char **pa
 /* What the Advanced view shows, as Qt DIE's FormatsWidget::reload() fills it:
  * the page and its values come from the selected file type's own reader. */
 
+#define FACTS_MAX_TYPES 64
 typedef struct facts_types {
     int wanted, found, first;
+    int count, list[FACTS_MAX_TYPES]; /* the concrete types, in detection order */
 } facts_types;
 
 static void facts_type(XFileType type, void *user)
@@ -1078,6 +1084,7 @@ static void facts_type(XFileType type, void *user)
     facts_types *types = (facts_types *)user;
     if (!gui_concrete_file_type(type)) return;
     if (!types->first) types->first = (int)type;
+    if (types->count < FACTS_MAX_TYPES) types->list[types->count++] = (int)type;
     if ((int)type == types->wanted) types->found = 1;
 }
 
@@ -1130,6 +1137,21 @@ static Abstractformat *facts_reader(int type, xx_io_device *device, void (**rele
     return (Abstractformat *)reader;
 }
 
+/* Whether the type's own reader accepts the file; types without one here
+ * pass. The detector can name a type its reader rejects (an 80-byte NE or LE
+ * header: Qt DIE lists only Binary and MSDOS there), and the automatic type
+ * then moves on, as Qt's does. */
+static int facts_type_valid(int type, xx_io_device *device)
+{
+    void (*release)(void *) = NULL;
+    Abstractformat *format = facts_reader(type, device, &release);
+    int valid;
+    if (!format) return 1;
+    valid = xx_format_is_valid(format, NULL) ? 1 : 0;
+    release(format);
+    return valid;
+}
+
 /* XBinary::getWidthModeFromSize: the address width of a file without a mode. */
 static unsigned int facts_size_bits(uint64_t size)
 {
@@ -1160,12 +1182,43 @@ static void facts_entry_offset(gui_backend_facts *facts, const xx_memory_map *ma
 }
 
 /* XBinary::valueToTimeString(DT_TYPE_POSIX): a QDateTime in local time. */
+static int facts_localtime(int64_t seconds, struct tm *out)
+{
+    time_t value = (time_t)seconds;
+    if ((int64_t)value != seconds) return 0;
+#ifdef _WIN32
+    return localtime_s(out, &value) == 0;
+#else
+    return localtime_r(&value, out) != NULL;
+#endif
+}
+
+/* The stamp is unsigned 32-bit seconds, up to 2106. Where time_t is 32-bit
+ * the local offset is taken 84 years earlier (same weekday and leap cycle)
+ * and the date computed here (days_from_civil inverse, H. Hinnant). */
 static void facts_time(char *text, size_t capacity, uint32_t stamp)
 {
-    time_t value = (time_t)stamp;
-    struct tm *local = localtime(&value);
-    if (local) xx_rt_snprintf(text, capacity, "%04d-%02d-%02d %02d:%02d:%02d", local->tm_year + 1900, local->tm_mon + 1,
-        local->tm_mday, local->tm_hour, local->tm_min, local->tm_sec);
+    struct tm local;
+    int64_t value = (int64_t)stamp;
+    if (!facts_localtime(value, &local)) {
+        const int64_t shift = 2650838400; /* 84 years */
+        int64_t shifted = value - shift, days, offset, era, doe, yoe, doy, mp, y, m, d, secs;
+        if (!facts_localtime(shifted, &local)) return;
+        y = local.tm_year + 1900; m = local.tm_mon + 1; d = local.tm_mday;
+        y -= m <= 2; era = (y >= 0 ? y : y - 399) / 400; yoe = y - era * 400;
+        doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1; doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+        days = era * 146097 + doe - 719468;
+        offset = days * 86400 + local.tm_hour * 3600 + local.tm_min * 60 + local.tm_sec - shifted;
+        value += offset;
+        days = (value >= 0 ? value : value - 86399) / 86400; secs = value - days * 86400;
+        days += 719468; era = (days >= 0 ? days : days - 146096) / 146097; doe = days - era * 146097;
+        yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365; doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        mp = (5 * doy + 2) / 153; d = doy - (153 * mp + 2) / 5 + 1; m = mp < 10 ? mp + 3 : mp - 9; y = yoe + era * 400 + (m <= 2);
+        local.tm_year = (int)(y - 1900); local.tm_mon = (int)(m - 1); local.tm_mday = (int)d;
+        local.tm_hour = (int)(secs / 3600); local.tm_min = (int)(secs / 60 % 60); local.tm_sec = (int)(secs % 60);
+    }
+    xx_rt_snprintf(text, capacity, "%04d-%02d-%02d %02d:%02d:%02d", local.tm_year + 1900, local.tm_mon + 1,
+        local.tm_mday, local.tm_hour, local.tm_min, local.tm_sec);
 }
 
 static char *facts_strdup(const char *text)
@@ -1207,6 +1260,10 @@ static int facts_pe(gui_backend_facts *facts, xx_io_device *device)
         if (pe.pDirRVA[XX_PE_INSPECT_DIR_RESOURCE]) facts->flags |= GUI_FACTS_RESOURCES;
         if (pe.pDirRVA[XX_PE_INSPECT_DIR_TLS]) facts->flags |= GUI_FACTS_TLS;
         if (pe.pDirRVA[14]) facts->flags |= GUI_FACTS_DOTNET; /* IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR */
+        if ((facts->flags & GUI_FACTS_DOTNET) && (pe.nTimeDateStamp & 0x80000000u)) {
+            facts->net_id = pe.nTimeDateStamp;
+            facts->flags |= GUI_FACTS_NET_ID;
+        }
         if (pe.nNumberOfSections) facts->flags |= GUI_FACTS_SECTIONS;
         if (pe.nOverlayOffset >= 0 && pe.nOverlaySize > 0) {
             facts->overlay_offset = pe.nOverlayOffset; facts->overlay_size = pe.nOverlaySize;
@@ -1251,14 +1308,23 @@ static int facts_elf(gui_backend_facts *facts, xx_io_device *device)
         const xx_memory_map *map = xx_format_get_memory_map(&elf.format, XX_MEMORY_MAP_MODE_UNKNOWN, NULL);
         int is_64 = xx_elf_is_64(&elf);
         uint64_t first_load = 0, i;
+        int have_load = 0;
         facts_format_row(facts, &elf.format);
         facts->base_bits = facts->entry_bits = is_64 ? 64 : 32;
         /* XELF::getMemoryMap loads the image at module address 0 (XBinary's
-         * base) and moves the first PT_LOAD there, so Qt DIE shows base 0 and
-         * the entry relative to that segment. The file offset uses e_entry. */
-        for (i = 0; i < xx_elf_get_number_of_program_headers(&elf); ++i) {
+         * base) and moves the lowest PT_LOAD there: the first one's p_vaddr,
+         * lowered by each one's p_vaddr aligned down to its p_align
+         * (S_ALIGN_DOWN64 mask, p_align <= 1 meaning 1), over the first 1000
+         * program headers. Qt DIE shows base 0 and the entry relative to that
+         * address. The file offset uses e_entry. */
+        for (i = 0; i < xx_elf_get_number_of_program_headers(&elf) && i < 1000u; ++i) {
             const xx_elf_program_header *header = xx_elf_get_program_header(&elf, i);
-            if (header && header->type == 1u) { first_load = header->virtual_address; break; } /* PT_LOAD */
+            if (header && header->type == 1u) { /* PT_LOAD */
+                uint64_t align = header->alignment > 1u ? header->alignment : 1u;
+                uint64_t aligned = header->virtual_address & ~(align - 1u);
+                if (!have_load) { first_load = header->virtual_address; have_load = 1; }
+                if (aligned < first_load) first_load = aligned;
+            }
         }
         facts->entry_point = xx_elf_get_entry_point(&elf);
         facts_entry_offset(facts, map);
@@ -1442,12 +1508,17 @@ int gui_backend_file_facts(const char *path, int type_id, gui_backend_facts *fac
     xx_rt_memset(facts, 0, sizeof(*facts));
     facts->entry_point_offset = facts->overlay_offset = -1;
     if (!path || !*path || type_id < 0 || type_id >= XFT_COUNT || (type_id && !gui_concrete_file_type((XFileType)type_id))) return 0;
-    types.wanted = type_id; types.found = 0; types.first = 0;
+    types.wanted = type_id; types.found = 0; types.first = 0; types.count = 0;
     if (!die_engine_detect_file_types(path, facts_type, &types) || !types.first || (type_id && !types.found)) return 0;
-    if (!type_id) type_id = types.first;
     if (!(device = xx_io_file_open(path, "rb"))) return 0;
     size = xx_io_total_size(device);
     if (size < 0) { xx_io_close(device); return 0; }
+    if (!type_id) {
+        int i;
+        type_id = types.first;
+        for (i = 0; i < types.count; ++i)
+            if (facts_type_valid(types.list[i], device)) { type_id = types.list[i]; break; }
+    }
     facts->type_id = type_id;
     copy_field(facts->type_name, sizeof(facts->type_name), xft_to_string((XFileType)type_id));
     facts->page = facts_page(type_id);

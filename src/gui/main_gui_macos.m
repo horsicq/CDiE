@@ -1,11 +1,14 @@
 /* Copyright (c) 2026 hors<horsicq@gmail.com>
  * SPDX-License-Identifier: MIT
- * Cocoa application integration around the shared xxwidgets scan panel.
+ * Cocoa application integration around the shared xxwidgets main panel
+ * (xxwidgets_die_main_panel: Detect It Easy's Simple and Advanced views).
  * All engine calls and widget updates run on the main thread.
  */
 #import <AppKit/AppKit.h>
+#include <sys/stat.h>
 #include <xxwidgets/xxwidgets.h>
 #include <xxwidgets/xxwidgets_scan_panel.h>
+#include <xxwidgets/xxwidgets_die_main_panel.h>
 #include <xxwidgets/xxwidgets_combobox.h>
 #include <xxwidgets/xxwidgets_font_options.h>
 #include <xxwidgets/xxwidgets_process.h>
@@ -41,17 +44,61 @@
 #include "gui_extractor_source.h"
 #include "gui_update.h"
 #include "gui_error.h"
+#include "gui_tools.h"
+#include "gui_shortcuts.h"
+#include "gui_main_actions.h"
 
-enum { ACTION_NONE, ACTION_SCAN, ACTION_OPEN, ACTION_REPORT, ACTION_OPTIONS,
-       ACTION_DATABASES, ACTION_ABOUT, ACTION_FILE_INFORMATION, ACTION_ENTROPY, ACTION_HASH, ACTION_STRINGS, ACTION_HEX_VIEW, ACTION_DISASM, ACTION_MEMORY_MAP, ACTION_IMPORTS, ACTION_EXPORTS, ACTION_RESOURCES, ACTION_SYMBOLS, ACTION_EXTRACTOR, ACTION_RECENT, ACTION_UPDATE };
+/* The queued commands of the menu bar and the keyboard: the shared shortcut
+ * actions (gui_shortcuts.h, bound with base 0), so gui_main_run_shortcut
+ * carries them out exactly as on Windows and Linux. */
+enum {
+    ACTION_NONE = GUI_SHORTCUT_NONE,
+    ACTION_OPEN = GUI_SHORTCUT_OPEN,
+    ACTION_EXIT = GUI_SHORTCUT_EXIT,
+    ACTION_SCAN = GUI_SHORTCUT_SCAN,
+    ACTION_RECENT = GUI_SHORTCUT_RECENT,
+    ACTION_REPORT = GUI_SHORTCUT_REPORT,
+    ACTION_ABOUT = GUI_SHORTCUT_ABOUT,
+    ACTION_OPTIONS = GUI_SHORTCUT_OPTIONS,
+    ACTION_DATABASES = GUI_SHORTCUT_DATABASE_PATHS,
+    ACTION_UPDATE = GUI_SHORTCUT_UPDATE,
+    ACTION_FILE_INFORMATION = GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_FILE_INFORMATION,
+    ACTION_ENTROPY = GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_ENTROPY,
+    ACTION_HASH = GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_HASH,
+    ACTION_STRINGS = GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_STRINGS,
+    ACTION_HEX_VIEW = GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_HEX_VIEW,
+    ACTION_DISASM = GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_DISASM,
+    ACTION_MEMORY_MAP = GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_MEMORY_MAP,
+    ACTION_IMPORTS = GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_IMPORTS,
+    ACTION_EXPORTS = GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_EXPORTS,
+    ACTION_RESOURCES = GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_RESOURCES,
+    ACTION_SYMBOLS = GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_SYMBOLS,
+    ACTION_EXTRACTOR = GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_EXTRACTOR
+};
 static xxwidgets_app *g_app;
-static xxwidgets_widget *g_window, *g_path, *g_browse, *g_status, *g_options, *g_update;
-static xxwidgets_widget *g_file_information, *g_entropy, *g_hash, *g_strings, *g_hex_view, *g_disasm, *g_memory_map, *g_imports, *g_exports, *g_resources, *g_symbols, *g_extractor;
+static xxwidgets_widget *g_window;
+/* The main panel and its parts (borrowed from it); g_path is the file name
+ * bar's path field. */
+static xxwidgets_die_main_panel *g_main;
 static xxwidgets_scan_panel *g_panel;
-static int g_running = 1, g_pending, g_layout;
+static xxwidgets_file_name_bar *g_bar;
+static xxwidgets_file_header *g_header;
+static xxwidgets_side_panel *g_side;
+static xxwidgets_widget *g_path;
+static int g_running = 1, g_pending;
+/* A panel action, queued like g_pending and run after polling returns. */
+static xxwidgets_die_action g_panel_action;
+static int g_panel_pending;
 static gui_options_page_id g_options_page = GUI_OPTIONS_SCAN;
 static xx_settings *g_settings;
-static NSString *g_type_path;
+static NSString *g_type_path;      /* the loaded file (its types are in g_types), or nil */
+static gui_main_file_types g_types;
+static gui_main_hooks g_hooks;
+static int g_smoke_run;            /* --smoke-test / --smoke-update: errors go to stderr */
+/* There is no status line (DIE_LOOK.md Q1): errors wait here for a message
+ * dialog shown after polling returns (show_errors); g_message keeps the last
+ * informational line (update result, scan summary) for the smoke tests. */
+static char g_error[1024], g_message[640], g_scan_type[128];
 
 static NSString *string(const char *text)
 {
@@ -64,6 +111,38 @@ static xxwidgets_widget *control(xxwidgets_scan_panel_control_id which)
 {
     return xxwidgets_scan_panel_control(g_panel, which);
 }
+static xxwidgets_widget *side_control(int id)
+{
+    return xxwidgets_side_panel_control(g_side, id);
+}
+/* Queues an error for its message dialog (DIE_LOOK.md Q1: what went to the
+ * status line); an error queued earlier is kept, a new one joins it. */
+static void queue_error(const char *text)
+{
+    size_t used = strlen(g_error);
+    if (!text || !text[0]) return;
+    snprintf(g_message, sizeof(g_message), "%s", text);
+    if (used && used + 2 < sizeof(g_error)) { g_error[used++] = '\n'; g_error[used] = 0; }
+    snprintf(g_error + used, sizeof(g_error) - used, "%s", text);
+}
+static void hook_error(void *user, const char *text) { (void)user; queue_error(text); }
+/* Shows the queued errors, outside the xxwidgets callbacks. A smoke run has
+ * nobody to close the dialog: the text goes to stderr there. */
+static void show_errors(void)
+{
+    char text[sizeof(g_error)];
+    if (!g_error[0]) return;
+    memcpy(text, g_error, sizeof(text));
+    g_error[0] = 0;
+    if (g_smoke_run || !g_window) { fprintf(stderr, "cdie: %s\n", text); return; }
+    (void)xxwidgets_text_dialog(g_window, gui_backend_app_title(), text);
+}
+/* The panel's enabled states for the loaded file, re-applied after a setter
+ * (tags, results) enabled scan-bar controls on its own. */
+static void apply_loaded_state(void)
+{
+    if (g_main) (void)xxwidgets_die_main_panel_set_loaded(g_main, g_type_path != nil);
+}
 static xxwidgets_status refresh_panel_tags(void)
 {
     char *tags = gui_backend_used_tags();
@@ -71,16 +150,20 @@ static xxwidgets_status refresh_panel_tags(void)
     if (!tags) return XXWIDGETS_OUT_OF_MEMORY;
     status = xxwidgets_scan_panel_set_available_tags(g_panel, tags);
     gui_backend_free(tags);
+    apply_loaded_state();
     return status;
 }
+static int load_file(const char *path, int keep_choice);
 /* After a database reload the results and file types came from the old
- * signatures: clear them, as Windows and GTK do, then refresh the tags.
- * Automatic alone (nothing scanned yet) stays enabled, as on GTK. */
+ * signatures: clear the results, read the loaded file's types again, then
+ * refresh the tags. */
 static xxwidgets_status reload_panel_tags(void)
 {
     xxwidgets_status status = xxwidgets_scan_panel_clear(g_panel);
-    if (status == XXWIDGETS_OK && g_type_path) status = xxwidgets_widget_set_enabled(control(XXWIDGETS_SCAN_PANEL_FILE_TYPE), 0);
-    [g_type_path release]; g_type_path = nil;
+    if (g_type_path) {
+        NSString *path = [[g_type_path retain] autorelease];
+        (void)load_file([path UTF8String], 0);
+    }
     return status == XXWIDGETS_OK ? refresh_panel_tags() : status;
 }
 static xxwidgets_status apply_panel_tag_filters(void)
@@ -112,154 +195,125 @@ static void report_ui_error(const char *operation, xxwidgets_status status)
 {
     char message[512];
     cdie_translation_snprintf(message, sizeof(message), CDIE_N_("%s: %s"), CDIE_TR(operation), gui_error_status_text(status));
-    xxwidgets_widget_set_text(g_status, message);
+    queue_error(message);
 }
+/* Without signatures nothing can be detected: said once in a dialog. */
 static void ready(void)
 {
-    NSString *message = gui_backend_signature_count() ?
-        [NSString stringWithFormat:cdie_ns_fmt(@"Ready. %d signatures loaded. Choose a file or drop one into the window."), gui_backend_signature_count()] :
-        cdie_ns_tr(@"No signature database loaded. Choose its folder in Options > Scan.");
-    xxwidgets_widget_set_text(g_status, [message UTF8String]);
+    if (!gui_backend_signature_count()) queue_error(CDIE_TR("No signature database loaded. Choose its folder in Options > Scan."));
 }
+/* The path field's text with ~ expanded, copied to buffer ("" when empty or
+ * unreadable). */
+static const char *field_path(char *buffer, size_t size)
+{
+    NSString *path;
+    const char *text;
+    buffer[0] = 0;
+    if (!g_bar || xxwidgets_file_name_bar_get_path(g_bar, buffer, size, NULL) != XXWIDGETS_OK) { buffer[0] = 0; return buffer; }
+    if (!buffer[0]) return buffer;
+    path = [string(buffer) stringByExpandingTildeInPath];
+    text = [path UTF8String];
+    if (!text || strlen(text) >= size) { buffer[0] = 0; return buffer; }
+    memcpy(buffer, text, strlen(text) + 1);
+    return buffer;
+}
+static int history_enabled(void);
+/* The File type combo, File size and the panel's states for path: 1 when its
+ * types could be read (the file is loaded then). keep_choice keeps the File
+ * type picked for the same file. On failure the file is unloaded and the
+ * reason queued for a dialog. */
+static int load_file(const char *path, int keep_choice)
+{
+    xx_meta_string *records = NULL;
+    struct stat info;
+    xxwidgets_status status;
+    if (!path || !path[0]) return 0;
+    if (!gui_main_file_types_load(&g_types, path, keep_choice)) {
+        /* One sentence on every platform, with the file system's reason (gui_error.h). */
+        char message[512];
+        gui_error_open_status(message, sizeof(message), path);
+        queue_error(message);
+        (void)xxwidgets_file_header_clear(g_header);
+        [g_type_path release]; g_type_path = nil;
+        apply_loaded_state();
+        return 0;
+    }
+    status = gui_main_file_types_records(&g_types, &records);
+    if (status == XXWIDGETS_OK) status = xxwidgets_file_header_set_file_types(g_header, records, g_types.count, g_types.selected);
+    gui_main_file_types_free_records(records, g_types.count);
+    if (status == XXWIDGETS_OK && !stat(path, &info)) status = xxwidgets_file_header_set_file_size(g_header, (uint64_t)info.st_size);
+    if (status == XXWIDGETS_OK) status = xxwidgets_file_name_bar_set_loaded_path(g_bar, path);
+    if (status != XXWIDGETS_OK) report_ui_error(CDIE_N_("File type"), status);
+    if (![g_type_path isEqualToString:string(path)]) { [g_type_path release]; g_type_path = [string(path) copy]; }
+    apply_loaded_state();
+    (void)xxwidgets_file_name_bar_set_recent_available(g_bar, history_enabled());
+    return 1;
+}
+/* A file from the picker, Recent files, a drop, the Dock or a second launch:
+ * shown and loaded, then scanned when Options say so. */
 static void open_path(NSString *path)
 {
-    xxwidgets_widget_set_text(g_path, [path UTF8String]);
-    gui_frontend_remember_file([path UTF8String]);
+    const char *text = [path UTF8String];
+    if (!text) return;
+    (void)xxwidgets_file_name_bar_set_path(g_bar, text);
+    gui_frontend_remember_file(text);
+    (void)load_file([[path stringByExpandingTildeInPath] UTF8String], 0);
     g_pending = gui_frontend_scan_after_open() ? ACTION_SCAN : ACTION_NONE;
 }
-/* The window's start and minimum size in cells. A cell is as wide as "M"
- * (11-12 pt), so the minimum still fits a 1280 pt wide screen; the backend
- * clamps a larger window to the screen and lays out for what fits. */
-#define MAIN_WINDOW_COLUMNS 116
-#define MAIN_WINDOW_ROWS 34
-#define MAIN_WINDOW_MIN_COLUMNS 104
-#define MAIN_WINDOW_MIN_ROWS 28
-static void layout(void)
+/* Shows the scan engine stored in Scan/Engine (Options can change it). */
+static void sync_engine(void)
 {
-    /* The two tool rows under the panel, seven buttons each. */
-    static xxwidgets_widget **const tools[2][7] = {
-        {&g_options, &g_imports, &g_exports, &g_resources, &g_symbols, &g_extractor, &g_update},
-        {&g_file_information, &g_entropy, &g_hash, &g_strings, &g_hex_view, &g_disasm, &g_memory_map}};
-    xxwidgets_rect bounds;
-    if (!g_panel || xxwidgets_widget_get_rect(g_window, &bounds) != XXWIDGETS_OK) return;
-    int width = bounds.width, height = bounds.height;
-    xxwidgets_widget_set_rect(g_path, (xxwidgets_rect){2, 1, width - 17, 2});
-    xxwidgets_widget_set_rect(g_browse, (xxwidgets_rect){width - 13, 1, 11, 2});
-    /* At least the panel's minimum height (14) in a short window. */
-    xxwidgets_scan_panel_set_rect(g_panel, (xxwidgets_rect){2, 4, width - 4, height - 14 < 14 ? 14 : height - 14});
-    /* Each row shares the width between its buttons, as on GTK, so all of
-     * them stay inside a window of any width. */
-    for (int row = 0; row < 2; ++row)
-        for (int column = 0; column < 7; ++column) {
-            int x = 2 + column * (width - 4) / 7, end = 2 + (column + 1) * (width - 4) / 7;
-            xxwidgets_widget_set_rect(*tools[row][column], (xxwidgets_rect){x, height - 9 + row * 3, end - x - 1, 2});
-        }
-    /* Two rows, as on Windows, for a message too long for one. */
-    xxwidgets_widget_set_rect(g_status, (xxwidgets_rect){2, height - 3, width - 4, 2});
+    gui_backend_scan_preferences scan;
+    size_t i;
+    if (!gui_backend_get_scan_preferences(&scan)) return;
+    for (i = 0; i < gui_backend_engine_count(); ++i) {
+        const char *id = gui_backend_engine_id(i);
+        if (id && !strcmp(id, scan.engine)) { (void)xxwidgets_widget_set_value(control(XXWIDGETS_SCAN_PANEL_ENGINE), (int)i); return; }
+    }
 }
 static void on_event(xxwidgets_app *app, const xxwidgets_event *event, void *user)
 {
+    xxwidgets_die_action action;
     (void)app; (void)user;
-    if (event->type == XXWIDGETS_EVENT_CLOSE && event->widget == g_window) g_running = 0;
-    else if (event->type == XXWIDGETS_EVENT_RESIZE && event->widget == g_window) g_layout = 1;
-    else if (event->type == XXWIDGETS_EVENT_SHORTCUT) g_pending = event->value;
-    else if (event->type == XXWIDGETS_EVENT_DROP_FILES && event->widget == g_window && event->path_count) open_path(string(event->paths[0]));
-    else if (event->type == XXWIDGETS_EVENT_CHANGE && event->widget == g_path) {
-        /* As on Windows: the results stay; the file types describe the last
-         * scanned file, so they wait for the next scan. */
-        xxwidgets_widget_set_enabled(control(XXWIDGETS_SCAN_PANEL_FILE_TYPE), 0);
-    } else if (event->type == XXWIDGETS_EVENT_CHANGE &&
-               (event->widget == control(XXWIDGETS_SCAN_PANEL_INCLUDE_TAGS) ||
-                event->widget == control(XXWIDGETS_SCAN_PANEL_EXCLUDE_TAGS))) {
+    if (event->type == XXWIDGETS_EVENT_CLOSE && event->widget == g_window) { g_running = 0; return; }
+    if (event->type == XXWIDGETS_EVENT_SHORTCUT) {
+        gui_shortcut_action shortcut = gui_shortcuts_action(event->value, 0);
+        if (shortcut != GUI_SHORTCUT_NONE) g_pending = (int)shortcut;
+        return;
+    }
+    if (event->type == XXWIDGETS_EVENT_DROP_FILES && event->widget == g_window) {
+        if (event->path_count) open_path(string(event->paths[0]));
+        return;
+    }
+    if (event->type == XXWIDGETS_EVENT_CHANGE &&
+        (event->widget == control(XXWIDGETS_SCAN_PANEL_INCLUDE_TAGS) || event->widget == control(XXWIDGETS_SCAN_PANEL_EXCLUDE_TAGS))) {
         xxwidgets_status status = apply_panel_tag_filters();
         if (status != XXWIDGETS_OK) report_ui_error(CDIE_N_("Read tag filters"), status);
-    } else if (event->type == XXWIDGETS_EVENT_SELECT && event->widget == control(XXWIDGETS_SCAN_PANEL_FILE_TYPE)) {
-        /* As on Windows: a file type scans the file in the path field, if any. */
-        size_t length = 0;
-        if (xxwidgets_widget_get_text(g_path, NULL, 0, &length) == XXWIDGETS_OK && length > 1) g_pending = ACTION_SCAN;
-    } else if (gui_tree_event(g_panel, event)) {
-        /* S or ? on a result row: shown after polling returns. */
-    } else if (event->type == XXWIDGETS_EVENT_CLICK) {
-        if (event->widget == g_browse) g_pending = ACTION_OPEN;
-        else if (event->widget == control(XXWIDGETS_SCAN_PANEL_SCAN)) g_pending = ACTION_SCAN;
-        else if (event->widget == control(XXWIDGETS_SCAN_PANEL_REPORT)) g_pending = ACTION_REPORT;
-        else if (event->widget == g_options) g_pending = ACTION_OPTIONS;
-        else if (event->widget == g_file_information) g_pending = ACTION_FILE_INFORMATION;
-        else if (event->widget == g_entropy) g_pending = ACTION_ENTROPY;
-        else if (event->widget == g_hash) g_pending = ACTION_HASH;
-        else if (event->widget == g_strings) g_pending = ACTION_STRINGS;
-        else if (event->widget == g_hex_view) g_pending = ACTION_HEX_VIEW;
-        else if (event->widget == g_disasm) g_pending = ACTION_DISASM;
-        else if (event->widget == g_memory_map) g_pending = ACTION_MEMORY_MAP;
-        else if (event->widget == g_imports) g_pending = ACTION_IMPORTS;
-        else if (event->widget == g_exports) g_pending = ACTION_EXPORTS;
-        else if (event->widget == g_resources) g_pending = ACTION_RESOURCES;
-        else if (event->widget == g_symbols) g_pending = ACTION_SYMBOLS;
-        else if (event->widget == g_extractor) g_pending = ACTION_EXTRACTOR;
-        else if (event->widget == g_update) g_pending = ACTION_UPDATE;
+        return;
+    }
+    /* S or ? on a result row, and the scan bar's Signatures, Directory and
+     * Log: shown by gui_tree_process after polling returns. */
+    if (gui_tree_event(g_panel, event)) return;
+    if (g_main && xxwidgets_die_main_panel_handle_event(g_main, event, &action)) {
+        if (action.id != XXWIDGETS_DIE_ACTION_NONE) { g_panel_action = action; g_panel_pending = 1; }
     }
 }
-static void collect_type(int type, const char *name, void *user)
-{
-    [(NSMutableArray *)user addObject:@{@"id": @(type), @"name": string(type == 0 ? CDIE_TR("Automatic") : name)}];
-}
-static int refresh_types(NSString *path)
-{
-    NSMutableArray *types = [NSMutableArray array];
-    xx_var selected = {0};
-    xxwidgets_widget *combo = control(XXWIDGETS_SCAN_PANEL_FILE_TYPE);
-    if ([path isEqualToString:g_type_path]) xxwidgets_combobox_get_current(combo, &selected);
-    if (!gui_backend_file_types([path UTF8String], collect_type, types)) return 0;
-    size_t count = [types count];
-    xx_meta_string *records = calloc(count, sizeof(*records));
-    xx_str_w_s *labels = calloc(count, sizeof(*labels));
-    if (!records || !labels) { free(records); free(labels); return 0; }
-    int index = 0, ok = 1;
-    for (size_t i = 0; i < count; ++i) {
-        NSDictionary *item = types[i];
-        labels[i].data = xx_str_utf8_to_unicode([item[@"name"] UTF8String]);
-        if (!labels[i].data) { ok = 0; break; }
-        labels[i].length = wcslen(labels[i].data);
-        labels[i].capacity = labels[i].length + 1;
-        labels[i].is_view = true;
-        records[i].meta_string = &labels[i];
-        records[i].var.type = XX_VAR_TYPE_UINT64;
-        records[i].var.val.u64 = [item[@"id"] unsignedLongLongValue];
-        if (selected.type == XX_VAR_TYPE_UINT64 && records[i].var.val.u64 == selected.val.u64) index = (int)i;
-    }
-    if (ok) ok = xxwidgets_combobox_set_records(combo, records, count) == XXWIDGETS_OK;
-    if (ok) ok = xxwidgets_widget_set_value(combo, index) == XXWIDGETS_OK;
-    for (size_t i = 0; i < count; ++i) if (labels[i].data) xx_str_wfree(labels[i].data);
-    free(labels); free(records);
-    if (ok) { [g_type_path release]; g_type_path = [path copy]; }
-    return ok;
-}
+/* Scans the file in the path field (loading it first) with the File type
+ * the user picked, or type 0 for the preferred one. */
 static int do_scan(void)
 {
-    size_t length = 0;
-    if (xxwidgets_widget_get_text(g_path, NULL, 0, &length) != XXWIDGETS_OK) return 0;
-    char *text = malloc(length ? length : 1);
-    if (!text) return 0;
-    xxwidgets_status status = xxwidgets_widget_get_text(g_path, text, length, NULL);
-    NSString *path = status == XXWIDGETS_OK ? [string(text) stringByExpandingTildeInPath] : nil;
-    free(text);
-    if (!path) return 0;
-    xxwidgets_widget *combo = control(XXWIDGETS_SCAN_PANEL_FILE_TYPE);
-    /* No file: the results stay, as on Windows. */
-    if (![path length]) { NSBeep(); xxwidgets_widget_focus(g_path); return 0; }
-    xxwidgets_scan_panel_clear(g_panel);
-    if (!refresh_types(path)) {
-        /* One sentence on every platform, with the file system's reason (gui_error.h). */
-        char message[512];
-        xxwidgets_widget_set_enabled(combo, 0);
-        gui_error_open_status(message, sizeof(message), [path UTF8String]);
-        xxwidgets_widget_set_text(g_status, message);
-        return 0;
-    }
-    xx_var type_id = {0};
+    char path[4096];
+    char *type = NULL;
     unsigned int flags = 0, databases = 0;
-    if (xxwidgets_combobox_get_current(combo, &type_id) != XXWIDGETS_OK || type_id.type != XX_VAR_TYPE_UINT64 ||
-        xxwidgets_scan_panel_get_flags(g_panel, &flags) != XXWIDGETS_OK ||
+    int cancelled = 0, ok, type_id;
+    NSTimeInterval started;
+    g_scan_type[0] = 0;
+    /* No file: the results stay, as on Windows. */
+    if (!field_path(path, sizeof(path))[0]) { NSBeep(); xxwidgets_widget_focus(g_path); return 0; }
+    xxwidgets_scan_panel_clear(g_panel);
+    if (!load_file(path, g_type_path && !strcmp([g_type_path UTF8String] ?: "", path))) return 0;
+    type_id = gui_main_file_types_scan_id(&g_types);
+    if (xxwidgets_scan_panel_get_flags(g_panel, &flags) != XXWIDGETS_OK ||
         xxwidgets_scan_panel_get_databases(g_panel, &databases) != XXWIDGETS_OK) return 0;
     {
         xxwidgets_status status = apply_panel_tag_filters();
@@ -267,21 +321,22 @@ static int do_scan(void)
     }
     gui_backend_set_flags(flags & 1, flags & 2, flags & 4, flags & 8, flags & 16, flags & 32);
     gui_backend_set_databases((databases & XXWIDGETS_SCAN_DATABASE_CUSTOM) != 0);
-    xxwidgets_widget_set_text(g_status, CDIE_TR("Scanning…"));
     xxwidgets_widget_set_enabled(g_window, 0);
     [NSApp updateWindows];
-    NSTimeInterval started = [NSDate timeIntervalSinceReferenceDate];
-    char *type = NULL;
-    int cancelled = 0;
-    int ok = gui_tree_scan(g_window, g_panel, [path UTF8String], (int)type_id.val.u64, &type, &cancelled);
-    NSString *message = ok ? [NSString stringWithFormat:cdie_ns_fmt(@"Scan complete (%@). %lu results · %.0f ms"), string(type),
-        (unsigned long)xxwidgets_scan_panel_count(g_panel), ([NSDate timeIntervalSinceReferenceDate] - started) * 1000] :
-        cancelled ? cdie_ns_tr(@"Scan cancelled.") : cdie_ns_tr(@"Scan failed.");
-    xxwidgets_widget_set_text(g_status, [message UTF8String]);
+    started = [NSDate timeIntervalSinceReferenceDate];
+    /* The scan time goes to the panel's elapsed field (gui_tree_scan). */
+    ok = gui_tree_scan(g_window, g_panel, path, type_id, &type, &cancelled);
+    if (ok) {
+        snprintf(g_scan_type, sizeof(g_scan_type), "%s", type ? type : "");
+        snprintf(g_message, sizeof(g_message), "%s", [[NSString stringWithFormat:cdie_ns_fmt(@"Scan complete (%@). %lu results · %.0f ms"), string(type),
+            (unsigned long)xxwidgets_scan_panel_count(g_panel), ([NSDate timeIntervalSinceReferenceDate] - started) * 1000] UTF8String] ?: "");
+    } else if (cancelled) snprintf(g_message, sizeof(g_message), "%s", CDIE_TR("Scan cancelled."));
+    else queue_error(CDIE_TR("Scan failed."));
     gui_backend_free(type);
     xxwidgets_widget_set_enabled(g_window, 1);
-    xxwidgets_widget_set_enabled(combo, 1);
-    if (ok) gui_frontend_remember_file([path UTF8String]);
+    apply_loaded_state();
+    if (ok) gui_frontend_remember_file(path);
+    (void)xxwidgets_file_name_bar_set_recent_available(g_bar, history_enabled());
     return ok;
 }
 /* The pickers stay application-modal (runModal) rather than sheets: a sheet
@@ -316,246 +371,6 @@ static void do_open(void)
     if (folder) [picker setDirectoryURL:[NSURL fileURLWithPath:[folder stringByStandardizingPath] isDirectory:YES]];
     if ([picker runModal] == NSModalResponseOK) open_path([[picker URL] path]);
 }
-static void do_file_information(void)
-{
-    size_t length = 0;
-    char *path;
-    xxwidgets_status status = xxwidgets_widget_get_text(g_path, NULL, 0, &length);
-    if (status != XXWIDGETS_OK) { report_ui_error(CDIE_N_("Read file path"), status); return; }
-    path = malloc(length ? length : 1);
-    if (!path) { report_ui_error(CDIE_N_("Read file path"), XXWIDGETS_OUT_OF_MEMORY); return; }
-    status = xxwidgets_widget_get_text(g_path, path, length ? length : 1, NULL);
-    if (status == XXWIDGETS_OK && !path[0]) {
-        xxwidgets_widget_set_text(g_status, CDIE_TR("Choose a PE, ELF or Mach-O file to inspect."));
-        xxwidgets_widget_focus(g_path);
-    } else if (status == XXWIDGETS_OK) {
-        NSString *expanded = [string(path) stringByExpandingTildeInPath];
-        status = gui_file_information_show(g_window, [expanded UTF8String]);
-    }
-    free(path);
-    if (status != XXWIDGETS_OK) report_ui_error("File Information", status);
-}
-
-static void do_entropy(void)
-{
-    size_t length = 0;
-    char *path;
-    xxwidgets_status status = xxwidgets_widget_get_text(g_path, NULL, 0, &length);
-    if (status != XXWIDGETS_OK) { report_ui_error(CDIE_N_("Read file path"), status); return; }
-    path = malloc(length ? length : 1);
-    if (!path) { report_ui_error(CDIE_N_("Read file path"), XXWIDGETS_OUT_OF_MEMORY); return; }
-    status = xxwidgets_widget_get_text(g_path, path, length ? length : 1, NULL);
-    if (status == XXWIDGETS_OK && !path[0]) {
-        xxwidgets_widget_set_text(g_status, CDIE_TR("Choose a file to calculate entropy."));
-        xxwidgets_widget_focus(g_path);
-    } else if (status == XXWIDGETS_OK) {
-        NSString *expanded = [string(path) stringByExpandingTildeInPath];
-        status = gui_entropy_show(g_window, [expanded UTF8String]);
-    }
-    free(path);
-    if (status != XXWIDGETS_OK) report_ui_error("Entropy", status);
-}
-
-static void do_hash(void)
-{
-    size_t length = 0;
-    char *path;
-    xxwidgets_status status = xxwidgets_widget_get_text(g_path, NULL, 0, &length);
-    if (status != XXWIDGETS_OK) { report_ui_error(CDIE_N_("Read file path"), status); return; }
-    path = malloc(length ? length : 1);
-    if (!path) { report_ui_error(CDIE_N_("Read file path"), XXWIDGETS_OUT_OF_MEMORY); return; }
-    status = xxwidgets_widget_get_text(g_path, path, length ? length : 1, NULL);
-    if (status == XXWIDGETS_OK && !path[0]) {
-        xxwidgets_widget_set_text(g_status, CDIE_TR("Choose a file to calculate hashes."));
-        xxwidgets_widget_focus(g_path);
-    } else if (status == XXWIDGETS_OK) {
-        NSString *expanded = [string(path) stringByExpandingTildeInPath];
-        status = gui_hash_show(g_window, [expanded UTF8String]);
-    }
-    free(path);
-    if (status != XXWIDGETS_OK) report_ui_error("Hash", status);
-}
-
-static void do_strings(void)
-{
-    size_t length = 0;
-    char *path;
-    xxwidgets_status status = xxwidgets_widget_get_text(g_path, NULL, 0, &length);
-    if (status != XXWIDGETS_OK) { report_ui_error(CDIE_N_("Read file path"), status); return; }
-    path = malloc(length ? length : 1);
-    if (!path) { report_ui_error(CDIE_N_("Read file path"), XXWIDGETS_OUT_OF_MEMORY); return; }
-    status = xxwidgets_widget_get_text(g_path, path, length ? length : 1, NULL);
-    if (status == XXWIDGETS_OK && !path[0]) {
-        xxwidgets_widget_set_text(g_status, CDIE_TR("Choose a file to extract strings."));
-        xxwidgets_widget_focus(g_path);
-    } else if (status == XXWIDGETS_OK) {
-        NSString *expanded = [string(path) stringByExpandingTildeInPath];
-        status = gui_strings_show(g_window, [expanded UTF8String]);
-    }
-    free(path);
-    if (status != XXWIDGETS_OK) report_ui_error("Strings", status);
-}
-
-static void do_hex_view(void)
-{
-    size_t length = 0;
-    char *path;
-    xxwidgets_status status = xxwidgets_widget_get_text(g_path, NULL, 0, &length);
-    if (status != XXWIDGETS_OK) { report_ui_error(CDIE_N_("Read file path"), status); return; }
-    path = malloc(length ? length : 1);
-    if (!path) { report_ui_error(CDIE_N_("Read file path"), XXWIDGETS_OUT_OF_MEMORY); return; }
-    status = xxwidgets_widget_get_text(g_path, path, length ? length : 1, NULL);
-    if (status == XXWIDGETS_OK && !path[0]) {
-        xxwidgets_widget_set_text(g_status, CDIE_TR("Choose a file to view its bytes."));
-        xxwidgets_widget_focus(g_path);
-    } else if (status == XXWIDGETS_OK) {
-        NSString *expanded = [string(path) stringByExpandingTildeInPath];
-        status = gui_hex_view_show(g_window, [expanded UTF8String]);
-    }
-    free(path);
-    if (status != XXWIDGETS_OK) report_ui_error("Hex View", status);
-}
-
-static void do_disasm(void)
-{
-    size_t length = 0;
-    char *path;
-    xxwidgets_status status = xxwidgets_widget_get_text(g_path, NULL, 0, &length);
-    if (status != XXWIDGETS_OK) { report_ui_error(CDIE_N_("Read file path"), status); return; }
-    path = malloc(length ? length : 1);
-    if (!path) { report_ui_error(CDIE_N_("Read file path"), XXWIDGETS_OUT_OF_MEMORY); return; }
-    status = xxwidgets_widget_get_text(g_path, path, length ? length : 1, NULL);
-    if (status == XXWIDGETS_OK && !path[0]) {
-        xxwidgets_widget_set_text(g_status, CDIE_TR("Choose a file to disassemble."));
-        xxwidgets_widget_focus(g_path);
-    } else if (status == XXWIDGETS_OK) {
-        NSString *expanded = [string(path) stringByExpandingTildeInPath];
-        status = gui_disasm_show(g_window, [expanded UTF8String]);
-    }
-    free(path);
-    if (status != XXWIDGETS_OK) report_ui_error("Disasm", status);
-}
-
-static void do_memory_map(void)
-{
-    size_t length = 0;
-    char *path;
-    xxwidgets_status status = xxwidgets_widget_get_text(g_path, NULL, 0, &length);
-    if (status != XXWIDGETS_OK) { report_ui_error(CDIE_N_("Read file path"), status); return; }
-    path = malloc(length ? length : 1);
-    if (!path) { report_ui_error(CDIE_N_("Read file path"), XXWIDGETS_OUT_OF_MEMORY); return; }
-    status = xxwidgets_widget_get_text(g_path, path, length ? length : 1, NULL);
-    if (status == XXWIDGETS_OK && !path[0]) {
-        xxwidgets_widget_set_text(g_status, CDIE_TR("Choose a file to map."));
-        xxwidgets_widget_focus(g_path);
-    } else if (status == XXWIDGETS_OK) {
-        NSString *expanded = [string(path) stringByExpandingTildeInPath];
-        status = gui_memory_map_show(g_window, [expanded UTF8String]);
-    }
-    free(path);
-    if (status != XXWIDGETS_OK) report_ui_error("Memory Map", status);
-}
-
-static void do_imports(void)
-{
-    size_t length = 0;
-    char *path;
-    xxwidgets_status status = xxwidgets_widget_get_text(g_path, NULL, 0, &length);
-    if (status != XXWIDGETS_OK) { report_ui_error(CDIE_N_("Read file path"), status); return; }
-    path = malloc(length ? length : 1);
-    if (!path) { report_ui_error(CDIE_N_("Read file path"), XXWIDGETS_OUT_OF_MEMORY); return; }
-    status = xxwidgets_widget_get_text(g_path, path, length ? length : 1, NULL);
-    if (status == XXWIDGETS_OK && !path[0]) {
-        xxwidgets_widget_set_text(g_status, CDIE_TR("Choose a file to inspect imports."));
-        xxwidgets_widget_focus(g_path);
-    } else if (status == XXWIDGETS_OK) {
-        NSString *expanded = [string(path) stringByExpandingTildeInPath];
-        status = gui_imports_show(g_window, [expanded UTF8String]);
-    }
-    free(path);
-    if (status != XXWIDGETS_OK) report_ui_error("Imports", status);
-}
-
-static void do_exports(void)
-{
-    size_t length = 0;
-    char *path;
-    xxwidgets_status status = xxwidgets_widget_get_text(g_path, NULL, 0, &length);
-    if (status != XXWIDGETS_OK) { report_ui_error(CDIE_N_("Read file path"), status); return; }
-    path = malloc(length ? length : 1);
-    if (!path) { report_ui_error(CDIE_N_("Read file path"), XXWIDGETS_OUT_OF_MEMORY); return; }
-    status = xxwidgets_widget_get_text(g_path, path, length ? length : 1, NULL);
-    if (status == XXWIDGETS_OK && !path[0]) {
-        xxwidgets_widget_set_text(g_status, CDIE_TR("Choose a file to inspect exports."));
-        xxwidgets_widget_focus(g_path);
-    } else if (status == XXWIDGETS_OK) {
-        NSString *expanded = [string(path) stringByExpandingTildeInPath];
-        status = gui_exports_show(g_window, [expanded UTF8String]);
-    }
-    free(path);
-    if (status != XXWIDGETS_OK) report_ui_error("Exports", status);
-}
-
-static void do_resources(void)
-{
-    size_t length = 0;
-    char *path;
-    xxwidgets_status status = xxwidgets_widget_get_text(g_path, NULL, 0, &length);
-    if (status != XXWIDGETS_OK) { report_ui_error(CDIE_N_("Read file path"), status); return; }
-    path = malloc(length ? length : 1);
-    if (!path) { report_ui_error(CDIE_N_("Read file path"), XXWIDGETS_OUT_OF_MEMORY); return; }
-    status = xxwidgets_widget_get_text(g_path, path, length ? length : 1, NULL);
-    if (status == XXWIDGETS_OK && !path[0]) {
-        xxwidgets_widget_set_text(g_status, CDIE_TR("Choose a file to inspect resources."));
-        xxwidgets_widget_focus(g_path);
-    } else if (status == XXWIDGETS_OK) {
-        NSString *expanded = [string(path) stringByExpandingTildeInPath];
-        status = gui_resources_show(g_window, [expanded UTF8String]);
-    }
-    free(path);
-    if (status != XXWIDGETS_OK) report_ui_error("Resources", status);
-}
-
-static void do_symbols(void)
-{
-    size_t length = 0;
-    char *path;
-    xxwidgets_status status = xxwidgets_widget_get_text(g_path, NULL, 0, &length);
-    if (status != XXWIDGETS_OK) { report_ui_error(CDIE_N_("Read file path"), status); return; }
-    path = malloc(length ? length : 1);
-    if (!path) { report_ui_error(CDIE_N_("Read file path"), XXWIDGETS_OUT_OF_MEMORY); return; }
-    status = xxwidgets_widget_get_text(g_path, path, length ? length : 1, NULL);
-    if (status == XXWIDGETS_OK && !path[0]) {
-        xxwidgets_widget_set_text(g_status, CDIE_TR("Choose a file to inspect symbols."));
-        xxwidgets_widget_focus(g_path);
-    } else if (status == XXWIDGETS_OK) {
-        NSString *expanded = [string(path) stringByExpandingTildeInPath];
-        status = gui_symbols_show(g_window, [expanded UTF8String]);
-    }
-    free(path);
-    if (status != XXWIDGETS_OK) report_ui_error("Symbols", status);
-}
-
-static void do_extractor(void)
-{
-    size_t length = 0;
-    char *path;
-    xxwidgets_status status = xxwidgets_widget_get_text(g_path, NULL, 0, &length);
-    if (status != XXWIDGETS_OK) { report_ui_error(CDIE_N_("Read file path"), status); return; }
-    path = malloc(length ? length : 1);
-    if (!path) { report_ui_error(CDIE_N_("Read file path"), XXWIDGETS_OUT_OF_MEMORY); return; }
-    status = xxwidgets_widget_get_text(g_path, path, length ? length : 1, NULL);
-    if (status == XXWIDGETS_OK && !path[0]) {
-        xxwidgets_widget_set_text(g_status, CDIE_TR("Choose a file to extract embedded files."));
-        xxwidgets_widget_focus(g_path);
-    } else if (status == XXWIDGETS_OK) {
-        NSString *expanded = [string(path) stringByExpandingTildeInPath];
-        status = gui_extractor_show(g_window, [expanded UTF8String]);
-    }
-    free(path);
-    if (status != XXWIDGETS_OK) report_ui_error("Extractor", status);
-}
-
 static xxwidgets_status browse_database(xxwidgets_widget *dialog, const char *initial, char **path, int *accepted, void *user)
 {
     NSOpenPanel *picker = [NSOpenPanel openPanel];
@@ -608,7 +423,8 @@ static xxwidgets_status apply_options(const gui_options_values *values)
     if (status == XXWIDGETS_OK) status = xxwidgets_app_get_font_options(g_app, &fonts);
     if (status == XXWIDGETS_OK && memcmp(&values->fonts, &fonts, sizeof(fonts))) {
         status = xxwidgets_app_set_font_options(g_app, &values->fonts);
-        if (status == XXWIDGETS_OK) layout();
+        /* Other fonts, other metrics: the view's minimum and layout again. */
+        if (status == XXWIDGETS_OK && g_main) status = xxwidgets_die_main_panel_set_advanced(g_main, xxwidgets_die_main_panel_get_advanced(g_main));
     }
     if (status == XXWIDGETS_OK) status = gui_frontend_apply_preferences(g_app, values);
     if (status == XXWIDGETS_OK) [(NSWindow *)xxwidgets_widget_native_handle(g_window) setLevel:values->appearance.stay_on_top ? NSFloatingWindowLevel : NSNormalWindowLevel];
@@ -632,10 +448,16 @@ static void do_options(gui_options_page_id page)
     }
     if (!accepted) return;
     status = apply_options(&values);
+    /* A new language: the panel's captions and tooltips from the catalog. */
+    if (status == XXWIDGETS_OK) status = xxwidgets_die_main_panel_retranslate(g_main);
+    if (status == XXWIDGETS_OK) status = xxwidgets_widget_set_tooltip(control(XXWIDGETS_SCAN_PANEL_REPORT), CDIE_TR("Scan report"));
+    sync_engine();
+    apply_loaded_state();
+    (void)xxwidgets_file_name_bar_set_recent_available(g_bar, history_enabled());
     if (status != XXWIDGETS_OK) report_ui_error("Apply options", status);
     else if (!gui_settings_save(g_settings, &values, g_options_page))
-        xxwidgets_widget_set_text(g_status, CDIE_TR("Options applied, but they could not be saved for the next start."));
-    else if (!reloaded) xxwidgets_widget_set_text(g_status, CDIE_TR("Options applied."));
+        queue_error(CDIE_TR("Options applied, but they could not be saved for the next start."));
+    else if (!reloaded) snprintf(g_message, sizeof(g_message), "%s", CDIE_TR("Options applied."));
 }
 
 static void do_about(void)
@@ -647,9 +469,10 @@ static void do_about(void)
     if (status != XXWIDGETS_OK) report_ui_error("About", status);
 }
 
-/* Update database: download and install from the stored update URL, refresh
- * the tags after a reload, and report on the status line. A NULL owner runs
- * without the progress dialog (--smoke-update). */
+/* Update database: download and install from the stored update URL and
+ * refresh the tags after a reload. The outcome stays in g_message; a failure
+ * with an owner gets a message dialog (Q1). A NULL owner runs without the
+ * progress dialog (--smoke-update). */
 static gui_update_result do_update(xxwidgets_widget *owner)
 {
     char message[512];
@@ -663,7 +486,8 @@ static gui_update_result do_update(xxwidgets_widget *owner)
         xxwidgets_status status = reload_panel_tags();
         if (status != XXWIDGETS_OK) { report_ui_error("Refresh signature tags", status); return result; }
     }
-    xxwidgets_widget_set_text(g_status, message);
+    snprintf(g_message, sizeof(g_message), "%s", message);
+    if (owner && (result == GUI_UPDATE_FAILED || result == GUI_UPDATE_RELOAD_FAILED)) queue_error(message);
     return result;
 }
 
@@ -699,32 +523,34 @@ static void do_recent(void)
     else if (status != XXWIDGETS_OK) report_ui_error("Recent files", status);
 }
 
-/* One queued action, run after polling returns: by the main loop and the smoke test. */
+/* One queued menu or keyboard command, run after polling returns: by the
+ * main loop and the smoke test, through the shared dispatcher. */
 static void run_action(int action)
 {
-    switch (action) {
-    case ACTION_SCAN: do_scan(); break;
-    case ACTION_OPEN: do_open(); break;
-    case ACTION_REPORT: do_report(); break;
-    case ACTION_OPTIONS: do_options(g_options_page); break;
-    case ACTION_DATABASES: do_options(GUI_OPTIONS_SCAN); break;
-    case ACTION_RECENT: do_recent(); break;
-    case ACTION_FILE_INFORMATION: do_file_information(); break;
-    case ACTION_ENTROPY: do_entropy(); break;
-    case ACTION_HASH: do_hash(); break;
-    case ACTION_STRINGS: do_strings(); break;
-    case ACTION_HEX_VIEW: do_hex_view(); break;
-    case ACTION_DISASM: do_disasm(); break;
-    case ACTION_MEMORY_MAP: do_memory_map(); break;
-    case ACTION_IMPORTS: do_imports(); break;
-    case ACTION_EXPORTS: do_exports(); break;
-    case ACTION_RESOURCES: do_resources(); break;
-    case ACTION_SYMBOLS: do_symbols(); break;
-    case ACTION_EXTRACTOR: do_extractor(); break;
-    case ACTION_ABOUT: do_about(); break;
-    case ACTION_UPDATE: do_update(g_window); break;
-    default: break;
+    char path[4096];
+    if (action == ACTION_NONE) return;
+    (void)gui_main_run_shortcut(g_window, g_main, field_path(path, sizeof(path)), (gui_shortcut_action)action, &g_hooks);
+    show_errors();
+}
+/* One queued panel action (a button of the main window), likewise. */
+static void run_panel_action(const xxwidgets_die_action *action)
+{
+    char path[4096];
+    /* PATH_EDITED: the results stay; the next scan loads the typed path. */
+    (void)gui_main_run_action(g_window, g_main, field_path(path, sizeof(path)), action, &g_hooks);
+    show_errors();
+}
+static void run_pending(void)
+{
+    int action = g_pending;
+    g_pending = ACTION_NONE;
+    if (g_panel_pending) {
+        xxwidgets_die_action panel_action = g_panel_action;
+        g_panel_pending = 0;
+        run_panel_action(&panel_action);
     }
+    run_action(action);
+    show_errors();
 }
 
 static int g_memory_settings; /* smoke runs: the settings stay in memory */
@@ -776,10 +602,7 @@ static void receive_forwarded_file(void)
     char *path = NULL;
     NSWindow *window;
     if (!gui_frontend_instance_poll(g_window, &path) || !path) return;
-    if (path[0] && xxwidgets_widget_set_text(g_path, path) == XXWIDGETS_OK) {
-        gui_frontend_remember_file(path);
-        if (gui_frontend_scan_after_open()) g_pending = ACTION_SCAN;
-    }
+    if (path[0]) open_path(string(path));
     free(path);
     window = xxwidgets_widget_native_handle(g_window);
     if ([window isMiniaturized]) [window deminiaturize:nil];
@@ -889,43 +712,63 @@ static int shortcut_allowed(xxwidgets_widget *window, int action, void *user)
     return action != ACTION_UPDATE || gui_update_supported();
 }
 
+/* The hooks of the shared dispatcher (gui_main_actions.h). */
+static void hook_browse(void *user) { (void)user; do_open(); }
+static void hook_recent(void *user) { (void)user; do_recent(); }
+/* Return in the path field: load and scan what was typed. */
+static void hook_open_path(void *user)
+{
+    char path[4096];
+    (void)user;
+    if (field_path(path, sizeof(path))[0]) gui_frontend_remember_file(path);
+    do_scan();
+}
+static void hook_scan(void *user, int type_id) { (void)user; (void)type_id; /* do_scan reads g_types */ do_scan(); }
+static void hook_report(void *user) { (void)user; do_report(); }
+static void hook_update(void *user) { (void)user; (void)do_update(g_window); }
+static void hook_options(void *user, int page) { (void)user; do_options(page < 0 ? g_options_page : (gui_options_page_id)page); }
+static void hook_about(void *user) { (void)user; do_about(); }
+/* Exit closes the main window the normal way: the loop ends, then finish_session. */
+static void hook_exit(void *user) { (void)user; g_running = 0; }
+/* View/Advanced and Scan/Engine are written at once, changes only. */
+static void hook_settings_changed(void *user) { (void)user; save_settings(); }
+
+/* The Simple and Advanced views (DIE_LOOK.md): the file name bar, the file
+ * header, the engine row, results and scan bar, and the right column with
+ * Update database above Shortcuts (Q2; disabled without an updater). The
+ * include and exclude tag filters stay in the scan bar (Q3). */
 static int create_controls(void)
 {
-    if (xxwidgets_widget_create(g_app, g_window, XXWIDGETS_EDIT, "", (xxwidgets_rect){2, 1, 75, 2}, &g_path) != XXWIDGETS_OK ||
-        xxwidgets_widget_create(g_app, g_window, XXWIDGETS_BUTTON, CDIE_TR("Open…"), (xxwidgets_rect){79, 1, 11, 2}, &g_browse) != XXWIDGETS_OK ||
-        xxwidgets_scan_panel_create(g_window, (xxwidgets_rect){2, 4, 88, 21}, &g_panel) != XXWIDGETS_OK ||
-        xxwidgets_widget_create(g_app, g_window, XXWIDGETS_BUTTON, CDIE_TR("Options…"), (xxwidgets_rect){2, 26, 16, 2}, &g_options) != XXWIDGETS_OK ||
-        xxwidgets_widget_create(g_app, g_window, XXWIDGETS_BUTTON, CDIE_TR("File Information…"), (xxwidgets_rect){2, 29, 26, 2}, &g_file_information) != XXWIDGETS_OK ||
-        xxwidgets_widget_create(g_app, g_window, XXWIDGETS_BUTTON, CDIE_TR("Entropy…"), (xxwidgets_rect){30, 29, 16, 2}, &g_entropy) != XXWIDGETS_OK ||
-        xxwidgets_widget_create(g_app, g_window, XXWIDGETS_BUTTON, CDIE_TR("Hash…"), (xxwidgets_rect){48, 29, 14, 2}, &g_hash) != XXWIDGETS_OK ||
-        xxwidgets_widget_create(g_app, g_window, XXWIDGETS_BUTTON, CDIE_TR("Strings…"), (xxwidgets_rect){64, 29, 18, 2}, &g_strings) != XXWIDGETS_OK ||
-        xxwidgets_widget_create(g_app, g_window, XXWIDGETS_BUTTON, CDIE_TR("Hex View…"), (xxwidgets_rect){84, 29, 18, 2}, &g_hex_view) != XXWIDGETS_OK ||
-        xxwidgets_widget_create(g_app, g_window, XXWIDGETS_BUTTON, CDIE_TR("Disasm…"), (xxwidgets_rect){104, 29, 18, 2}, &g_disasm) != XXWIDGETS_OK ||
-        xxwidgets_widget_create(g_app, g_window, XXWIDGETS_BUTTON, CDIE_TR("Memory Map…"), (xxwidgets_rect){124, 29, 20, 2}, &g_memory_map) != XXWIDGETS_OK ||
-        xxwidgets_widget_create(g_app, g_window, XXWIDGETS_BUTTON, CDIE_TR("Imports…"), (xxwidgets_rect){60, 26, 18, 2}, &g_imports) != XXWIDGETS_OK ||
-        xxwidgets_widget_create(g_app, g_window, XXWIDGETS_BUTTON, CDIE_TR("Exports…"), (xxwidgets_rect){80, 26, 18, 2}, &g_exports) != XXWIDGETS_OK ||
-        xxwidgets_widget_create(g_app, g_window, XXWIDGETS_BUTTON, CDIE_TR("Resources…"), (xxwidgets_rect){100, 26, 22, 2}, &g_resources) != XXWIDGETS_OK ||
-        xxwidgets_widget_create(g_app, g_window, XXWIDGETS_BUTTON, CDIE_TR("Symbols…"), (xxwidgets_rect){124, 26, 18, 2}, &g_symbols) != XXWIDGETS_OK ||
-        xxwidgets_widget_create(g_app, g_window, XXWIDGETS_BUTTON, CDIE_TR("Extractor…"), (xxwidgets_rect){104, 26, 22, 2}, &g_extractor) != XXWIDGETS_OK ||
-        xxwidgets_widget_create(g_app, g_window, XXWIDGETS_BUTTON, CDIE_TR("Update database"), (xxwidgets_rect){128, 26, 16, 2}, &g_update) != XXWIDGETS_OK ||
-        xxwidgets_widget_create(g_app, g_window, XXWIDGETS_LABEL, CDIE_TR("Loading databases…"), (xxwidgets_rect){2, 31, 88, 2}, &g_status) != XXWIDGETS_OK) return 0;
+    xxwidgets_shortcut bindings[64];
+    char storage[1024];
+    size_t count;
+    if (xxwidgets_die_main_panel_create(g_window, XXWIDGETS_DIE_MAIN_PANEL_SHOW_UPDATE | XXWIDGETS_DIE_MAIN_PANEL_TAG_FILTERS, &g_main) != XXWIDGETS_OK)
+        return 0;
+    g_panel = xxwidgets_die_main_panel_scan_panel(g_main);
+    g_bar = xxwidgets_die_main_panel_file_name_bar(g_main);
+    g_header = xxwidgets_die_main_panel_file_header(g_main);
+    g_side = xxwidgets_die_main_panel_side_panel(g_main);
+    g_path = g_bar ? xxwidgets_file_name_bar_control(g_bar, XXWIDGETS_FILE_NAME_BAR_PATH) : NULL;
+    if (!g_panel || !g_bar || !g_header || !g_side || !g_path) return 0;
     NSTextField *field = xxwidgets_widget_native_handle(g_path);
-    [field setPlaceholderString:cdie_ns_tr(@"Choose or drop a file to scan")];
-    [field setAccessibilityLabel:cdie_ns_tr(@"File to scan")];
-    /* The file types stay enabled (Automatic) until a path is edited, as on
-     * Windows and Linux. ">" names the report, as Windows' tooltip does
-     * (File > Report shows its Cmd key). */
+    if ([field isKindOfClass:[NSTextField class]]) {
+        [field setPlaceholderString:cdie_ns_tr(@"Choose or drop a file to scan")];
+        [field setAccessibilityLabel:cdie_ns_tr(@"File to scan")];
+    }
+    /* ">" names the report, as Windows' tooltip does (File > Report shows its Cmd key). */
     (void)xxwidgets_widget_set_tooltip(control(XXWIDGETS_SCAN_PANEL_REPORT), CDIE_TR("Scan report"));
-    xxwidgets_widget_set_enabled(g_update, gui_update_supported());
+    if (xxwidgets_side_panel_set_item_enabled(g_side, XXWIDGETS_DIE_SIDE_UPDATE, gui_update_supported() ? 1 : 0) != XXWIDGETS_OK) return 0;
     NSButton *scan = xxwidgets_widget_native_handle(control(XXWIDGETS_SCAN_PANEL_SCAN));
-    [scan setKeyEquivalent:@"\r"];
-    /* F1 and F2 as on Windows and Linux, beside Cmd+? and Cmd+,. */
-    const xxwidgets_shortcut shortcuts[] = {{"F5", ACTION_SCAN}, {"Cmd+O", ACTION_OPEN}, {"Cmd+R", ACTION_RECENT}, {"Cmd+Shift+R", ACTION_REPORT}, {"Cmd+U", ACTION_UPDATE},
-        {"F1", ACTION_ABOUT}, {"F2", ACTION_OPTIONS}};
+    if ([scan isKindOfClass:[NSButton class]]) [scan setKeyEquivalent:@"\r"];
+    /* The shared table's macOS column (Cmd+Q, Cmd+? and Cmd+, belong to the
+     * menu bar); action = gui_shortcut_action. */
+    count = gui_shortcuts_bindings(GUI_SHORTCUTS_MACOS, 0, gui_update_supported(), bindings, sizeof(bindings) / sizeof(bindings[0]),
+                                   storage, sizeof(storage));
+    if (!count) return 0;
     /* The custom database is on until saved Options say otherwise. */
     return xxwidgets_scan_panel_set_databases(g_panel, XXWIDGETS_SCAN_DATABASE_CUSTOM) == XXWIDGETS_OK &&
         xxwidgets_window_set_shortcut_filter(g_window, shortcut_allowed, NULL) == XXWIDGETS_OK &&
-        xxwidgets_window_set_shortcuts(g_window, shortcuts, sizeof(shortcuts) / sizeof(shortcuts[0])) == XXWIDGETS_OK;
+        xxwidgets_window_set_shortcuts(g_window, bindings, count) == XXWIDGETS_OK;
 }
 
 /* Modal dialog smoke driver. smoke_begin arms a repeating NSTimer in
@@ -950,7 +793,7 @@ enum {
 };
 enum { SMOKE_CHECK_NONE, SMOKE_CHECK_PAGE, SMOKE_CHECK_ABOUT, SMOKE_CHECK_TEXT, SMOKE_CHECK_TOOL, SMOKE_CHECK_TOOL_OR_ERROR,
        SMOKE_CHECK_EXTRACTOR, SMOKE_CHECK_RECENT, SMOKE_CHECK_SIGNATURES, SMOKE_CHECK_DIRECTORY, SMOKE_CHECK_PROGRESS, SMOKE_CHECK_CANCEL,
-       SMOKE_CHECK_UPDATE_BOX, SMOKE_CHECK_QUESTION };
+       SMOKE_CHECK_UPDATE_BOX, SMOKE_CHECK_QUESTION, SMOKE_CHECK_SHORTCUTS };
 #define SMOKE_TIMEOUT 15.0 /* seconds for one case */
 #define SMOKE_SETTLE 5.0   /* seconds a shown dialog may take to fill in */
 typedef struct smoke_driver {
@@ -1148,6 +991,11 @@ static int smoke_content(NSWindow *window)
         g_smoke.waiting = "the update box lacks the No updates text, Copy all or Close";
         return text && [[text string] hasPrefix:g_smoke.expected] && smoke_view(content, [NSButton class], "Copy all") &&
             smoke_view(content, [NSButton class], "Close") ? 1 : -1;
+    case SMOKE_CHECK_SHORTCUTS:
+        /* The read-only Shortcuts table: the shared rows, and Close. */
+        g_smoke.waiting = "Shortcuts lacks its rows or Close";
+        if (text) return -1;
+        return rows > 0 && smoke_view(content, [NSButton class], "Close") ? 1 : 0;
     case SMOKE_CHECK_QUESTION:
         /* The update question: its lines are labels; the closing line and both answers must be there. */
         g_smoke.waiting = "the update question lacks the update, version/date, its question or Yes/No";
@@ -1270,41 +1118,126 @@ static int smoke_begin(const char *title, int action, int check, const char *but
 static int smoke_main_usable(void)
 {
     NSWindow *window = xxwidgets_widget_native_handle(g_window);
-    NSButton *options = xxwidgets_widget_native_handle(g_options);
+    NSButton *options = xxwidgets_widget_native_handle(side_control(XXWIDGETS_DIE_SIDE_OPTIONS));
     return window && ![window ignoresMouseEvents] && [window canBecomeKeyWindow] && ![window attachedSheet] && ![NSApp modalWindow] &&
-        [options isEnabled] && xxwidgets_app_poll(g_app, 0) == XXWIDGETS_OK;
+        [options isKindOfClass:[NSButton class]] && [options isEnabled] && xxwidgets_app_poll(g_app, 0) == XXWIDGETS_OK;
+}
+/* 1 when widget is on screen in the main window: its view and every
+ * ancestor shown. A NULL widget (not created) counts as hidden. */
+static int smoke_shown(xxwidgets_widget *widget)
+{
+    id view = widget ? xxwidgets_widget_native_handle(widget) : nil;
+    return [view isKindOfClass:[NSView class]] && ![(NSView *)view isHiddenOrHasHiddenAncestor] &&
+        [(NSView *)view window] == xxwidgets_widget_native_handle(g_window);
+}
+static xxwidgets_widget *smoke_field_control(xxwidgets_file_header_field_id id)
+{
+    xxwidgets_value_field *field = xxwidgets_file_header_field(g_header, id);
+    return field ? xxwidgets_value_field_control(field, XXWIDGETS_VALUE_FIELD_VALUE) : NULL;
+}
+/* The controls each view shows and hides (DIE_LOOK.md 1.2 and 1.3; the tools
+ * grid and type area arrive in Phase 2). */
+static int smoke_view_controls(int advanced)
+{
+    static const xxwidgets_scan_panel_control_id scan_shown[] = {
+        XXWIDGETS_SCAN_PANEL_ENGINE, XXWIDGETS_SCAN_PANEL_ENDIANNESS, XXWIDGETS_SCAN_PANEL_MODE, XXWIDGETS_SCAN_PANEL_ARCHITECTURE,
+        XXWIDGETS_SCAN_PANEL_TYPE, XXWIDGETS_SCAN_PANEL_RESULTS, XXWIDGETS_SCAN_PANEL_SIGNATURES, XXWIDGETS_SCAN_PANEL_FLAGS,
+        XXWIDGETS_SCAN_PANEL_DATABASES, XXWIDGETS_SCAN_PANEL_INCLUDE_TAGS, XXWIDGETS_SCAN_PANEL_EXCLUDE_TAGS,
+        XXWIDGETS_SCAN_PANEL_DIRECTORY, XXWIDGETS_SCAN_PANEL_LOG, XXWIDGETS_SCAN_PANEL_REPORT, XXWIDGETS_SCAN_PANEL_ELAPSED,
+        XXWIDGETS_SCAN_PANEL_SCAN};
+    static const int side_shown[] = {XXWIDGETS_DIE_SIDE_ADVANCED, XXWIDGETS_DIE_SIDE_UPDATE, XXWIDGETS_DIE_SIDE_SHORTCUTS,
+        XXWIDGETS_DIE_SIDE_OPTIONS, XXWIDGETS_DIE_SIDE_ABOUT, XXWIDGETS_DIE_SIDE_EXIT};
+    static const xxwidgets_file_name_bar_control_id bar_shown[] = {XXWIDGETS_FILE_NAME_BAR_RECENT, XXWIDGETS_FILE_NAME_BAR_PATH,
+        XXWIDGETS_FILE_NAME_BAR_BROWSE};
+    size_t i;
+    if (xxwidgets_die_main_panel_get_advanced(g_main) != advanced) { fprintf(stderr, "Cocoa GUI smoke: the panel is not in the %s view\n", advanced ? "Advanced" : "Simple"); return 0; }
+    for (i = 0; i < sizeof(bar_shown) / sizeof(bar_shown[0]); ++i)
+        if (!smoke_shown(xxwidgets_file_name_bar_control(g_bar, bar_shown[i]))) { fprintf(stderr, "Cocoa GUI smoke: file name bar control %d is hidden\n", (int)bar_shown[i]); return 0; }
+    for (i = 0; i < sizeof(scan_shown) / sizeof(scan_shown[0]); ++i)
+        if (!smoke_shown(control(scan_shown[i]))) { fprintf(stderr, "Cocoa GUI smoke: scan panel control %d is hidden\n", (int)scan_shown[i]); return 0; }
+    for (i = 0; i < sizeof(side_shown) / sizeof(side_shown[0]); ++i)
+        if (!smoke_shown(side_control(side_shown[i]))) { fprintf(stderr, "Cocoa GUI smoke: right column item %d is hidden\n", side_shown[i]); return 0; }
+    /* File type and File size in both views; Base address and Entry point in Advanced only. */
+    if (!smoke_shown(smoke_field_control(XXWIDGETS_FILE_HEADER_FILE_TYPE)) || !smoke_shown(smoke_field_control(XXWIDGETS_FILE_HEADER_FILE_SIZE))) {
+        fprintf(stderr, "Cocoa GUI smoke: File type or File size is hidden\n"); return 0;
+    }
+    if (smoke_shown(smoke_field_control(XXWIDGETS_FILE_HEADER_BASE_ADDRESS)) != advanced ||
+        smoke_shown(smoke_field_control(XXWIDGETS_FILE_HEADER_ENTRY_POINT)) != advanced) {
+        fprintf(stderr, "Cocoa GUI smoke: Base address / Entry point visibility does not follow the %s view\n", advanced ? "Advanced" : "Simple"); return 0;
+    }
+    /* Gone from the main window: the scan panel's own File type (the header
+     * has it), Demangle (not in Phase 1). */
+    if (smoke_shown(control(XXWIDGETS_SCAN_PANEL_FILE_TYPE)) || smoke_shown(side_control(XXWIDGETS_DIE_SIDE_DEMANGLE))) {
+        fprintf(stderr, "Cocoa GUI smoke: the scan panel's File type or Demangle is shown\n"); return 0;
+    }
+    /* Update database: enabled exactly with an updater (Q2). */
+    {
+        NSButton *update = xxwidgets_widget_native_handle(side_control(XXWIDGETS_DIE_SIDE_UPDATE));
+        if (![update isKindOfClass:[NSButton class]] || ([update isEnabled] ? 1 : 0) != (gui_update_supported() ? 1 : 0)) {
+            fprintf(stderr, "Cocoa GUI smoke: Update database is %s with%s an updater\n", [update isEnabled] ? "enabled" : "disabled",
+                gui_update_supported() ? "" : "out"); return 0;
+        }
+    }
+    return 1;
 }
 /* The main window fits the visible part of its screen and, laid out for the
- * size it got, holds every control inside: nothing is cut off, also on a
- * screen too narrow for the window's minimum size (then also reported). */
-static int smoke_main_fits(void)
+ * size it got, holds every control inside with no two overlapping (frames,
+ * NSBox, may hold controls); both views' minimum fits a 1280 x 800 pt screen
+ * (K7). Too narrow a screen is reported, and then only "inside" counts. */
+static int smoke_layout(void)
 {
     NSWindow *window = xxwidgets_widget_native_handle(g_window);
-    NSButton *browse = xxwidgets_widget_native_handle(g_browse);
     NSScreen *screen;
     NSRect visible, frame, content;
-    xxwidgets_rect cells;
-    CGFloat cell;
+    NSArray *views;
+    int view_width, view_height, w, h, advanced;
+    NSUInteger i, j;
     if (xxwidgets_app_poll(g_app, 0) != XXWIDGETS_OK) return 0;
-    if (g_layout) { g_layout = 0; layout(); }
     screen = [window screen] ? [window screen] : [NSScreen mainScreen];
+    if (!screen) return 0;
     visible = [screen visibleFrame]; frame = [window frame]; content = [[window contentView] bounds];
-    /* The cell width, from a control's alignment rect (its cells, without AppKit's bezel). */
-    if (!screen || !browse || xxwidgets_widget_get_rect(g_browse, &cells) != XXWIDGETS_OK || cells.width <= 0) return 0;
-    cell = NSWidth([browse alignmentRectForFrame:[browse frame]]) / cells.width;
-    if (MAIN_WINDOW_MIN_COLUMNS * cell > NSWidth([window contentRectForFrameRect:visible]) + 0.5)
+    for (advanced = 0; advanced < 2; ++advanced) {
+        if (xxwidgets_die_main_panel_get_minimum_size(g_main, advanced, &view_width, &view_height) != XXWIDGETS_OK ||
+            xxwidgets_die_main_panel_get_default_size(g_main, advanced, &w, &h) != XXWIDGETS_OK) return 0;
+        /* 800 pt less the menu bar (24-37 pt) and a title bar (28 pt). */
+        if (view_width > 1280 || view_height > 800 - 37 - 28 || w > 1280 || h > 800 - 37 - 28) {
+            fprintf(stderr, "Cocoa GUI smoke: the %s view (minimum %dx%d, default %dx%d) does not fit 1280x800 pt\n",
+                advanced ? "Advanced" : "Simple", view_width, view_height, w, h);
+            return 0;
+        }
+    }
+    if (xxwidgets_die_main_panel_get_minimum_size(g_main, xxwidgets_die_main_panel_get_advanced(g_main), &view_width, &view_height) == XXWIDGETS_OK &&
+        view_width > NSWidth([window contentRectForFrameRect:visible]) + 0.5)
         fprintf(stderr, "Cocoa GUI smoke: the screen (%.0f pt) is narrower than the main window's minimum\n", NSWidth(visible));
     if (NSWidth(frame) > NSWidth(visible) + 0.5 || NSHeight(frame) > NSHeight(visible) + 0.5) {
         fprintf(stderr, "Cocoa GUI smoke: the main window (%.0fx%.0f) is larger than the screen's visible area (%.0fx%.0f)\n",
             NSWidth(frame), NSHeight(frame), NSWidth(visible), NSHeight(visible));
         return 0;
     }
-    for (NSView *view in [[window contentView] subviews]) {
+    views = [[window contentView] subviews];
+    for (i = 0; i < [views count]; ++i) {
+        NSView *view = views[i];
         NSRect slot = [view alignmentRectForFrame:[view frame]];
-        if (![view isHidden] && !NSContainsRect(NSInsetRect(content, -0.5, -0.5), slot)) {
+        if ([view isHidden]) continue;
+        if (!NSContainsRect(NSInsetRect(content, -0.5, -0.5), slot)) {
             fprintf(stderr, "Cocoa GUI smoke: a %s at %.0f,%.0f %.0fx%.0f lies outside the main window's %.0fx%.0f\n",
                 [NSStringFromClass([view class]) UTF8String], NSMinX(slot), NSMinY(slot), NSWidth(slot), NSHeight(slot), NSWidth(content), NSHeight(content));
             return 0;
+        }
+        if ([view isKindOfClass:[NSBox class]]) continue;
+        for (j = i + 1; j < [views count]; ++j) {
+            NSView *other = views[j];
+            NSRect overlap;
+            if ([other isHidden] || [other isKindOfClass:[NSBox class]]) continue;
+            /* A point of touching (rounding of alignment rects) is not an overlap. */
+            overlap = NSIntersectionRect(NSInsetRect(slot, 1, 1), NSInsetRect([other alignmentRectForFrame:[other frame]], 1, 1));
+            if (NSWidth(overlap) > 0 && NSHeight(overlap) > 0) {
+                NSRect second = [other alignmentRectForFrame:[other frame]];
+                fprintf(stderr, "Cocoa GUI smoke: a %s at %.0f,%.0f %.0fx%.0f overlaps a %s at %.0f,%.0f %.0fx%.0f\n",
+                    [NSStringFromClass([view class]) UTF8String], NSMinX(slot), NSMinY(slot), NSWidth(slot), NSHeight(slot),
+                    [NSStringFromClass([other class]) UTF8String], NSMinX(second), NSMinY(second), NSWidth(second), NSHeight(second));
+                return 0;
+            }
         }
     }
     return 1;
@@ -1415,7 +1348,10 @@ static int smoke_test(NSString *path)
     changed.use_arm_pmull = 2;
     if (gui_backend_set_optimization_options(&changed) || !gui_backend_set_optimization_options(&saved)) return 12;
     if (!gui_backend_signature_count()) { fprintf(stderr, "No bundled signatures loaded\n"); return 1; }
-    if (!smoke_main_fits()) return 74;
+    /* 74-75: the stored view (none in a smoke run: Simple) with its
+     * controls, laid out inside the window on the screen. */
+    if (!smoke_layout()) return 74;
+    if (!smoke_view_controls(0)) return 75;
     {
         xxwidgets_widget *include_combo = control(XXWIDGETS_SCAN_PANEL_INCLUDE_TAGS);
         xxwidgets_widget *exclude_combo = control(XXWIDGETS_SCAN_PANEL_EXCLUDE_TAGS);
@@ -1450,17 +1386,14 @@ static int smoke_test(NSString *path)
     size_t length = 0;
     if (xxwidgets_scan_panel_get_report(g_panel, NULL, 0, &length) != XXWIDGETS_OK || length <= 1 ||
         xxwidgets_treeview_count(control(XXWIDGETS_SCAN_PANEL_RESULTS)) == 0) return 3;
-    xxwidgets_widget *combo = control(XXWIDGETS_SCAN_PANEL_FILE_TYPE);
+    /* 4-6: File type Binary, as the header's combo reports it, rescans as Binary. */
     int found = 0;
-    for (size_t i = 0; i < xxwidgets_combobox_count(combo); ++i) {
-        const xx_meta_string *record;
-        if (xxwidgets_combobox_get_record(combo, i, &record) == XXWIDGETS_OK &&
-            wcscmp(record->meta_string->data, L"Binary") == 0) {
-            xxwidgets_widget_set_value(combo, (int)i);
-            if (!do_scan()) return 4;
-            char status[512];
-            xxwidgets_widget_get_text(g_status, status, sizeof(status), NULL);
-            if (!strstr(status, "(Binary)")) return 5;
+    for (size_t i = 0; i < g_types.count; ++i) {
+        if (g_types.names[i] && !strcmp(g_types.names[i], "Binary")) {
+            xxwidgets_die_action pick = {XXWIDGETS_DIE_ACTION_FILE_TYPE, (int)i, (uint64_t)g_types.ids[i]};
+            g_message[0] = 0;
+            if (!gui_main_run_action(g_window, g_main, [path UTF8String], &pick, &g_hooks) || !xxwidgets_scan_panel_count(g_panel)) return 4;
+            if (!strstr(g_message, "(Binary)")) { fprintf(stderr, "Cocoa GUI smoke: Binary rescan: %s\n", g_message); return 5; }
             found = 1; break;
         }
     }
@@ -1611,14 +1544,16 @@ static int smoke_test(NSString *path)
         if (!ok) return 26;
     }
     {
-        static const struct { const char *title; xxwidgets_widget **button; int action, check; } tools[] = {
-            {"File Information", &g_file_information, ACTION_FILE_INFORMATION, SMOKE_CHECK_TOOL}, {"Entropy", &g_entropy, ACTION_ENTROPY, SMOKE_CHECK_TOOL},
-            {"Hash", &g_hash, ACTION_HASH, SMOKE_CHECK_TOOL}, {"Strings", &g_strings, ACTION_STRINGS, SMOKE_CHECK_TOOL},
-            {"Hex View", &g_hex_view, ACTION_HEX_VIEW, SMOKE_CHECK_TOOL}, {"Disasm", &g_disasm, ACTION_DISASM, SMOKE_CHECK_TOOL},
-            {"Memory Map", &g_memory_map, ACTION_MEMORY_MAP, SMOKE_CHECK_TOOL}, {"Imports", &g_imports, ACTION_IMPORTS, SMOKE_CHECK_TOOL},
+        /* The tools have no buttons in the Simple view: the File menu (and
+         * their shortcuts) open them in both views. */
+        static const struct { const char *title; int action, check; } tools[] = {
+            {"File Information", ACTION_FILE_INFORMATION, SMOKE_CHECK_TOOL}, {"Entropy", ACTION_ENTROPY, SMOKE_CHECK_TOOL},
+            {"Hash", ACTION_HASH, SMOKE_CHECK_TOOL}, {"Strings", ACTION_STRINGS, SMOKE_CHECK_TOOL},
+            {"Hex View", ACTION_HEX_VIEW, SMOKE_CHECK_TOOL}, {"Disasm", ACTION_DISASM, SMOKE_CHECK_TOOL},
+            {"Memory Map", ACTION_MEMORY_MAP, SMOKE_CHECK_TOOL}, {"Imports", ACTION_IMPORTS, SMOKE_CHECK_TOOL},
             /* A Mach-O may have no exports, resources or symbols: an empty table or the error text is right then. */
-            {"Exports", &g_exports, ACTION_EXPORTS, SMOKE_CHECK_TOOL_OR_ERROR}, {"Resources", &g_resources, ACTION_RESOURCES, SMOKE_CHECK_TOOL_OR_ERROR},
-            {"Symbols", &g_symbols, ACTION_SYMBOLS, SMOKE_CHECK_TOOL_OR_ERROR}, {"Extractor", &g_extractor, ACTION_EXTRACTOR, SMOKE_CHECK_EXTRACTOR}};
+            {"Exports", ACTION_EXPORTS, SMOKE_CHECK_TOOL_OR_ERROR}, {"Resources", ACTION_RESOURCES, SMOKE_CHECK_TOOL_OR_ERROR},
+            {"Symbols", ACTION_SYMBOLS, SMOKE_CHECK_TOOL_OR_ERROR}, {"Extractor", ACTION_EXTRACTOR, SMOKE_CHECK_EXTRACTOR}};
         CDIEApplication *delegate = (CDIEApplication *)[NSApp delegate];
         xxwidgets_widget *results = control(XXWIDGETS_SCAN_PANEL_RESULTS);
         NSString *expected = nil;
@@ -1627,7 +1562,7 @@ static int smoke_test(NSString *path)
         char before[GUI_PREFERENCE_PATH_MAX], after[GUI_PREFERENCE_PATH_MAX], *text, *real;
         const char *message, *label;
         size_t i, count, report_size = 0;
-        int automatic = 0, history, ok;
+        int history, ok;
         xxwidgets_status status;
 
         /* 27-28: without a report, Report and its menu item do nothing; an
@@ -1636,12 +1571,8 @@ static int smoke_test(NSString *path)
             !smoke_begin("Scan report", SMOKE_ABSENT, SMOKE_CHECK_NONE, NULL, nil)) return 27;
         run_action(ACTION_REPORT);
         if (!smoke_finish()) return 27;
-        for (i = 0; i < xxwidgets_combobox_count(combo) && !automatic; ++i) {
-            const xx_meta_string *record;
-            if (xxwidgets_combobox_get_record(combo, i, &record) == XXWIDGETS_OK && record->var.type == XX_VAR_TYPE_UINT64 && !record->var.val.u64)
-                automatic = xxwidgets_widget_set_value(combo, (int)i) == XXWIDGETS_OK;
-        }
-        if (!automatic || !do_scan() || !xxwidgets_scan_panel_count(g_panel) || !report_available() || ![delegate validateMenuItem:item]) return 28;
+        /* The preferred File type scans with type 0 (Automatic). */
+        if (!gui_main_file_types_choose(&g_types, g_types.preferred) || gui_main_file_types_scan_id(&g_types) || !do_scan() || !xxwidgets_scan_panel_count(g_panel) || !report_available() || ![delegate validateMenuItem:item]) return 28;
         /* 29: File > Report. */
         if (xxwidgets_scan_panel_get_report(g_panel, NULL, 0, &report_size) != XXWIDGETS_OK || !(text = malloc(report_size))) return 29;
         if (xxwidgets_scan_panel_get_report(g_panel, text, report_size, NULL) == XXWIDGETS_OK) expected = string(text);
@@ -1752,10 +1683,12 @@ static int smoke_test(NSString *path)
         preferences.file.save_recent_files = history;
         gui_preferences_set(&preferences);
         if (!ok) return 55;
-        /* 56-68: each tool button opens its dialog (Close); Hash once more with Escape. */
+        /* 56-68: each tool's File menu item opens its dialog (Close); Hash once more with Escape. */
         for (i = 0; i < sizeof(tools) / sizeof(tools[0]); ++i) {
+            item = smoke_menu(tools[i].action, nil);
             g_pending = ACTION_NONE;
-            if (!smoke_press(*tools[i].button) || g_pending != tools[i].action ||
+            if (item && [delegate validateMenuItem:item]) [delegate action:item];
+            if (g_pending != tools[i].action ||
                 !smoke_begin(tools[i].title, SMOKE_BUTTON, tools[i].check, "Close", nil)) return 56 + (int)i;
             g_pending = ACTION_NONE;
             run_action(tools[i].action);
@@ -1818,13 +1751,86 @@ static int smoke_test(NSString *path)
                 if (saved[i]) setenv(names[i], saved[i], 1); else unsetenv(names[i]);
                 free(saved[i]);
             }
-            if (xxwidgets_widget_get_text(g_status, line, sizeof(line), NULL) != XXWIDGETS_OK) line[0] = 0;
+            snprintf(line, sizeof(line), "%s", g_message);
             if (!ok || result != GUI_UPDATE_CANCELLED) fprintf(stderr, "Cocoa dialog smoke: Updating Database: %s %s\n", gui_update_result_name(result), line);
             if (!ok || result != GUI_UPDATE_CANCELLED || strcmp(line, CDIE_TR("Database update cancelled.")) ||
                 gui_backend_database_generation() != generation || gui_backend_signature_count() != signatures) return 73;
         }
+        /* 76-77: the Advanced checkbox shows the Advanced view, grows the
+         * window to its minimum and stores View/Advanced; again: back to
+         * Simple, the window not shrunk, the setting off. */
+        {
+            NSWindow *window = xxwidgets_widget_native_handle(g_window);
+            NSScreen *screen = [window screen] ? [window screen] : [NSScreen mainScreen];
+            NSRect room = screen ? [window contentRectForFrameRect:[screen visibleFrame]] : NSZeroRect;
+            int minimum_width = 0, minimum_height = 0, width = 0, height = 0, before_width = 0, before_height = 0;
+            for (i = 0; i < 2; ++i) {
+                int advanced = i == 0;
+                if (xxwidgets_window_get_client_size(g_window, &before_width, &before_height) != XXWIDGETS_OK) return 76 + (int)i;
+                g_pending = ACTION_NONE; g_panel_pending = 0;
+                if (!smoke_press(side_control(XXWIDGETS_DIE_SIDE_ADVANCED)) || !g_panel_pending ||
+                    g_panel_action.id != XXWIDGETS_DIE_ACTION_ADVANCED_CHANGED || g_panel_action.value != advanced) {
+                    fprintf(stderr, "Cocoa GUI smoke: Advanced did not report ADVANCED_CHANGED %d\n", advanced);
+                    return 76 + (int)i;
+                }
+                run_pending();
+                if (gui_frontend_advanced() != advanced) { fprintf(stderr, "Cocoa GUI smoke: View/Advanced is not %d\n", advanced); return 76 + (int)i; }
+                if (!smoke_view_controls(advanced) || !smoke_layout()) return 76 + (int)i;
+                if (xxwidgets_die_main_panel_get_minimum_size(g_main, advanced, &minimum_width, &minimum_height) != XXWIDGETS_OK ||
+                    xxwidgets_window_get_client_size(g_window, &width, &height) != XXWIDGETS_OK) return 76 + (int)i;
+                /* At least the view's minimum where the screen has room; never smaller than before. */
+                if ((minimum_width <= NSWidth(room) && width < minimum_width) || (minimum_height <= NSHeight(room) && height < minimum_height) ||
+                    width < before_width || height < before_height) {
+                    fprintf(stderr, "Cocoa GUI smoke: after the toggle the window is %dx%d (minimum %dx%d, before %dx%d)\n",
+                        width, height, minimum_width, minimum_height, before_width, before_height);
+                    return 76 + (int)i;
+                }
+            }
+        }
+        /* 78-80: the right column's Shortcuts (Close), Options (on the last
+         * page; Cancel) and About (Escape). */
+        g_pending = ACTION_NONE; g_panel_pending = 0;
+        if (!smoke_press(side_control(XXWIDGETS_DIE_SIDE_SHORTCUTS)) || !g_panel_pending || g_panel_action.id != XXWIDGETS_DIE_ACTION_SHORTCUTS ||
+            !smoke_begin("Shortcuts", SMOKE_BUTTON, SMOKE_CHECK_SHORTCUTS, "Close", nil)) return 78;
+        run_pending();
+        if (!smoke_finish()) return 78;
+        if (!smoke_press(side_control(XXWIDGETS_DIE_SIDE_OPTIONS)) || !g_panel_pending || g_panel_action.id != XXWIDGETS_DIE_ACTION_OPTIONS ||
+            !smoke_options(g_options_page, SMOKE_BUTTON, "Cancel")) return 79;
+        run_pending();
+        if (!smoke_finish()) return 79;
+        if (!smoke_press(side_control(XXWIDGETS_DIE_SIDE_ABOUT)) || !g_panel_pending || g_panel_action.id != XXWIDGETS_DIE_ACTION_ABOUT ||
+            !smoke_begin("About", SMOKE_ESCAPE, SMOKE_CHECK_ABOUT, NULL, nil)) return 80;
+        run_pending();
+        if (!smoke_finish()) return 80;
+        /* 81: Update database asks for an update with an updater (73 ran one);
+         * without, it is disabled and a click does nothing (Q2). */
+        g_panel_pending = 0;
+        if (gui_update_supported()) {
+            if (!smoke_press(side_control(XXWIDGETS_DIE_SIDE_UPDATE)) || !g_panel_pending || g_panel_action.id != XXWIDGETS_DIE_ACTION_UPDATE) return 81;
+        } else {
+            xxwidgets_event click = {0};
+            click.type = XXWIDGETS_EVENT_CLICK; click.widget = side_control(XXWIDGETS_DIE_SIDE_UPDATE);
+            if (smoke_press(click.widget)) return 81;
+            on_event(g_app, &click, NULL);
+            if (g_panel_pending) return 81;
+        }
+        g_panel_pending = 0;
+        /* 82: the file name bar's Recent files and Open file ask for their
+         * dialogs (52-54 ran them). */
+        if (history_enabled() && (!smoke_press(xxwidgets_file_name_bar_control(g_bar, XXWIDGETS_FILE_NAME_BAR_RECENT)) || !g_panel_pending ||
+            g_panel_action.id != XXWIDGETS_DIE_ACTION_RECENT)) return 82;
+        g_panel_pending = 0;
+        if (!smoke_press(xxwidgets_file_name_bar_control(g_bar, XXWIDGETS_FILE_NAME_BAR_BROWSE)) || !g_panel_pending ||
+            g_panel_action.id != XXWIDGETS_DIE_ACTION_BROWSE) return 82;
+        g_panel_pending = 0;
+        /* 83: Exit ends the main loop the normal way (the loop is not running
+         * here: the flag is set back). */
+        if (!smoke_press(side_control(XXWIDGETS_DIE_SIDE_EXIT)) || !g_panel_pending || g_panel_action.id != XXWIDGETS_DIE_ACTION_EXIT) return 83;
+        run_pending();
+        if (g_running) return 83;
+        g_running = 1;
     }
-    printf("Cocoa GUI smoke test passed: %d signatures, file drop, scan, type selection, report, missing-file recovery, File Information, Entropy, Hash, Strings, Hex View, Disasm, Memory Map, Imports, Exports, Resources, Symbols, Extractor; dialogs: Scan report, Signatures, Log, Scan directory, About, Options (10 pages, Colors, 3 pickers), Open, Recent files, 12 tools, progress%s\n",
+    printf("Cocoa GUI smoke test passed: %d signatures, file drop, scan, type selection, report, missing-file recovery, File Information, Entropy, Hash, Strings, Hex View, Disasm, Memory Map, Imports, Exports, Resources, Symbols, Extractor; dialogs: Scan report, Signatures, Log, Scan directory, About, Options (10 pages, Colors, 3 pickers), Open, Recent files, 12 tools, progress; main window: Simple and Advanced views, Advanced toggle (View/Advanced), layout, Shortcuts, Options, About, Update database, Recent, Open, Exit%s\n",
         gui_backend_signature_count(), gui_update_supported() ? ", Updating Database" : "");
     return 0;
 }
@@ -1850,22 +1856,23 @@ static const smoke_update_mode *smoke_update_find(const char *name)
         if (name && !strcmp(smoke_update_modes[i].name, name)) return &smoke_update_modes[i];
     return NULL;
 }
-/* --smoke-update: one click on Update database; exits 0 when the result is the expected one. */
+/* --smoke-update: one click on the right column's Update database; exits 0
+ * when the result is the expected one. */
 static int smoke_update(const smoke_update_mode *mode)
 {
     xxwidgets_event click = {0};
     char text[640] = "";
     int ok = 1;
-    xxwidgets_widget_set_text(g_status, "");
-    click.type = XXWIDGETS_EVENT_CLICK; click.widget = g_update;
-    g_pending = ACTION_NONE;
+    g_message[0] = 0;
+    click.type = XXWIDGETS_EVENT_CLICK; click.widget = side_control(XXWIDGETS_DIE_SIDE_UPDATE);
+    g_pending = ACTION_NONE; g_panel_pending = 0;
     on_event(g_app, &click, NULL);
-    if (g_pending != ACTION_UPDATE) { fprintf(stderr, "smoke-update: the button did not request an update\n"); return 1; }
-    g_pending = ACTION_NONE;
+    if (!g_panel_pending || g_panel_action.id != XXWIDGETS_DIE_ACTION_UPDATE) { fprintf(stderr, "smoke-update: the button did not request an update\n"); return 1; }
+    g_panel_pending = 0;
     if (mode->button && !smoke_begin("Update database", SMOKE_BUTTON, mode->check, mode->button, string(CDIE_TR(mode->expected)))) return 1;
     gui_update_result result = do_update(mode->button ? g_window : NULL);
     if (mode->button) ok = smoke_finish();
-    if (xxwidgets_widget_get_text(g_status, text, sizeof(text), NULL) != XXWIDGETS_OK) text[0] = 0;
+    snprintf(text, sizeof(text), "%s", g_message);
     fprintf(stderr, "smoke-update: %s %s\n", gui_update_result_name(result), text);
     if (ok) ok = !strcmp(gui_update_result_name(result), mode->result);
     if (ok && result == GUI_UPDATE_INSTALLED) ok = gui_backend_signature_count() > 0 && text[0];
@@ -1901,6 +1908,14 @@ int main(int argc, char **argv)
         int result = 0;
         CDIEApplication *delegate = nil;
         g_memory_settings = smoke;
+        g_smoke_run = smoke;
+        g_hooks.browse = hook_browse; g_hooks.recent = hook_recent; g_hooks.open_path = hook_open_path;
+        g_hooks.scan = hook_scan; g_hooks.report = hook_report; g_hooks.update = hook_update;
+        g_hooks.options = hook_options; g_hooks.about = hook_about; g_hooks.exit = hook_exit;
+        g_hooks.settings_changed = hook_settings_changed; g_hooks.error = hook_error;
+        g_hooks.with_update = gui_update_supported() ? 1 : 0;
+        g_hooks.file_types = &g_types;
+        /* Signatures, Directory and Log stay with gui_tree_event (on_event). */
         size_t translation_line=0;
         char *stored_translation = !translation && !getenv("CDIE_TRANSLATION") ? gui_frontend_stored_language(smoke) : NULL;
         status=cdie_translation_open(g_app,translation ? translation : stored_translation,&translation_line);
@@ -1925,13 +1940,13 @@ int main(int argc, char **argv)
             }
             result=1; goto finish;
         }
-        /* Created hidden; show_main_window() shows it once it is ready. */
+        /* Created hidden; show_main_window() shows it once it is ready. The
+         * panel sets the minimum; the stored view sets the size (below). */
         xxwidgets_app_set_create_hidden(g_app, 1);
         status = xxwidgets_widget_create(g_app, NULL, XXWIDGETS_WINDOW, gui_backend_app_title(),
-            (xxwidgets_rect){4, 3, MAIN_WINDOW_COLUMNS, MAIN_WINDOW_ROWS}, &g_window);
+            (xxwidgets_rect){4, 3, 116, 34}, &g_window);
         xxwidgets_app_set_create_hidden(g_app, 0);
         if (status != XXWIDGETS_OK || !create_controls()) { result = 1; goto finish; }
-        xxwidgets_window_set_minimum_size(g_window, MAIN_WINDOW_MIN_COLUMNS, MAIN_WINDOW_MIN_ROWS);
         if (xxwidgets_window_set_accept_file_drops(g_window, 1) != XXWIDGETS_OK) { result = 1; goto finish; }
         delegate = [[CDIEApplication alloc] init];
         [NSApp setDelegate:delegate];
@@ -1957,11 +1972,23 @@ int main(int argc, char **argv)
             if (options_status == XXWIDGETS_OK) options_status = apply_options(&values);
         }
         tags_status = refresh_panel_tags();
-        ready(); layout();
-        if (!settings_databases) xxwidgets_widget_set_text(g_status, CDIE_TR("The saved signature folders cannot be loaded; the default ones are active."));
-        else if (!settings_read) xxwidgets_widget_set_text(g_status, CDIE_TR("Saved options cannot be read; the defaults are used."));
-        /* As on Windows and Linux, the window opens with what did load and the
-         * status line says what did not; only a smoke run stops. */
+        {
+            /* View/Advanced, read once before the window shows (no event, as
+             * Qt's blocked signals); then Qt's 720 x 500 or the view's minimum. */
+            int width = 0, height = 0, advanced = gui_frontend_advanced();
+            if (xxwidgets_die_main_panel_set_advanced(g_main, advanced) != XXWIDGETS_OK ||
+                xxwidgets_die_main_panel_get_default_size(g_main, advanced, &width, &height) != XXWIDGETS_OK ||
+                xxwidgets_widget_set_frame(g_window, (xxwidgets_rect){0, 0, width, height}) != XXWIDGETS_OK ||
+                xxwidgets_die_main_panel_layout(g_main) != XXWIDGETS_OK) { result = 1; goto finish; }
+        }
+        sync_engine();
+        apply_loaded_state();
+        (void)xxwidgets_file_name_bar_set_recent_available(g_bar, history_enabled());
+        ready();
+        if (!settings_databases) queue_error(CDIE_TR("The saved signature folders cannot be loaded; the default ones are active."));
+        else if (!settings_read) queue_error(CDIE_TR("Saved options cannot be read; the defaults are used."));
+        /* As on Windows and Linux, the window opens with what did load and a
+         * message says what did not; only a smoke run stops. */
         if (options_status != XXWIDGETS_OK) report_ui_error("Apply saved options", options_status);
         if (tags_status != XXWIDGETS_OK) report_ui_error(CDIE_N_("Load signature tags"), tags_status);
         if (smoke && (options_status != XXWIDGETS_OK || tags_status != XXWIDGETS_OK)) { result = 1; goto finish; }
@@ -1973,24 +2000,24 @@ int main(int argc, char **argv)
         }
         show_main_window();
         xxwidgets_widget_focus(g_path);
+        show_errors();
         if (startup) open_path(startup);
         while (g_running) {
             @autoreleasepool {
                 status = xxwidgets_app_poll(g_app, 30);
                 if (status != XXWIDGETS_OK) { result = 1; break; }
                 if (!g_running) break;
-                if (g_layout) { g_layout = 0; layout(); }
                 receive_forwarded_file();
                 const char *message = gui_tree_process(g_window);
-                if (message) xxwidgets_widget_set_text(g_status, message);
-                int action = g_pending; g_pending = ACTION_NONE;
-                run_action(action);
+                if (message) queue_error(message);
+                run_pending();
             }
         }
 finish:
         finish_session();
         [g_type_path release]; g_type_path = nil;
-        if (g_panel) xxwidgets_scan_panel_destroy(g_panel);
+        if (g_main) xxwidgets_die_main_panel_destroy(g_main);
+        g_main = NULL; g_panel = NULL; g_bar = NULL; g_header = NULL; g_side = NULL; g_path = NULL;
         (cdie_translation_close(), xxwidgets_app_destroy(g_app));
         [delegate release];
         return result;

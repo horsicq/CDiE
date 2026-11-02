@@ -7,10 +7,13 @@
 #include "gui_frontend_preferences.h"
 #include "../gui/gui_about.h"
 #include "../gui/gui_settings.h"
+#include "gui_main_actions.h"
+#include "gui_shortcuts.h"
 #include "global.h"
 #include <xxwidgets/xxwidgets.h>
 #include <xxwidgets/xxwidgets_combobox.h>
 #include <xxwidgets/xxwidgets_scan_panel.h>
+#include <xxwidgets/xxwidgets_die_main_panel.h>
 #include <xxfclib/strings/xx_string.h>
 #include <limits.h>
 #include <stdio.h>
@@ -45,39 +48,33 @@
 #include "gui_tools.h"
 #include <gtk/gtk.h>
 
-enum { ACTION_NONE, ACTION_SCAN, ACTION_REPORT, ACTION_QUIT, ACTION_OPTIONS, ACTION_BROWSE,
-    ACTION_DATABASE_PATHS, ACTION_FONTS, ACTION_ABOUT, ACTION_RECENT, ACTION_UPDATE, ACTION_TOOL_BASE = 100 };
+/* The main window is xxwidgets_die_main_panel (DIE_LOOK.md): the file name
+ * row, File type and File size (Base address and Entry point in the Advanced
+ * view), the engine row, the result tree, the scan bar and the right column
+ * (Advanced, Update database, Shortcuts, Options, About, Exit). Its actions
+ * and the shortcuts run through gui_main_actions.c after polling returns, as
+ * on Windows and macOS. There is no status line (Qt has none): failures are
+ * message dialogs, the scan time is the elapsed field. */
+enum { SHORTCUT_BASE = 1000 }; /* SHORTCUT event values: SHORTCUT_BASE + gui_shortcut_action */
 typedef struct tui_app {
     xxwidgets_app *app;
-    xxwidgets_widget *window, *path, *status, *recent, *browse, *update, *options, *about, *tools[12];
+    xxwidgets_widget *window, *path; /* path: the file name row's box (borrowed) */
+    xxwidgets_die_main_panel *main_panel; /* not "main": the GTK probes #define main */
+    /* The main panel's parts, borrowed. */
+    xxwidgets_file_name_bar *bar;
+    xxwidgets_file_header *header;
     xxwidgets_scan_panel *panel;
-    char *type_path;
+    xxwidgets_side_panel *side;
+    gui_main_file_types types;   /* the loaded file's File type list */
+    char *loaded;                /* the loaded file (UTF-8), NULL when none */
+    char *message;               /* the last message shown (the probes read it) */
+    xxwidgets_die_action action; /* pending: a main panel action */
+    gui_shortcut_action shortcut;/* pending: a shortcut */
     gui_options_page_id options_page;
+    gui_update_result update_result; /* the last Update database */
     xx_settings *settings;
-    int running, pending, busy, needs_layout;
+    int running, busy, quiet;    /* quiet: messages go to stderr (smoke runs) */
 } tui_app;
-typedef struct file_type { int id; wchar_t *label; } file_type;
-typedef struct file_types { file_type *items; size_t count; int failed; } file_types;
-static void set_status(tui_app *ui, const char *message) { (void)xxwidgets_widget_set_text(ui->status, message); }
-/* Failures on the status line, as sentences (gui_error.h), never status
- * names: a window that did not open, as the result tree says it (gui_tree.c),
- * or "<what failed>: <reason>". what and window are translated. */
-static void report_window_error(tui_app *ui, const char *window, xxwidgets_status status)
-{
-    char message[512];
-    cdie_translation_snprintf(message, sizeof(message), CDIE_N_("Cannot open %s. %s"), window, gui_error_status_text(status));
-    set_status(ui, message);
-}
-static void report_error(tui_app *ui, const char *what, xxwidgets_status status)
-{
-    char message[512];
-    cdie_translation_snprintf(message, sizeof(message), CDIE_N_("%s: %s"), what, gui_error_status_text(status));
-    set_status(ui, message);
-}
-static xxwidgets_widget *control(tui_app *ui, xxwidgets_scan_panel_control_id id)
-{
-    return xxwidgets_scan_panel_control(ui->panel, id);
-}
 
 static char *copy_text(const char *text)
 {
@@ -87,63 +84,44 @@ static char *copy_text(const char *text)
     return copy;
 }
 
-static void collect_type(int id, const char *name, void *user)
+/* What went to the status line before (Q1): a message dialog over the main
+ * window, titled with the application's name; on stderr in smoke runs. */
+static void show_message(tui_app *ui, const char *text)
 {
-    file_types *types = user;
-    file_type *items;
-    wchar_t *label;
-    if (types->failed) return;
-    if (types->count >= SIZE_MAX / sizeof(*items) - 1) { types->failed = 1; return; }
-    label = xx_str_utf8_to_unicode(id == 0 ? CDIE_TR("Automatic") : name);
-    if (!label) { types->failed = 1; return; }
-    items = realloc(types->items, (types->count + 1) * sizeof(*items));
-    if (!items) { xx_str_wfree(label); types->failed = 1; return; }
-    types->items = items;
-    types->items[types->count++] = (file_type){id, label};
+    if (!text || !text[0]) return;
+    free(ui->message); ui->message = copy_text(text);
+    if (ui->quiet || !ui->window) { fprintf(stderr, "%s\n", text); return; }
+    (void)xxwidgets_text_dialog(ui->window, gui_backend_app_title(), text);
+}
+/* Failures as sentences (gui_error.h), never status names: a window that did
+ * not open, as the result tree says it (gui_tree.c), or "<what failed>:
+ * <reason>". what and window are translated. */
+static void report_window_error(tui_app *ui, const char *window, xxwidgets_status status)
+{
+    char message[512];
+    cdie_translation_snprintf(message, sizeof(message), CDIE_N_("Cannot open %s. %s"), window, gui_error_status_text(status));
+    show_message(ui, message);
+}
+static void report_error(tui_app *ui, const char *what, xxwidgets_status status)
+{
+    char message[512];
+    cdie_translation_snprintf(message, sizeof(message), CDIE_N_("%s: %s"), what, gui_error_status_text(status));
+    show_message(ui, message);
+}
+static xxwidgets_widget *control(tui_app *ui, xxwidgets_scan_panel_control_id id)
+{
+    return xxwidgets_scan_panel_control(ui->panel, id);
 }
 
-static int refresh_types(tui_app *ui, const char *path)
-{
-    file_types types = {0};
-    xx_var selected = {0};
-    xx_meta_string *records = NULL;
-    xx_str_w_s *labels = NULL;
-    xxwidgets_widget *combo = control(ui, XXWIDGETS_SCAN_PANEL_FILE_TYPE);
-    char *saved_path = NULL;
-    int ok = 0, index = 0;
-    if (ui->type_path && !strcmp(ui->type_path, path)) (void)xxwidgets_combobox_get_current(combo, &selected);
-    if (!gui_backend_file_types(path, collect_type, &types) || types.failed || !types.count) goto cleanup;
-    records = calloc(types.count, sizeof(*records));
-    labels = calloc(types.count, sizeof(*labels));
-    saved_path = copy_text(path);
-    if (!records || !labels || !saved_path) goto cleanup;
-    for (size_t i = 0; i < types.count; ++i) {
-        labels[i].data = types.items[i].label;
-        labels[i].length = wcslen(labels[i].data);
-        labels[i].capacity = labels[i].length + 1;
-        labels[i].is_view = true;
-        records[i].meta_string = &labels[i];
-        records[i].var.type = XX_VAR_TYPE_UINT64;
-        records[i].var.val.u64 = (uint64_t)types.items[i].id;
-        if (selected.type == XX_VAR_TYPE_UINT64 && selected.val.u64 == records[i].var.val.u64) index = (int)i;
-    }
-    ok = xxwidgets_combobox_set_records(combo, records, types.count) == XXWIDGETS_OK &&
-        xxwidgets_widget_set_value(combo, index) == XXWIDGETS_OK;
-    if (ok) { free(ui->type_path); ui->type_path = saved_path; saved_path = NULL; }
-cleanup:
-    for (size_t i = 0; i < types.count; ++i) xx_str_wfree(types.items[i].label);
-    free(types.items); free(records); free(labels); free(saved_path);
-    return ok;
-}
-
+/* The path box's text, with a leading ~ expanded; NULL on failure. */
 static char *read_path(tui_app *ui)
 {
     size_t size = 0;
     char *path;
-    if (xxwidgets_widget_get_text(ui->path, NULL, 0, &size) != XXWIDGETS_OK || !size) return NULL;
+    if (xxwidgets_file_name_bar_get_path(ui->bar, NULL, 0, &size) != XXWIDGETS_OK || !size) return NULL;
     path = malloc(size);
     if (!path) return NULL;
-    if (xxwidgets_widget_get_text(ui->path, path, size, NULL) != XXWIDGETS_OK) { free(path); return NULL; }
+    if (xxwidgets_file_name_bar_get_path(ui->bar, path, size, NULL) != XXWIDGETS_OK) { free(path); return NULL; }
     if (path[0] == '~' && (path[1] == '/' || !path[1])) {
         const char *home = getenv("HOME");
         if (home) {
@@ -180,51 +158,105 @@ static char *read_tags(const xxwidgets_scan_panel *panel, int include)
     return tags;
 }
 
-static int scan(tui_app *ui, int smoke)
+/* No file: the file's controls disabled (DIE_LOOK.md 1.5), the path kept. */
+static void unload(tui_app *ui)
 {
-    char message[192], *type = NULL, *path = read_path(ui);
-    char *include_tags = NULL, *exclude_tags = NULL;
-    xx_var selected = {0};
-    unsigned int flags = 0, databases = 0;
-    int cancelled = 0, ok = 0;
-    if (!path) { set_status(ui, CDIE_TR("Cannot read the file path (out of memory or widget error).")); return 0; }
-    if (!path[0]) { set_status(ui, CDIE_TR("Enter a file path, then press Enter or F5.")); (void)xxwidgets_widget_focus(ui->path); goto cleanup; }
-    if (!gui_backend_signature_count()) { set_status(ui, CDIE_TR("No signatures loaded. Choose the main folder in Options > Scan (F3).")); goto cleanup; }
-    if (xxwidgets_scan_panel_clear(ui->panel) != XXWIDGETS_OK) {
-        set_status(ui, CDIE_TR("Cannot clear the previous scan results.")); goto cleanup;
+    free(ui->loaded); ui->loaded = NULL;
+    gui_main_file_types_clear(&ui->types);
+    (void)xxwidgets_file_header_clear(ui->header);
+    (void)xxwidgets_scan_panel_clear(ui->panel);
+    (void)xxwidgets_die_main_panel_set_loaded(ui->main_panel, 0);
+}
+
+static int scan(tui_app *ui, int type_id, int smoke);
+/* Opens path (UTF-8): its File type list, File size, Base address and Entry
+ * point, the path in the file name row, the history; then a scan when
+ * scan_after. A file that cannot be read unloads the previous one and says
+ * why. Returns 1 when the file was opened. */
+static int open_file(tui_app *ui, const char *path, int scan_after)
+{
+    xx_meta_string *records = NULL;
+    gui_backend_facts facts;
+    xxwidgets_status status;
+    char *copy;
+    int same;
+    if (!path || !path[0]) {
+        show_message(ui, CDIE_TR("Enter a file path, then press Enter or F5."));
+        (void)xxwidgets_widget_focus(ui->path);
+        return 0;
     }
-    if (!refresh_types(ui, path)) {
+    same = ui->loaded && !strcmp(ui->loaded, path);
+    copy = copy_text(path);
+    if (!copy) { show_message(ui, CDIE_TR("Cannot read the file path (out of memory or widget error).")); return 0; }
+    if (!gui_main_file_types_load(&ui->types, path, same)) {
         /* One sentence on every platform, with the file system's reason (gui_error.h). */
         char reason[512];
-        (void)xxwidgets_widget_set_enabled(control(ui, XXWIDGETS_SCAN_PANEL_FILE_TYPE), 0);
+        free(copy);
+        unload(ui);
         gui_error_open_status(reason, sizeof(reason), path);
-        set_status(ui, reason); goto cleanup;
+        show_message(ui, reason);
+        return 0;
     }
-    if (xxwidgets_combobox_get_current(control(ui, XXWIDGETS_SCAN_PANEL_FILE_TYPE), &selected) != XXWIDGETS_OK ||
-        selected.type != XX_VAR_TYPE_UINT64 || selected.val.u64 > INT_MAX ||
-        xxwidgets_scan_panel_get_flags(ui->panel, &flags) != XXWIDGETS_OK ||
+    status = gui_main_file_types_records(&ui->types, &records);
+    if (status == XXWIDGETS_OK) status = xxwidgets_file_header_set_file_types(ui->header, records, ui->types.count, ui->types.selected);
+    gui_main_file_types_free_records(records, ui->types.count);
+    memset(&facts, 0, sizeof(facts));
+    if (status == XXWIDGETS_OK && gui_backend_file_facts(path, 0, &facts)) {
+        status = xxwidgets_file_header_set_file_size(ui->header, facts.file_size);
+        /* The Advanced view's values; formats without them keep the fields empty. */
+        if (facts.base_bits) (void)xxwidgets_file_header_set_address(ui->header, XXWIDGETS_FILE_HEADER_BASE_ADDRESS, facts.base_address, facts.base_bits);
+        if (facts.entry_bits) (void)xxwidgets_file_header_set_address(ui->header, XXWIDGETS_FILE_HEADER_ENTRY_POINT, facts.entry_point, facts.entry_bits);
+    }
+    gui_backend_facts_free(&facts);
+    if (status == XXWIDGETS_OK) status = xxwidgets_file_name_bar_set_loaded_path(ui->bar, path);
+    if (status != XXWIDGETS_OK) { free(copy); unload(ui); report_error(ui, CDIE_TR("Open file"), status); return 0; }
+    free(ui->loaded); ui->loaded = copy;
+    if (!same) { (void)xxwidgets_scan_panel_clear(ui->panel); gui_tree_reset(); }
+    (void)xxwidgets_die_main_panel_set_loaded(ui->main_panel, 1);
+    gui_frontend_remember_file(path);
+    if (scan_after) (void)scan(ui, 0, 0);
+    return 1;
+}
+
+/* Scans the loaded file as type_id (0: automatic). Text typed into the path
+ * box since is opened first, which keeps F5 working on a typed path. */
+static int scan(tui_app *ui, int type_id, int smoke)
+{
+    char *type = NULL, *path = read_path(ui);
+    char *include_tags = NULL, *exclude_tags = NULL;
+    unsigned int flags = 0, databases = 0;
+    int cancelled = 0, ok = 0;
+    if (!path) { show_message(ui, CDIE_TR("Cannot read the file path (out of memory or widget error).")); return 0; }
+    if (!ui->loaded || strcmp(path, ui->loaded)) {
+        if (!open_file(ui, path, 0)) goto cleanup;
+        type_id = 0;
+    }
+    if (!gui_backend_signature_count()) { show_message(ui, CDIE_TR("No signatures loaded. Choose the main folder in Options > Scan (F3).")); goto cleanup; }
+    if (xxwidgets_scan_panel_clear(ui->panel) != XXWIDGETS_OK) {
+        show_message(ui, CDIE_TR("Cannot clear the previous scan results.")); goto cleanup;
+    }
+    if (xxwidgets_scan_panel_get_flags(ui->panel, &flags) != XXWIDGETS_OK ||
         xxwidgets_scan_panel_get_databases(ui->panel, &databases) != XXWIDGETS_OK) {
-        set_status(ui, CDIE_TR("Cannot read the selected scan options.")); goto cleanup;
+        show_message(ui, CDIE_TR("Cannot read the selected scan options.")); goto cleanup;
     }
     include_tags = read_tags(ui->panel, 1);
     exclude_tags = read_tags(ui->panel, 0);
     if (!include_tags || !exclude_tags || !gui_backend_set_tag_filters(include_tags, exclude_tags)) {
-        set_status(ui, CDIE_TR("Cannot apply the selected tag filters.")); goto cleanup;
+        show_message(ui, CDIE_TR("Cannot apply the selected tag filters.")); goto cleanup;
     }
     gui_backend_set_flags(flags & XXWIDGETS_SCAN_DEEP, flags & XXWIDGETS_SCAN_HEURISTIC,
         flags & XXWIDGETS_SCAN_VERBOSE, flags & XXWIDGETS_SCAN_AGGRESSIVE,
         flags & XXWIDGETS_SCAN_HIDE_UNKNOWN, flags & XXWIDGETS_SCAN_FORMAT);
     gui_backend_set_databases((databases & XXWIDGETS_SCAN_DATABASE_CUSTOM) != 0);
-    set_status(ui, CDIE_TR("Scanning..."));
     ui->busy = 1;
-    ok = gui_tree_scan(smoke ? NULL : ui->window, ui->panel, path, (int)selected.val.u64, &type, &cancelled);
+    ok = gui_tree_scan(smoke ? NULL : ui->window, ui->panel, ui->loaded, type_id, &type, &cancelled);
     ui->busy = 0;
-    if (ok) cdie_translation_snprintf(message, sizeof(message), CDIE_N_("Scan complete (%s). %zu detections."), type ? type : "Unknown", xxwidgets_scan_panel_count(ui->panel));
-    else cdie_translation_snprintf(message, sizeof(message), CDIE_N_("%s"), cancelled ? CDIE_TR("Scan cancelled.") : CDIE_TR("Scan failed."));
-    set_status(ui, message);
+    /* The elapsed field shows the time; only a failure is reported. */
+    if (!ok && !cancelled) show_message(ui, CDIE_TR("Scan failed."));
     /* The focus stays where it was, as on Windows. */
-    if (ok) gui_frontend_remember_file(path);
-    (void)xxwidgets_widget_set_enabled(control(ui, XXWIDGETS_SCAN_PANEL_FILE_TYPE), 1);
+    if (ok) gui_frontend_remember_file(ui->loaded);
+    /* Report follows the new results; the tags keep their own rule. */
+    (void)xxwidgets_die_main_panel_set_loaded(ui->main_panel, 1);
 cleanup:
     gui_backend_free(type);
     free(include_tags);
@@ -233,127 +265,94 @@ cleanup:
     return ok;
 }
 
-
-/* The button labels, in gui_tools order (gui_tool_run opens them). */
-static const char *tool_names[] = {CDIE_N_("File Information"), CDIE_N_("Entropy"), CDIE_N_("Hash"), CDIE_N_("Strings"), CDIE_N_("Hex View"), CDIE_N_("Disasm"), CDIE_N_("Memory Map"), CDIE_N_("Imports"), CDIE_N_("Exports"), CDIE_N_("Resources"), CDIE_N_("Symbols"), CDIE_N_("Extractor")};
-
-static void layout(tui_app *ui)
+/* The scan engine combo shows Scan/Engine (Options > Scan may change it). */
+static void show_engine(tui_app *ui)
 {
-    xxwidgets_rect bounds;
-    if (xxwidgets_widget_get_rect(ui->window, &bounds) != XXWIDGETS_OK) return;
-    int w = bounds.width, h = bounds.height, panel = h - 14 < 14 ? 14 : h - 14;
-    xxwidgets_rect log_rect, report_rect;
-    /* As on Windows: Recent files (a down arrow), the path, then "...". */
-    (void)xxwidgets_widget_set_rect(ui->recent, (xxwidgets_rect){2, 1, 6, 2});
-    (void)xxwidgets_widget_set_rect(ui->path, (xxwidgets_rect){9, 1, w - 18, 2});
-    (void)xxwidgets_widget_set_rect(ui->browse, (xxwidgets_rect){w - 8, 1, 6, 2});
-    /* The panel keeps its minimum height (14) in a short window. */
-    (void)xxwidgets_scan_panel_set_rect(ui->panel, (xxwidgets_rect){2, 4, w - 4, panel});
-    /* Update database in the panel's lower button row, after Log and short of
-     * the report button, as on Windows. */
-    if (xxwidgets_widget_get_rect(control(ui, XXWIDGETS_SCAN_PANEL_LOG), &log_rect) == XXWIDGETS_OK &&
-        xxwidgets_widget_get_rect(control(ui, XXWIDGETS_SCAN_PANEL_REPORT), &report_rect) == XXWIDGETS_OK) {
-        int x = log_rect.x + log_rect.width + 1, room = report_rect.x - 1 - x;
-        if (room > 0) (void)xxwidgets_widget_set_rect(ui->update, (xxwidgets_rect){x, log_rect.y, room < 20 ? room : 20, 2});
-    }
-    /* Under the panel, as on Windows: the status line (two rows, for long
-     * messages), then Options, About, Imports ... Extractor, then File
-     * Information ... Memory Map, in two rows of seven. */
-    (void)xxwidgets_widget_set_rect(ui->status, (xxwidgets_rect){2, h - 9, w - 4, 2});
-    for (int i = 0; i < 14; ++i) {
-        xxwidgets_widget *button = i == 0 ? ui->options : i == 1 ? ui->about : i < 7 ? ui->tools[i + 5] : ui->tools[i - 7];
-        int row = i / 7, col = i % 7;
-        int x = 2 + col * (w - 4) / 7;
-        int end = 2 + (col + 1) * (w - 4) / 7;
-        (void)xxwidgets_widget_set_rect(button, (xxwidgets_rect){x, h - 6 + row * 3, end - x - 1, 2});
-    }
+    gui_backend_scan_preferences scan_preferences;
+    xxwidgets_widget *engine = control(ui, XXWIDGETS_SCAN_PANEL_ENGINE);
+    if (!engine || !gui_backend_get_scan_preferences(&scan_preferences)) return;
+    for (size_t i = 0; gui_backend_engine_id(i); ++i)
+        if (!strcmp(gui_backend_engine_id(i), scan_preferences.engine)) { (void)xxwidgets_widget_set_value(engine, (int)i); break; }
 }
+
+/* The size Qt opens with (720 x 500 at 96 DPI), or the view's minimum. */
+static void default_size(tui_app *ui)
+{
+    int width = 0, height = 0;
+    if (xxwidgets_die_main_panel_get_default_size(ui->main_panel, xxwidgets_die_main_panel_get_advanced(ui->main_panel), &width, &height) == XXWIDGETS_OK)
+        (void)xxwidgets_widget_set_frame(ui->window, (xxwidgets_rect){0, 0, width, height});
+    (void)xxwidgets_die_main_panel_layout(ui->main_panel);
+}
+/* View/Advanced as stored (no event, no write), at its default size. */
+static void apply_stored_view(tui_app *ui)
+{
+    (void)xxwidgets_die_main_panel_set_advanced(ui->main_panel, gui_frontend_advanced());
+    default_size(ui);
+}
+
 static void on_event(xxwidgets_app *app, const xxwidgets_event *event, void *user)
 {
-    tui_app *ui = user; (void)app;
-    if (event->type == XXWIDGETS_EVENT_RESIZE && event->widget == ui->window) { ui->needs_layout = 1; return; }
+    tui_app *ui = user;
+    xxwidgets_die_action action;
+    (void)app;
+    if (!ui->main_panel) return;
+    /* The panel lays itself out again, also under a modal scan. */
+    if (event->type == XXWIDGETS_EVENT_RESIZE && event->widget == ui->window) { (void)xxwidgets_die_main_panel_handle_event(ui->main_panel, event, &action); return; }
     if (ui->busy) return;
     if (event->type == XXWIDGETS_EVENT_CLOSE && event->widget == ui->window) ui->running = 0;
     else if (event->type == XXWIDGETS_EVENT_DROP_FILES && event->widget == ui->window && event->path_count) {
-        (void)xxwidgets_widget_set_text(ui->path, event->paths[0]);
-        gui_frontend_remember_file(event->paths[0]);
-        ui->pending = gui_frontend_scan_after_open() ? ACTION_SCAN : ACTION_NONE;
+        /* Opened after polling returns, as a typed path and Enter. */
+        (void)xxwidgets_file_name_bar_set_path(ui->bar, event->paths[0]);
+        memset(&ui->action, 0, sizeof(ui->action));
+        ui->action.id = XXWIDGETS_DIE_ACTION_OPEN_PATH;
     } else if (event->type == XXWIDGETS_EVENT_SHORTCUT) {
-        if (event->value == ACTION_QUIT) ui->running = 0; else ui->pending = event->value;
-    } else if (event->type == XXWIDGETS_EVENT_ACTIVATE && event->widget == ui->path) ui->pending = ACTION_SCAN;
-    else if (event->type == XXWIDGETS_EVENT_CHANGE && event->widget == ui->path) {
-        /* As on Windows: the results stay; the file types describe the last
-         * scanned file, so they wait for the next scan. */
-        (void)xxwidgets_widget_set_enabled(control(ui, XXWIDGETS_SCAN_PANEL_FILE_TYPE), 0);
-    } else if (event->type == XXWIDGETS_EVENT_SELECT && event->widget == control(ui, XXWIDGETS_SCAN_PANEL_FILE_TYPE)) {
-        size_t size = 0;
-        if (xxwidgets_widget_get_text(ui->path, NULL, 0, &size) == XXWIDGETS_OK && size > 1) ui->pending = ACTION_SCAN;
+        gui_shortcut_action shortcut = gui_shortcuts_action(event->value, SHORTCUT_BASE);
+        if (shortcut == GUI_SHORTCUT_EXIT) ui->running = 0;
+        else if (shortcut != GUI_SHORTCUT_NONE) ui->shortcut = shortcut;
     } else if (gui_tree_event(ui->panel, event)) {
-        /* S or ? on a result row: shown after polling returns. */
-    } else if (event->type == XXWIDGETS_EVENT_CLICK) {
-        if (event->widget == ui->browse) ui->pending = ACTION_BROWSE;
-        else if (event->widget == ui->recent) ui->pending = ACTION_RECENT;
-        else if (event->widget == ui->update) ui->pending = ACTION_UPDATE;
-        else if (event->widget == ui->options) ui->pending = ACTION_OPTIONS;
-        else if (event->widget == ui->about) ui->pending = ACTION_ABOUT;
-        else if (event->widget == control(ui, XXWIDGETS_SCAN_PANEL_SCAN)) ui->pending = ACTION_SCAN;
-        else if (event->widget == control(ui, XXWIDGETS_SCAN_PANEL_REPORT)) ui->pending = ACTION_REPORT;
-        else for (int i = 0; i < 12; ++i) if (event->widget == ui->tools[i]) ui->pending = ACTION_TOOL_BASE + i;
+        /* Signatures, Directory, Log, and S or ? on a result row: shown
+         * by gui_tree_process after polling returns. */
+    } else if (xxwidgets_die_main_panel_handle_event(ui->main_panel, event, &action)) {
+        if (action.id != XXWIDGETS_DIE_ACTION_NONE && action.id != XXWIDGETS_DIE_ACTION_PATH_EDITED) ui->action = action;
     }
 }
-/* Ctrl+U does what its button does, so nothing without an updater, as on
- * Windows. Report and Recent files say why on the status line (run_action). */
-static int shortcut_allowed(xxwidgets_widget *window, int action, void *user)
-{
-    (void)window; (void)user;
-    return action != ACTION_UPDATE || gui_update_supported();
-}
+
 static int create_controls(tui_app *ui, const char *path)
 {
-    /* The Windows keys, the tools in tool_names order; F3 (also Ctrl+Shift+D)
-     * and F4 open Options on Scan and Fonts, Ctrl+Q quits. */
-    static const xxwidgets_shortcut shortcuts[] = {{"F5", ACTION_SCAN}, {"Ctrl+R", ACTION_RECENT}, {"Ctrl+Shift+R", ACTION_REPORT}, {"Ctrl+Q", ACTION_QUIT}, {"Ctrl+O", ACTION_BROWSE}, {"F1", ACTION_ABOUT}, {"F2", ACTION_OPTIONS}, {"Ctrl+Shift+D", ACTION_DATABASE_PATHS}, {"F3", ACTION_DATABASE_PATHS}, {"F4", ACTION_FONTS}, {"Ctrl+U", ACTION_UPDATE},
-        {"Ctrl+I", ACTION_TOOL_BASE + 0}, {"Ctrl+E", ACTION_TOOL_BASE + 1}, {"Ctrl+H", ACTION_TOOL_BASE + 2}, {"Ctrl+Shift+S", ACTION_TOOL_BASE + 3}, {"Ctrl+Shift+X", ACTION_TOOL_BASE + 4}, {"Ctrl+Shift+A", ACTION_TOOL_BASE + 5},
-        {"Ctrl+M", ACTION_TOOL_BASE + 6}, {"Ctrl+Shift+I", ACTION_TOOL_BASE + 7}, {"Ctrl+Shift+E", ACTION_TOOL_BASE + 8}, {"Ctrl+Shift+U", ACTION_TOOL_BASE + 9}, {"Ctrl+Shift+Y", ACTION_TOOL_BASE + 10}, {"Ctrl+Shift+T", ACTION_TOOL_BASE + 11}};
+    xxwidgets_shortcut shortcuts[GUI_SHORTCUT_COUNT * 2];
+    char storage[512];
+    unsigned int flags = XXWIDGETS_DIE_MAIN_PANEL_SHOW_UPDATE | XXWIDGETS_DIE_MAIN_PANEL_TAG_FILTERS;
+    size_t count = gui_shortcuts_bindings(GUI_SHORTCUTS_LINUX, SHORTCUT_BASE, gui_update_supported(), shortcuts,
+        sizeof(shortcuts) / sizeof(shortcuts[0]), storage, sizeof(storage));
+    char *tags;
+    xxwidgets_status s;
+    if (!count) return 0;
+    /* The panel sizes the window (its minimum, then Qt's default size). */
     if (xxwidgets_widget_create(ui->app, NULL, XXWIDGETS_WINDOW, gui_backend_app_title(), (xxwidgets_rect){4, 3, 132, 34}, &ui->window) != XXWIDGETS_OK ||
-        xxwidgets_widget_create(ui->app, ui->window, XXWIDGETS_EDIT, path ? path : "", (xxwidgets_rect){9, 1, 114, 2}, &ui->path) != XXWIDGETS_OK ||
-        /* A down arrow, as a history list, as on Windows; ">" belongs to the report. */
-        xxwidgets_widget_create(ui->app, ui->window, XXWIDGETS_BUTTON, "\xE2\x96\xBC", (xxwidgets_rect){2, 1, 6, 2}, &ui->recent) != XXWIDGETS_OK ||
-        xxwidgets_widget_create(ui->app, ui->window, XXWIDGETS_BUTTON, CDIE_TR("..."), (xxwidgets_rect){124, 1, 6, 2}, &ui->browse) != XXWIDGETS_OK ||
-        xxwidgets_scan_panel_create(ui->window, (xxwidgets_rect){2, 4, 128, 20}, &ui->panel) != XXWIDGETS_OK ||
-        xxwidgets_widget_create(ui->app, ui->window, XXWIDGETS_BUTTON, CDIE_TR("Update database"), (xxwidgets_rect){22, 22, 20, 2}, &ui->update) != XXWIDGETS_OK ||
-        xxwidgets_widget_create(ui->app, ui->window, XXWIDGETS_LABEL, "", (xxwidgets_rect){2, 25, 128, 2}, &ui->status) != XXWIDGETS_OK ||
-        xxwidgets_widget_create(ui->app, ui->window, XXWIDGETS_BUTTON, CDIE_TR("Options"), (xxwidgets_rect){2, 28, 18, 2}, &ui->options) != XXWIDGETS_OK ||
-        xxwidgets_widget_create(ui->app, ui->window, XXWIDGETS_BUTTON, CDIE_TR("About"), (xxwidgets_rect){2, 28, 18, 2}, &ui->about) != XXWIDGETS_OK) return 0;
-    for (int i = 0; i < 12; ++i)
-        if (xxwidgets_widget_create(ui->app, ui->window, XXWIDGETS_BUTTON, CDIE_TR(tool_names[i]), (xxwidgets_rect){2, 28, 18, 2}, &ui->tools[i]) != XXWIDGETS_OK) return 0;
-    char *tags = gui_backend_used_tags();
+        xxwidgets_die_main_panel_create(ui->window, flags, &ui->main_panel) != XXWIDGETS_OK) return 0;
+    ui->bar = xxwidgets_die_main_panel_file_name_bar(ui->main_panel);
+    ui->header = xxwidgets_die_main_panel_file_header(ui->main_panel);
+    ui->panel = xxwidgets_die_main_panel_scan_panel(ui->main_panel);
+    ui->side = xxwidgets_die_main_panel_side_panel(ui->main_panel);
+    ui->path = xxwidgets_file_name_bar_control(ui->bar, XXWIDGETS_FILE_NAME_BAR_PATH);
+    if (!ui->bar || !ui->header || !ui->panel || !ui->side || !ui->path) return 0;
+    tags = gui_backend_used_tags();
     if (!tags) return 0;
-    xxwidgets_status s = xxwidgets_scan_panel_set_available_tags(ui->panel, tags); gui_backend_free(tags);
-    /* Windows' defaults: Deep, Heuristic and Verbose; the file types are
-     * enabled from the start (Automatic). */
-    if (s != XXWIDGETS_OK || xxwidgets_window_set_shortcuts(ui->window, shortcuts, sizeof(shortcuts)/sizeof(shortcuts[0])) != XXWIDGETS_OK ||
-        xxwidgets_window_set_shortcut_filter(ui->window, shortcut_allowed, NULL) != XXWIDGETS_OK ||
+    s = xxwidgets_scan_panel_set_available_tags(ui->panel, tags); gui_backend_free(tags);
+    /* Windows' defaults: Deep, Heuristic and Verbose. */
+    if (s != XXWIDGETS_OK || xxwidgets_window_set_shortcuts(ui->window, shortcuts, count) != XXWIDGETS_OK ||
         xxwidgets_scan_panel_set_flags(ui->panel, XXWIDGETS_SCAN_DEEP | XXWIDGETS_SCAN_HEURISTIC | XXWIDGETS_SCAN_VERBOSE) != XXWIDGETS_OK ||
         xxwidgets_scan_panel_set_databases(ui->panel, XXWIDGETS_SCAN_DATABASE_CUSTOM) != XXWIDGETS_OK ||
-        xxwidgets_widget_set_enabled(ui->update, gui_update_supported()) != XXWIDGETS_OK ||
-        xxwidgets_window_set_minimum_size(ui->window, 120, 31) != XXWIDGETS_OK ||
+        /* Update database is shown (Q2) and works only with an updater. */
+        xxwidgets_side_panel_set_item_enabled(ui->side, XXWIDGETS_DIE_SIDE_UPDATE, gui_update_supported()) != XXWIDGETS_OK ||
         xxwidgets_window_set_accept_file_drops(ui->window, 1) != XXWIDGETS_OK) return 0;
-    /* The tooltips Windows has; the backend may have none (no-op). */
-    (void)xxwidgets_widget_set_tooltip(ui->recent, CDIE_TR("Recent files (Ctrl+R)"));
-    (void)xxwidgets_widget_set_tooltip(control(ui, XXWIDGETS_SCAN_PANEL_REPORT), CDIE_TR("Scan report (Ctrl+Shift+R)"));
-    {
-        /* Windows names the path box after its "File name" label; here it
-         * has no label, so the name is a placeholder and for screen readers. */
-        GtkWidget *entry = GTK_WIDGET(xxwidgets_widget_native_handle(ui->path));
-        if (GTK_IS_ENTRY(entry)) {
-            gtk_entry_set_placeholder_text(GTK_ENTRY(entry), CDIE_TR("File name"));
-            atk_object_set_name(gtk_widget_get_accessible(entry), CDIE_TR("File name"));
-        }
-    }
-    layout(ui); (void)xxwidgets_widget_focus(ui->path);
-    set_status(ui, gui_backend_signature_count() ? CDIE_TR("Choose a file, drop one here, or enter its path.") :
-        CDIE_TR("No signatures loaded. Choose the main folder in Options > Scan (F3).")); return 1;
+    /* The tags enable their combos: no file is loaded yet. */
+    if (xxwidgets_die_main_panel_set_loaded(ui->main_panel, 0) != XXWIDGETS_OK) return 0;
+    if (path && xxwidgets_file_name_bar_set_path(ui->bar, path) != XXWIDGETS_OK) return 0;
+    show_engine(ui);
+    apply_stored_view(ui);
+    (void)xxwidgets_widget_focus(ui->path);
+    return 1;
 }
 /* Starts a chooser in a UTF-8 folder (relative ones from the working
  * directory); 0 when there is none or GTK cannot open it. */
@@ -427,72 +426,56 @@ static xxwidgets_status apply_options(tui_app *ui, const gui_options_values *val
     if (status == XXWIDGETS_OK) status = xxwidgets_app_get_font_options(ui->app, &fonts);
     if (status == XXWIDGETS_OK && memcmp(&values->fonts, &fonts, sizeof(fonts))) {
         status = xxwidgets_app_set_font_options(ui->app, &values->fonts);
-        if (status == XXWIDGETS_OK) layout(ui);
+        /* New text sizes: the minimum and the layout follow. */
+        if (status == XXWIDGETS_OK) status = xxwidgets_die_main_panel_retranslate(ui->main_panel);
     }
     if (status == XXWIDGETS_OK) status = gui_frontend_apply_preferences(ui->app, values);
     if (status == XXWIDGETS_OK) gtk_window_set_keep_above(GTK_WINDOW(xxwidgets_widget_native_handle(ui->window)), values->appearance.stay_on_top != 0);
     /* As on Windows, Recent files is disabled while no history is kept. */
-    if (status == XXWIDGETS_OK) status = xxwidgets_widget_set_enabled(ui->recent, values->file.save_recent_files != 0);
+    if (status == XXWIDGETS_OK) status = xxwidgets_file_name_bar_set_recent_available(ui->bar, values->file.save_recent_files != 0);
+    if (status == XXWIDGETS_OK) show_engine(ui);
     return status;
+}
+
+/* Saves the settings that differ from the store (View/Advanced, Scan/Engine). */
+static void save_settings(tui_app *ui)
+{
+    gui_options_values values;
+    if (!ui->settings || current_options(ui, &values) != XXWIDGETS_OK) return;
+    if (!gui_settings_save(ui->settings, &values, ui->options_page))
+        show_message(ui, CDIE_TR("Options applied, but they could not be saved for the next start."));
 }
 
 static int reload_tags(tui_app *ui)
 {
-    char message[160];
     char *tags = gui_backend_used_tags();
     xxwidgets_status status;
-    /* File types of a scanned file wait for the next scan; Automatic alone
-     * (nothing scanned yet, as at startup) stays enabled. */
-    int scanned = ui->type_path != NULL;
-    free(ui->type_path); ui->type_path = NULL;
+    /* The old results came from the old database. */
     status = xxwidgets_scan_panel_clear(ui->panel);
-    if (status == XXWIDGETS_OK && scanned) status = xxwidgets_widget_set_enabled(control(ui, XXWIDGETS_SCAN_PANEL_FILE_TYPE), 0);
+    gui_tree_reset();
     if (status == XXWIDGETS_OK) status = tags ? xxwidgets_scan_panel_set_available_tags(ui->panel, tags) : XXWIDGETS_OUT_OF_MEMORY;
     gui_backend_free(tags);
-    cdie_translation_snprintf(message, sizeof(message), CDIE_N_("Database reloaded: %d signatures. Press F5 to scan."), gui_backend_signature_count());
-    if (status == XXWIDGETS_OK) set_status(ui, message);
-    else report_error(ui, CDIE_TR("Refresh signature tags"), status);
+    /* The tags enable their combos even with no file loaded. */
+    (void)xxwidgets_die_main_panel_set_loaded(ui->main_panel, ui->loaded != NULL);
+    if (status != XXWIDGETS_OK) report_error(ui, CDIE_TR("Refresh signature tags"), status);
     return status == XXWIDGETS_OK;
 }
 
 /* Update database: download and install from the stored update URL, reload
- * the tags after a reload, and report on the status bar. A NULL owner runs
- * without the progress dialog (--smoke-update). */
-static gui_update_result update_database(tui_app *ui, xxwidgets_widget *owner)
+ * the tags after a reload. gui_update_run shows the result over owner; a NULL
+ * owner runs without dialogs (--smoke-update). */
+static gui_update_result update_database(tui_app *ui, xxwidgets_widget *owner, char *message, size_t size)
 {
-    char message[512];
     gui_options_values preferences;
     gui_update_result result;
     uint64_t generation = gui_backend_database_generation();
     gui_preferences_get(&preferences);
     ui->busy = 1;
-    result = gui_update_run(owner, preferences.databases.main_update_url, message, sizeof(message));
+    result = gui_update_run(owner, preferences.databases.main_update_url, message, size);
     ui->busy = 0;
-    /* Installed, or switched to an up-to-date per-user copy. A tag reload
-     * failure keeps its own message. */
-    if (gui_backend_database_generation() == generation || reload_tags(ui)) set_status(ui, message);
+    /* Installed, or switched to an up-to-date per-user copy. */
+    if (gui_backend_database_generation() != generation) (void)reload_tags(ui);
     return result;
-}
-
-/* --smoke-update: one click on Update database; exits 0 when the result is the expected one. */
-static int smoke_update(tui_app *ui, const char *expected)
-{
-    xxwidgets_event click = {0};
-    char text[640] = "";
-    gui_update_result result;
-    int ok;
-    set_status(ui, "");
-    click.type = XXWIDGETS_EVENT_CLICK; click.widget = ui->update;
-    ui->pending = ACTION_NONE;
-    on_event(ui->app, &click, ui);
-    if (ui->pending != ACTION_UPDATE) { fprintf(stderr, "smoke-update: the button did not request an update\n"); return 1; }
-    ui->pending = ACTION_NONE;
-    result = update_database(ui, NULL);
-    if (xxwidgets_widget_get_text(ui->status, text, sizeof(text), NULL) != XXWIDGETS_OK) text[0] = 0;
-    fprintf(stderr, "smoke-update: %s %s\n", gui_update_result_name(result), text);
-    ok = !strcmp(gui_update_result_name(result), expected);
-    if (ok && result == GUI_UPDATE_INSTALLED) ok = gui_backend_signature_count() > 0 && text[0];
-    return ok ? 0 : 1;
 }
 
 /* The shared Options window; Linux has no Explorer context menu page. */
@@ -510,8 +493,7 @@ static void options_dialog(tui_app *ui, gui_options_page_id page)
     status = apply_options(ui, &values);
     if (status != XXWIDGETS_OK) report_error(ui, CDIE_TR("Apply options"), status);
     else if (!gui_settings_save(ui->settings, &values, ui->options_page))
-        set_status(ui, CDIE_TR("Options applied, but they could not be saved for the next start."));
-    else if (!reloaded) set_status(ui, CDIE_TR("Options applied."));
+        show_message(ui, CDIE_TR("Options applied, but they could not be saved for the next start."));
 }
 static void about_dialog(tui_app *ui)
 {
@@ -540,7 +522,8 @@ static int chooser_start_file(GtkWidget *dialog, const char *path)
 static void browse(tui_app *ui)
 {
     GtkWidget *dialog = gtk_file_chooser_dialog_new(CDIE_TR("Select a file to scan"), GTK_WINDOW(xxwidgets_widget_native_handle(ui->window)), GTK_FILE_CHOOSER_ACTION_OPEN, CDIE_TR("Cancel"), GTK_RESPONSE_CANCEL, CDIE_TR("Open"), GTK_RESPONSE_ACCEPT, NULL);
-    char *current = read_path(ui);
+    char *current = read_path(ui), *chosen = NULL;
+    int invalid = 0;
     /* As on Windows: the file in the path box, else the last directory when
      * it is kept. */
     if (!chooser_start_file(dialog, current)) (void)chooser_start_last(dialog);
@@ -549,12 +532,18 @@ static void browse(tui_app *ui)
         gchar *filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
         /* The path box and the scan take UTF-8, as the database Browse does. */
         gchar *path = filename ? g_filename_to_utf8(filename, -1, NULL, NULL, NULL) : NULL;
-        if (path) { (void)xxwidgets_widget_set_text(ui->path, path); gui_frontend_remember_file(path);
-            ui->pending = gui_frontend_scan_after_open() ? ACTION_SCAN : ACTION_NONE; }
-        else if (filename) set_status(ui, CDIE_TR("Cannot open this file: its name is not valid text (UTF-8)."));
+        if (path) chosen = copy_text(path);
+        else if (filename) invalid = 1;
         g_free(path); g_free(filename);
     }
     gtk_widget_destroy(dialog);
+    /* Opened once the chooser is gone. */
+    if (invalid) show_message(ui, CDIE_TR("Cannot open this file: its name is not valid text (UTF-8)."));
+    if (chosen) {
+        (void)xxwidgets_file_name_bar_set_path(ui->bar, chosen);
+        (void)open_file(ui, chosen, gui_frontend_scan_after_open());
+        free(chosen);
+    }
 }
 static void recent_dialog(tui_app *ui)
 {
@@ -563,51 +552,131 @@ static void recent_dialog(tui_app *ui)
     int accepted = 0;
     xxwidgets_status status;
     gui_preferences_get(&preferences);
-    /* Windows disables its Recent button when no history is kept. */
-    if (!preferences.file.save_recent_files) { set_status(ui, CDIE_TR("No file history is kept. Turn on Save history in Options > File.")); return; }
+    /* Its button is disabled while no history is kept; Ctrl+R says why. */
+    if (!preferences.file.save_recent_files) { show_message(ui, CDIE_TR("No file history is kept. Turn on Save history in Options > File.")); return; }
     status = gui_frontend_recent_dialog(ui->window, recent, sizeof(recent), &accepted);
     if (status == XXWIDGETS_OK && accepted) {
-        (void)xxwidgets_widget_set_text(ui->path, recent); gui_frontend_remember_file(recent);
-        ui->pending = gui_frontend_scan_after_open() ? ACTION_SCAN : ACTION_NONE;
+        (void)xxwidgets_file_name_bar_set_path(ui->bar, recent);
+        (void)open_file(ui, recent, gui_frontend_scan_after_open());
     } else if (status != XXWIDGETS_OK) report_window_error(ui, CDIE_TR("Recent files"), status);
 }
-/* One action of the main loop, after polling returns: the buttons, shortcuts
- * and drops all end here. */
-static void run_action(tui_app *ui, int action)
+
+/* The hooks of gui_main_actions.c. */
+static void hook_browse(void *user) { browse(user); }
+static void hook_recent(void *user) { recent_dialog(user); }
+static void hook_open_path(void *user)
 {
-    xxwidgets_status status = XXWIDGETS_OK;
-    if (action == ACTION_SCAN) (void)scan(ui, 0);
-    else if (action == ACTION_BROWSE) browse(ui);
-    else if (action == ACTION_UPDATE) (void)update_database(ui, ui->window);
-    else if (action == ACTION_DATABASE_PATHS) options_dialog(ui, GUI_OPTIONS_SCAN);
-    else if (action == ACTION_RECENT) recent_dialog(ui);
-    else if (action == ACTION_FONTS) options_dialog(ui, GUI_OPTIONS_FONTS);
-    else if (action == ACTION_ABOUT) about_dialog(ui);
-    else if (action == ACTION_REPORT) {
-        /* The shortcut does what the Report button does, and nothing while it is disabled. */
-        GtkWidget *report = GTK_WIDGET(xxwidgets_widget_native_handle(control(ui, XXWIDGETS_SCAN_PANEL_REPORT)));
-        if (!report || !gtk_widget_get_sensitive(report)) set_status(ui, CDIE_TR("Scan a file first: there is no report yet."));
-        else if ((status = xxwidgets_scan_panel_show_report(ui->panel)) != XXWIDGETS_OK) report_window_error(ui, CDIE_TR("Scan report"), status);
-    }
-    else if (action == ACTION_OPTIONS) options_dialog(ui, ui->options_page);
-    else if (action >= ACTION_TOOL_BASE && action < ACTION_TOOL_BASE + GUI_TOOL_COUNT) {
-        /* The wording every platform uses (gui_tools.c): the tool's hint for
-         * no file, "<Tool>: <reason>" for a failure. */
-        char *selected = read_path(ui);
-        const char *message = gui_tool_run(ui->window, (gui_tool_id)(action - ACTION_TOOL_BASE), selected);
-        if (message) {
-            set_status(ui, message);
-            if (!selected || !*selected) (void)xxwidgets_widget_focus(ui->path);
-        }
-        free(selected);
-    }
+    tui_app *ui = user;
+    char *path = read_path(ui);
+    if (!path) { show_message(ui, CDIE_TR("Cannot read the file path (out of memory or widget error).")); return; }
+    (void)open_file(ui, path, gui_frontend_scan_after_open());
+    free(path);
 }
+static void hook_scan(void *user, int type_id) { (void)scan(user, type_id, 0); }
+static void hook_report(void *user)
+{
+    tui_app *ui = user;
+    size_t required = 0;
+    xxwidgets_status status;
+    /* The shortcut does what the Report button does: nothing without a report. */
+    if (xxwidgets_scan_panel_get_report(ui->panel, NULL, 0, &required) != XXWIDGETS_OK || required <= 1) return;
+    if ((status = xxwidgets_scan_panel_show_report(ui->panel)) != XXWIDGETS_OK) report_window_error(ui, CDIE_TR("Scan report"), status);
+}
+static void hook_update(void *user)
+{
+    tui_app *ui = user;
+    char message[512] = "";
+    /* gui_update_run shows failures and "up to date" itself; an installed
+     * database said so on the status line, now in a message. */
+    ui->update_result = update_database(ui, ui->window, message, sizeof(message));
+    if (ui->update_result == GUI_UPDATE_INSTALLED) show_message(ui, message);
+}
+static void hook_options(void *user, int page)
+{
+    tui_app *ui = user;
+    options_dialog(ui, page < 0 ? ui->options_page : (gui_options_page_id)page);
+}
+static void hook_about(void *user) { about_dialog(user); }
+static void hook_exit(void *user) { ((tui_app *)user)->running = 0; }
+static void hook_settings_changed(void *user) { save_settings(user); }
+static void hook_error(void *user, const char *text) { show_message(user, text); }
+static void main_hooks(tui_app *ui, gui_main_hooks *hooks)
+{
+    memset(hooks, 0, sizeof(*hooks));
+    hooks->user = ui;
+    hooks->browse = hook_browse; hooks->recent = hook_recent; hooks->open_path = hook_open_path;
+    hooks->scan = hook_scan; hooks->report = hook_report; hooks->update = hook_update;
+    hooks->options = hook_options; hooks->about = hook_about; hooks->exit = hook_exit;
+    hooks->settings_changed = hook_settings_changed; hooks->error = hook_error;
+    hooks->with_update = gui_update_supported();
+    hooks->file_types = &ui->types;
+}
+/* The pending action and shortcut, after polling returns: the buttons, the
+ * shortcuts and drops all end here. */
+static void run_pending(tui_app *ui)
+{
+    xxwidgets_die_action action = ui->action;
+    gui_shortcut_action shortcut = ui->shortcut;
+    gui_main_hooks hooks;
+    memset(&ui->action, 0, sizeof(ui->action));
+    ui->shortcut = GUI_SHORTCUT_NONE;
+    main_hooks(ui, &hooks);
+    if (action.id != XXWIDGETS_DIE_ACTION_NONE) (void)gui_main_run_action(ui->window, ui->main_panel, ui->loaded, &action, &hooks);
+    if (shortcut != GUI_SHORTCUT_NONE) (void)gui_main_run_shortcut(ui->window, ui->main_panel, ui->loaded, shortcut, &hooks);
+}
+/* One pass of the main loop after polling. */
+static void main_loop_pass(tui_app *ui)
+{
+    const char *message = gui_tree_process(ui->window);
+    if (message) show_message(ui, message);
+    run_pending(ui);
+}
+
+/* --smoke-update: one click on Update database; exits 0 when the result is the expected one. */
+static int smoke_update(tui_app *ui, const char *expected)
+{
+    xxwidgets_event click = {0};
+    char text[512] = "";
+    gui_update_result result;
+    int ok;
+    click.type = XXWIDGETS_EVENT_CLICK; click.widget = xxwidgets_side_panel_control(ui->side, XXWIDGETS_DIE_SIDE_UPDATE);
+    memset(&ui->action, 0, sizeof(ui->action));
+    on_event(ui->app, &click, ui);
+    if (ui->action.id != XXWIDGETS_DIE_ACTION_UPDATE) { fprintf(stderr, "smoke-update: the button did not request an update\n"); return 1; }
+    memset(&ui->action, 0, sizeof(ui->action));
+    result = update_database(ui, NULL, text, sizeof(text));
+    fprintf(stderr, "smoke-update: %s %s\n", gui_update_result_name(result), text);
+    ok = !strcmp(gui_update_result_name(result), expected);
+    if (ok && result == GUI_UPDATE_INSTALLED) ok = gui_backend_signature_count() > 0 && text[0];
+    return ok ? 0 : 1;
+}
+
+/* Saved Options apply before the first scan and before the window shows;
+ * smoke tests keep them in memory. The message for a problem, or NULL. */
+static const char *load_settings(tui_app *ui, int memory_only)
+{
+    gui_options_values values;
+    int stored = 1, databases = 1;
+    xxwidgets_status status;
+    ui->settings = gui_settings_open(memory_only, &stored);
+    status = current_options(ui, &values);
+    if (status == XXWIDGETS_OK) databases = gui_settings_load(ui->settings, &values, &ui->options_page);
+    if (status == XXWIDGETS_OK) status = apply_options(ui, &values);
+    if (status == XXWIDGETS_OK && !gui_backend_db_paths_current("", "")) reload_tags(ui);
+    /* View/Advanced (DIE_LOOK.md 2.1), read once before the window shows. */
+    apply_stored_view(ui);
+    if (status != XXWIDGETS_OK) { report_error(ui, CDIE_TR("Apply saved options"), status); return NULL; }
+    if (!databases) return CDIE_TR("The saved signature folders cannot be loaded; the default ones are active.");
+    if (!stored) return CDIE_TR("Saved options cannot be read; the defaults are used.");
+    return NULL;
+}
+
 int main(int argc, char **argv)
 {
     const char *translation = NULL;
     if (!cdie_translation_arguments(&argc,argv,&translation)) { fprintf(stderr,"--translation requires a PO file\n"); return 1; }
     int smoke=0, smoke_test=0, positional=0;
-    const char *path=NULL, *update_expected=NULL;
+    const char *path=NULL, *update_expected=NULL, *startup_message=NULL;
     for (int i=1;i<argc;++i) {
         if (!positional && !strcmp(argv[i],"--")) { positional=1; continue; }
         if (!positional && !strcmp(argv[i],"--smoke-test")) { smoke=smoke_test=1; continue; }
@@ -625,6 +694,7 @@ int main(int argc, char **argv)
     xxwidgets_status status; int result = 0;
     if (update_expected && (smoke_test || path)) { fprintf(stderr, "--smoke-update cannot be combined with --smoke-test or a file\n"); return 2; }
     if (smoke && !update_expected && !path) { fprintf(stderr, "--smoke-test requires a file\n"); return 1; }
+    ui.quiet = smoke;
     (void)gui_backend_init();
     /* GTK names the window class after the program; die.desktop's StartupWMClass is "die". */
     g_set_prgname("die");
@@ -667,60 +737,49 @@ int main(int argc, char **argv)
     if (!create_controls(&ui, shown)) { fprintf(stderr, "Cannot create GUI controls.\n"); result = 1; goto cleanup; }
     if (!smoke) (void)xxwidgets_app_set_create_hidden(ui.app, 0);
     ui.options_page = GUI_OPTIONS_SCAN;
-    {
-        /* Saved Options apply before the first scan; smoke tests keep them in memory. */
-        gui_options_values values;
-        int stored = 1, databases = 1;
-        ui.settings = gui_settings_open(smoke, &stored);
-        status = current_options(&ui, &values);
-        if (status == XXWIDGETS_OK) databases = gui_settings_load(ui.settings, &values, &ui.options_page);
-        if (status == XXWIDGETS_OK) status = apply_options(&ui, &values);
-        if (status == XXWIDGETS_OK && !gui_backend_db_paths_current("", "")) reload_tags(&ui);
-        if (status != XXWIDGETS_OK) report_error(&ui, CDIE_TR("Apply saved options"), status);
-        else if (!databases) set_status(&ui, CDIE_TR("The saved signature folders cannot be loaded; the default ones are active."));
-        else if (!stored) set_status(&ui, CDIE_TR("Saved options cannot be read; the defaults are used."));
+    startup_message = load_settings(&ui, smoke);
+    if (update_expected) { result = smoke_update(&ui, update_expected); goto cleanup; }
+    if (smoke) {
+        if (startup_message) fprintf(stderr, "%s\n", startup_message);
+        result = scan(&ui, 0, 1) ? 0 : 1;
+        if (!result) printf("GTK GUI smoke: %zu detections\n", xxwidgets_scan_panel_count(ui.panel));
+        goto cleanup;
     }
-    if (update_expected) { if (!smoke) (void)xxwidgets_widget_set_visible(ui.window, 1); result = smoke_update(&ui, update_expected); goto cleanup; }
-    if (smoke) { result = scan(&ui, 1) ? 0 : 1; if (!result) printf("GTK GUI smoke: %zu detections\n", xxwidgets_scan_panel_count(ui.panel)); goto cleanup; }
     {
         int instance = gui_frontend_instance_start(ui.window, path);
         if (instance <= 0) { if (instance < 0) { fprintf(stderr,"Cannot acquire application instance lock.\n"); result=1; } goto cleanup; }
     }
     if (xxwidgets_widget_set_visible(ui.window, 1) != XXWIDGETS_OK) { result = 1; goto cleanup; }
-    if (shown) gui_frontend_remember_file(shown);
-    else if (path) set_status(&ui, CDIE_TR("Cannot open this file: its name is not valid text (UTF-8)."));
-    ui.running = 1; ui.pending = shown && gui_frontend_scan_after_open() ? ACTION_SCAN : ACTION_NONE;
+    show_message(&ui, startup_message);
+    if (shown) (void)open_file(&ui, shown, gui_frontend_scan_after_open());
+    else if (path) show_message(&ui, CDIE_TR("Cannot open this file: its name is not valid text (UTF-8)."));
+    ui.running = 1;
     while (ui.running) {
         status = xxwidgets_app_poll(ui.app, 30);
         if (status != XXWIDGETS_OK) { result = 1; break; }
-        if (ui.needs_layout) { ui.needs_layout = 0; layout(&ui); }
         {
             /* A later launch's file ("Single application"), as WM_COPYDATA on
              * Windows: the path, history, a scan if wanted, and to the front. */
             char *forwarded = NULL;
             if (gui_frontend_instance_poll(ui.window, &forwarded) && forwarded) {
-                /* "": a launch without a file, which only raises the window. */
-                if (forwarded[0] && xxwidgets_widget_set_text(ui.path, forwarded) == XXWIDGETS_OK) {
-                    gui_frontend_remember_file(forwarded);
-                    if (gui_frontend_scan_after_open()) ui.pending = ACTION_SCAN;
-                }
                 gtk_window_present(GTK_WINDOW(xxwidgets_widget_native_handle(ui.window)));
+                /* "": a launch without a file, which only raises the window. */
+                if (forwarded[0] && xxwidgets_file_name_bar_set_path(ui.bar, forwarded) == XXWIDGETS_OK)
+                    (void)open_file(&ui, forwarded, gui_frontend_scan_after_open());
             }
             free(forwarded);
         }
-        const char *message = gui_tree_process(ui.window);
-        if (message) set_status(&ui, message);
-        int action = ui.pending; ui.pending = ACTION_NONE;
-        run_action(&ui, action);
+        main_loop_pass(&ui);
     }
 cleanup:
+    /* Changes only (View/Advanced was saved when it changed). */
     if (!smoke && ui.settings && ui.window) {
         gui_options_values values;
         if (current_options(&ui,&values)==XXWIDGETS_OK) (void)gui_settings_save(ui.settings,&values,ui.options_page);
     }
     gui_frontend_instance_close();
-    free(ui.type_path);
-    if (ui.panel) (void)xxwidgets_scan_panel_destroy(ui.panel);
+    free(ui.loaded); free(ui.message);
+    if (ui.main_panel) (void)xxwidgets_die_main_panel_destroy(ui.main_panel);
     cdie_translation_close();
     if (ui.app) (void)xxwidgets_app_destroy(ui.app);
     gui_settings_close(ui.settings);

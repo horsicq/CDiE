@@ -302,7 +302,9 @@ enum {
     GUI_FACTS_COMMANDS = 1u << 11,  /* Mach-O */
     GUI_FACTS_SEGMENTS = 1u << 12,
     GUI_FACTS_LIBRARIES = 1u << 13,
-    GUI_FACTS_ENTRY_OFFSET = 1u << 14 /* entry_point_offset is a file offset */
+    GUI_FACTS_ENTRY_OFFSET = 1u << 14, /* entry_point_offset is a file offset */
+    GUI_FACTS_NET_ID = 1u << 15     /* PE: net_id is valid; Qt titles the time stamp box ".NET ID"
+                                     * and shows net_id as 8 hex digits instead of the date */
 };
 typedef struct gui_backend_facts {
     int type_id;             /* the file_types() ID described: the preferred type when 0 was asked */
@@ -331,9 +333,13 @@ typedef struct gui_backend_facts {
     char time_date_stamp_text[32];      /* "yyyy-MM-dd hh:mm:ss" in local time, as Qt DIE */
     int64_t overlay_offset, overlay_size; /* -1 and 0 without an overlay */
     char *manifest, *version;           /* heap UTF-8 or NULL; "Key: Value" lines for version */
+    /* XPE::getNetId: with a COM descriptor, a TimeDateStamp with bit 31 set
+     * (a deterministic .NET build's hash), else 0. */
+    uint32_t net_id;
 } gui_backend_facts;
 /* Fills facts for path as type_id (a gui_backend_file_types ID; 0 resolves to
- * the preferred concrete type, as a type-0 scan does). Reads headers only and
+ * the preferred concrete type, as a type-0 scan does, skipping one whose own
+ * format reader rejects the file, as Qt DIE's list does). Reads headers only and
  * needs no database, so it may run before gui_backend_init. Returns 1 on
  * success; 0 for an unreadable file or a type the file does not have, with
  * facts zeroed. Release with gui_backend_facts_free, also after a failure. */

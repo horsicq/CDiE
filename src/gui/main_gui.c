@@ -46,6 +46,7 @@
 #include <xxwidgets/xxwidgets_context_options.h>
 #include <xxwidgets/xxwidgets_optimization_options.h>
 #include <xxwidgets/xxwidgets_options_pages.h>
+#include <xxwidgets/xxwidgets_die_main_panel.h>
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
@@ -75,6 +76,8 @@
 #include "gui_tools.h"
 #include "gui_update.h"
 #include "gui_error.h"
+#include "gui_main_actions.h"
+#include "gui_shortcuts.h"
 #include "resource.h"
 
 #if defined(_M_ARM64) || defined(_M_ARM64EC) || defined(_M_ARM) || defined(__aarch64__) || defined(__arm__)
@@ -83,65 +86,48 @@
 #define CDIE_GUI_ARM_TARGET 0
 #endif
 
-#define IDC_EDIT_PATH   102
-#define IDC_BTN_BROWSE  103
-#define IDC_COMBO_TYPE  104
-#define IDC_COMBO_FLAGS 105
-#define IDC_COMBO_DATABASES 106
-#define IDC_STATIC_MSEC 107
-#define IDC_BTN_SCAN    108
-#define IDC_SCANRESULTS 109
-#define IDC_BTN_EXIT    110
-#define IDC_BTN_OPTIONS 111
-#define IDC_BTN_ABOUT   112
-#define IDC_BTN_REPORT  113
-#define IDC_STATUS      114
-#define IDC_COMBO_INCLUDE_TAGS 119
-#define IDC_COMBO_EXCLUDE_TAGS 120
-#define IDC_BTN_FILE_INFORMATION 121
-#define IDC_BTN_ENTROPY 122
-#define IDC_BTN_HASH 123
-#define IDC_BTN_STRINGS 124
-#define IDC_BTN_HEX_VIEW 125
-#define IDC_BTN_DISASM 126
-#define IDC_BTN_MEMORY_MAP 127
-#define IDC_BTN_IMPORTS 128
-#define IDC_BTN_EXPORTS 129
-#define IDC_BTN_RESOURCES 130
-#define IDC_BTN_SYMBOLS 131
-#define IDC_BTN_EXTRACTOR 132
-#define IDC_BTN_UPDATE 133
-#define IDC_BTN_RECENT 134
-
-enum gui_action { ACTION_NONE, ACTION_SCAN, ACTION_BROWSE, ACTION_RECENT,
-                  ACTION_OPTIONS, ACTION_ABOUT, ACTION_REPORT,
-                  ACTION_DATABASE_PATHS, ACTION_FILE_INFORMATION, ACTION_ENTROPY, ACTION_HASH, ACTION_STRINGS, ACTION_HEX_VIEW, ACTION_DISASM, ACTION_MEMORY_MAP, ACTION_IMPORTS, ACTION_EXPORTS, ACTION_RESOURCES, ACTION_SYMBOLS, ACTION_EXTRACTOR, ACTION_UPDATE };
+/* What the main loop runs once app_poll returns (modal loops never start
+ * inside the event callback): opening the path field, an action of the main
+ * panel (g_pendingDie), or a shortcut (ACTION_SHORTCUT + gui_shortcut_action). */
+enum gui_action { ACTION_NONE, ACTION_OPEN /* the path field, as typed or dropped */, ACTION_DIE, ACTION_SHORTCUT = 100 };
+#define SHORTCUT_ACTION(shortcut) (ACTION_SHORTCUT + (int)(shortcut))
 
 static HINSTANCE g_hInst;
 static xxwidgets_app *g_app;
-static xxwidgets_widget *g_window, *g_fileLabel, *g_path, *g_browse, *g_type, *g_recent;
+/* The window's content is one xxwidgets_die_main_panel (DIE_LOOK.md):
+ * the file name bar, the file header, the scan panel and the right column.
+ * The globals below borrow its controls. */
+static xxwidgets_die_main_panel *g_main;
+static xxwidgets_file_header *g_header;
+static xxwidgets_side_panel *g_side;
+static xxwidgets_widget *g_window, *g_path, *g_browse, *g_type, *g_recent;
 static xxwidgets_widget *g_flags, *g_databases, *g_msec, *g_scan, *g_results;
-static xxwidgets_widget *g_typeLabel, *g_flagLabel, *g_databaseLabel;
+static xxwidgets_widget *g_flagLabel, *g_databaseLabel;
 static xxwidgets_widget *g_includeTags, *g_excludeTags, *g_includeTagsLabel, *g_excludeTagsLabel;
-/* DIE's panel: Signatures, Directory and Log buttons, the file's facts. */
-static xxwidgets_widget *g_signaturesButton, *g_directoryButton, *g_logButton, *g_facts[4], *g_factLabels[4];
-/* Beside Log: downloads and installs the current signature database. */
-static xxwidgets_widget *g_updateButton;
-static xxwidgets_widget *g_options, *g_aboutButton, *g_reportButton, *g_exit, *g_status;
-static xxwidgets_widget *g_fileInformationButton, *g_entropyButton, *g_hashButton, *g_stringsButton, *g_hexViewButton, *g_disasmButton, *g_memoryMapButton, *g_importsButton, *g_exportsButton, *g_resourcesButton, *g_symbolsButton, *g_extractorButton;
+/* DIE's scan bar: Signatures, Directory and Log; the engine row's values. */
+static xxwidgets_widget *g_signaturesButton, *g_directoryButton, *g_logButton, *g_facts[4];
+/* The right column: Advanced, Update database (Q2), Shortcuts, Options, About, Exit. */
+static xxwidgets_widget *g_advanced, *g_updateButton, *g_shortcutsButton;
+static xxwidgets_widget *g_options, *g_aboutButton, *g_reportButton, *g_exit;
 static xxwidgets_scan_panel *g_panel;
 static xxwidgets_about_dialog *g_about;
-/* Names the two small buttons: Recent files beside the path, ">" the report. */
-static HWND g_tooltip;
-static int g_running, g_pending, g_memorySettings;
+static xxwidgets_die_action g_pendingDie;
+static int g_running, g_pending, g_memorySettings, g_loaded, g_quit;
 static char *g_typePath;
-static int g_minWindowWidth = 720, g_minWindowHeight = 380;
+static gui_main_file_types g_fileTypes;
+/* No status line (Q1): the last message is kept (smoke runs read it), and
+ * errors are shown in a message dialog. */
+static char g_lastMessage[640];
+/* Set in the smoke runs: errors are kept and traced, never shown in a box
+ * no step expects. */
+static int g_quietErrors;
 
 static int g_bFlagDeep = 1, g_bFlagHeur = 1, g_bFlagVerbose = 1;
 static int g_bFlagAggr, g_bFlagHideUnknown, g_bFlagFormat;
 /* The custom database; the main one is always used. */
 static int g_bDbCustom = 1;
-static void layout(void);
+static void smoke_trace(const char *text);
+static void smoke_last_message(char *text, size_t size);
 
 static HWND native(xxwidgets_widget *widget)
 {
@@ -155,11 +141,38 @@ static void apply_flags_to_backend(void)
     gui_backend_set_databases(g_bDbCustom);
 }
 
-static void set_status_wide(const WCHAR *wide)
+/* An outcome worth no dialog (a finished scan, applied options). */
+static void note_message(const char *text)
+{
+    xx_rt_snprintf(g_lastMessage, sizeof(g_lastMessage), "%s", text ? text : "");
+}
+
+/* An error: kept, and shown in a text dialog over the main window. */
+static void show_error(const char *text)
+{
+    if (!text || !text[0]) return;
+    note_message(text);
+    if (g_quietErrors || !g_window) {
+        smoke_trace(text);
+        return;
+    }
+    (void)xxwidgets_text_dialog(g_window, gui_backend_app_title(), text);
+}
+
+static void show_error_wide(const WCHAR *wide)
 {
     char *text = xx_str_unicode_to_utf8(wide);
     if (text) {
-        xxwidgets_widget_set_text(g_status, CDIE_TR(text));
+        show_error(text);
+        xx_str_free(text);
+    }
+}
+
+static void note_message_wide(const WCHAR *wide)
+{
+    char *text = xx_str_unicode_to_utf8(wide);
+    if (text) {
+        note_message(text);
         xx_str_free(text);
     }
 }
@@ -171,11 +184,20 @@ static void report_ui_error(const char *operation, xxwidgets_status status)
     WCHAR *name = xx_str_utf8_to_unicode(CDIE_TR(operation));
     WCHAR *detail = xx_str_utf8_to_unicode(gui_error_status_text(status));
     cdie_translation_swprintf(text, sizeof(text)/sizeof(text[0]), CDIE_N_(L"%s: %s"), name ? name : L"Interface error", detail ? detail : L"unknown error");
-    set_status_wide(text);
+    show_error_wide(text);
     if (name) xx_str_wfree(name);
     if (detail) xx_str_wfree(detail);
 }
 
+/* The panel's file state: with a file, the scan bar and the file header are
+ * enabled (Report only with a report, the tag filters only with tags). The
+ * scan panel's own setters enable controls regardless, so this is re-applied
+ * after them. */
+static void apply_loaded(int loaded)
+{
+    g_loaded = loaded != 0;
+    if (g_main) (void)xxwidgets_die_main_panel_set_loaded(g_main, g_loaded);
+}
 static unsigned int flags_mask(void)
 {
     return (g_bFlagDeep ? 1u : 0u) | (g_bFlagHeur ? 2u : 0u) |
@@ -195,6 +217,8 @@ static xxwidgets_status refresh_panel_tags(void)
     if (pTags == NULL) return XXWIDGETS_OUT_OF_MEMORY;
     status = xxwidgets_scan_panel_set_available_tags(g_panel, pTags);
     gui_backend_free(pTags);
+    /* set_available_tags enables the filters even with no file loaded. */
+    apply_loaded(g_loaded);
     return status;
 }
 
@@ -255,114 +279,99 @@ static void clear_scan(void)
     xxwidgets_widget_set_text(g_msec, "");
 }
 
-typedef struct file_type_buffer {
-    xx_meta_string *records;
-    SIZE_T count, capacity;
-    int failed;
-} file_type_buffer;
-
-static void free_file_types(file_type_buffer *buffer)
+/* The path field's text, from the process heap; NULL (reported) on failure. */
+static char *read_path(const char *operation)
 {
-    SIZE_T i;
-    for (i = 0; i < buffer->count; ++i) {
-        xx_str_wfree(buffer->records[i].meta_string->data);
-        HeapFree(GetProcessHeap(), 0, buffer->records[i].meta_string);
+    SIZE_T required = 0;
+    char *path;
+    xxwidgets_status status = xxwidgets_widget_get_text(g_path, NULL, 0, &required);
+    if (status != XXWIDGETS_OK) { report_ui_error(operation, status); return NULL; }
+    path = (char *)HeapAlloc(GetProcessHeap(), 0, required ? required : 1);
+    if (!path) { report_ui_error(operation, XXWIDGETS_OUT_OF_MEMORY); return NULL; }
+    status = xxwidgets_widget_get_text(g_path, path, required ? required : 1, NULL);
+    if (status != XXWIDGETS_OK) {
+        HeapFree(GetProcessHeap(), 0, path);
+        report_ui_error(operation, status);
+        return NULL;
     }
-    if (buffer->records) HeapFree(GetProcessHeap(), 0, buffer->records);
+    return path;
 }
 
-static void collect_file_type(int type_id, const char *name, void *user_data)
-{
-    file_type_buffer *buffer = (file_type_buffer *)user_data;
-    xx_meta_string record = {0};
-    WCHAR *wide;
-    SIZE_T length = 0;
-    if (buffer->failed) return;
-    if (buffer->count == buffer->capacity) {
-        SIZE_T capacity = buffer->capacity ? buffer->capacity * 2 : 8;
-        xx_meta_string *records;
-        if (capacity < buffer->capacity || capacity > ((SIZE_T)-1) / sizeof(*records)) {
-            buffer->failed = 1; return;
-        }
-        records = buffer->records
-            ? (xx_meta_string *)HeapReAlloc(GetProcessHeap(), 0, buffer->records, capacity * sizeof(*records))
-            : (xx_meta_string *)HeapAlloc(GetProcessHeap(), 0, capacity * sizeof(*records));
-        if (!records) { buffer->failed = 1; return; }
-        buffer->records = records; buffer->capacity = capacity;
-    }
-    wide = xx_str_utf8_to_unicode(type_id == 0 ? CDIE_TR("Automatic") : name);
-    record.meta_string = (xx_str_w_s *)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*record.meta_string));
-    if (!wide || !record.meta_string) {
-        if (wide) xx_str_wfree(wide);
-        if (record.meta_string) HeapFree(GetProcessHeap(), 0, record.meta_string);
-        buffer->failed = 1; return;
-    }
-    while (wide[length]) ++length;
-    record.meta_string->data = wide;
-    record.meta_string->length = length;
-    record.meta_string->capacity = length + 1;
-    record.meta_string->is_view = true;
-    record.var.type = XX_VAR_TYPE_UINT64;
-    record.var.val.u64 = (uint64_t)type_id;
-    buffer->records[buffer->count++] = record;
-}
-
+/* The type id the next scan passes: 0 while the File type combo shows the
+ * preferred type (DIE_LOOK.md 2.6). */
 static xxwidgets_status selected_file_type(int *type_id)
 {
-    xx_var value = {0};
-    xxwidgets_status status = xxwidgets_combobox_get_current(g_type, &value);
-    if (status != XXWIDGETS_OK) return status;
-    if (value.type != XX_VAR_TYPE_UINT64 || value.val.u64 > INT_MAX)
-        return XXWIDGETS_INVALID_ARGUMENT;
-    *type_id = (int)value.val.u64;
+    *type_id = gui_main_file_types_scan_id(&g_fileTypes);
     return XXWIDGETS_OK;
 }
 
+/* The file's concrete types into the File type combo (the user's pick kept
+ * on a rescan of the same file), its size and addresses into the header. */
 static xxwidgets_status refresh_file_types(const char *path)
 {
-    file_type_buffer buffer = {0};
+    xx_meta_string *records = NULL;
+    gui_backend_facts facts;
     xxwidgets_status status;
     char *new_path;
-    int type_id = 0, selected = 0;
-    SIZE_T i;
-    if (g_typePath && !lstrcmpA(g_typePath, path)) {
-        status = selected_file_type(&type_id);
-        if (status != XXWIDGETS_OK) return status;
-    }
-    if (!gui_backend_file_types(path, collect_file_type, &buffer)) {
-        free_file_types(&buffer);
-        return XXWIDGETS_PLATFORM_ERROR;
-    }
-    if (buffer.failed) { free_file_types(&buffer); return XXWIDGETS_OUT_OF_MEMORY; }
+    int keep = g_typePath && !lstrcmpA(g_typePath, path);
+    if (!gui_main_file_types_load(&g_fileTypes, path, keep)) return XXWIDGETS_PLATFORM_ERROR;
     new_path = xx_str_create(path);
-    if (!new_path) { free_file_types(&buffer); return XXWIDGETS_OUT_OF_MEMORY; }
-    for (i = 0; i < buffer.count; ++i)
-        if (buffer.records[i].var.val.u64 == (uint64_t)type_id) { selected = (int)i; break; }
-    status = xxwidgets_combobox_set_records(g_type, buffer.records, buffer.count);
-    if (status == XXWIDGETS_OK) status = xxwidgets_widget_set_value(g_type, selected);
-    free_file_types(&buffer);
+    if (!new_path) return XXWIDGETS_OUT_OF_MEMORY;
+    status = gui_main_file_types_records(&g_fileTypes, &records);
+    if (status == XXWIDGETS_OK)
+        status = xxwidgets_file_header_set_file_types(g_header, records, g_fileTypes.count, g_fileTypes.selected);
+    if (records) gui_main_file_types_free_records(records, g_fileTypes.count);
     if (status != XXWIDGETS_OK) { xx_str_free(new_path); return status; }
     if (g_typePath) xx_str_free(g_typePath);
     g_typePath = new_path;
+    memset(&facts, 0, sizeof(facts));
+    if (gui_backend_file_facts(path, gui_main_file_types_scan_id(&g_fileTypes), &facts)) {
+        (void)xxwidgets_file_header_set_file_size(g_header, facts.file_size);
+        if (facts.base_bits)
+            (void)xxwidgets_file_header_set_address(g_header, XXWIDGETS_FILE_HEADER_BASE_ADDRESS, facts.base_address, facts.base_bits);
+        if (facts.entry_bits)
+            (void)xxwidgets_file_header_set_address(g_header, XXWIDGETS_FILE_HEADER_ENTRY_POINT, facts.entry_point, facts.entry_bits);
+    }
+    gui_backend_facts_free(&facts);
     return XXWIDGETS_OK;
+}
+
+/* Opens path as the loaded file: its types, size and addresses; the scan bar
+ * enabled. 0 (shown in a message dialog) when it cannot be read. */
+static int load_file(const char *path)
+{
+    xxwidgets_status status = refresh_file_types(path);
+    if (status != XXWIDGETS_OK) {
+        clear_scan();
+        (void)xxwidgets_file_header_clear(g_header);
+        gui_main_file_types_clear(&g_fileTypes);
+        if (g_typePath) xx_str_free(g_typePath);
+        g_typePath = NULL;
+        apply_loaded(0);
+        /* A file the system will not open says why, in the words GTK and macOS use. */
+        if (gui_error_file_reason(path)) {
+            char text[512];
+            gui_error_open_status(text, sizeof(text), path);
+            show_error(text);
+        } else report_ui_error(CDIE_N_("Load file types"), status);
+        return 0;
+    }
+    apply_loaded(1);
+    return 1;
 }
 
 static void do_scan(void)
 {
-    SIZE_T required = 0;
     char *path, *type = NULL;
     xxwidgets_status status;
     int ok, cancelled = 0, type_id = 0;
 
-    status = xxwidgets_widget_get_text(g_path, NULL, 0, &required);
-    if (status != XXWIDGETS_OK) { report_ui_error(CDIE_N_("Read file name"), status); return; }
-    if (required <= 1) { MessageBeep(MB_ICONASTERISK); xxwidgets_widget_focus(g_path); return; }
-    path = (char *)HeapAlloc(GetProcessHeap(), 0, required);
-    if (!path) { report_ui_error(CDIE_N_("Read file name"), XXWIDGETS_OUT_OF_MEMORY); return; }
-    status = xxwidgets_widget_get_text(g_path, path, required, NULL);
-    if (status != XXWIDGETS_OK) {
+    path = read_path(CDIE_N_("Read file name"));
+    if (!path) return;
+    if (!path[0]) {
         HeapFree(GetProcessHeap(), 0, path);
-        report_ui_error(CDIE_N_("Read file name"), status);
+        MessageBeep(MB_ICONASTERISK);
+        xxwidgets_widget_focus(g_path);
         return;
     }
     status = read_panel_options();
@@ -371,28 +380,18 @@ static void do_scan(void)
         report_ui_error(CDIE_N_("Read scan options"), status);
         return;
     }
-    status = refresh_file_types(path);
-    if (status == XXWIDGETS_OK) status = selected_file_type(&type_id);
-    if (status != XXWIDGETS_OK) {
-        clear_scan();
-        xxwidgets_widget_set_enabled(g_type, 0);
-        /* A file the system will not open says why, in the words GTK and macOS use. */
-        if (gui_error_file_reason(path)) {
-            char text[512];
-            gui_error_open_status(text, sizeof(text), path);
-            xxwidgets_widget_set_text(g_status, text);
-        } else report_ui_error(CDIE_N_("Load file types"), status);
+    if (!load_file(path)) {
         HeapFree(GetProcessHeap(), 0, path);
         return;
     }
+    (void)selected_file_type(&type_id);
     clear_scan();
     xxwidgets_widget_set_enabled(g_scan, 0);
     xxwidgets_widget_set_enabled(g_type, 0);
+    /* Progress shows in the elapsed field (Q1), then the time it took. */
     xxwidgets_widget_set_text(g_msec, CDIE_TR("Scanning..."));
-    xxwidgets_widget_set_text(g_status, CDIE_TR("Scanning the selected file..."));
     /* The engine runs on a worker; the process dialog keeps the window
-     * responsive, disables it meanwhile, and offers Cancel after a second.
-     * The panel shows the time it took. */
+     * responsive, disables it meanwhile, and offers Cancel after a second. */
     ok = gui_tree_scan(g_window, g_panel, path, type_id, &type, &cancelled);
     if (ok) {
         gui_frontend_remember_file(path);
@@ -403,18 +402,27 @@ static void do_scan(void)
                   cdie_translation_ngettext("Scan complete (%s). %u result. Use > for the full engine output.",
                                             "Scan complete (%s). %u results. Use > for the full engine output.", count),
                   type_name ? type_name : L"Unknown type", (unsigned int)count);
-        set_status_wide(text);
+        note_message_wide(text);
         if (type_name) xx_str_wfree(type_name);
     } else {
-        xxwidgets_widget_set_text(g_status, cancelled ? CDIE_TR("Scan cancelled.") : CDIE_TR("Cannot scan the file."));
         xxwidgets_widget_set_text(g_msec, "");
+        if (cancelled) note_message(CDIE_TR("Scan cancelled."));
+        else show_error(CDIE_TR("Cannot scan the file."));
     }
     HeapFree(GetProcessHeap(), 0, path);
     if (type) gui_backend_free(type);
-    xxwidgets_widget_set_enabled(g_type, 1);
-    xxwidgets_widget_set_enabled(g_scan, 1);
+    apply_loaded(1);
 }
 
+/* A file chosen by the picker, Recent files, a drop or another instance:
+ * into the path field, remembered, then scanned or only opened. */
+static void open_file(const char *path)
+{
+    if (xxwidgets_widget_set_text(g_path, path) != XXWIDGETS_OK) return;
+    gui_frontend_remember_file(path);
+    if (gui_frontend_scan_after_open()) do_scan();
+    else (void)load_file(path);
+}
 static void do_browse(void)
 {
     OPENFILENAMEW picker;
@@ -466,10 +474,8 @@ static void do_browse(void)
     if (picked) {
         char *path = xx_str_unicode_to_utf8(file);
         if (path) {
-            xxwidgets_widget_set_text(g_path, path);
-            gui_frontend_remember_file(path);
+            open_file(path);
             xx_str_free(path);
-            if (gui_frontend_scan_after_open()) do_scan();
         }
     }
     xx_str_wfree(initial);
@@ -478,25 +484,14 @@ static void do_browse(void)
 }
 
 /* The tools share one table (gui_tools.c): the same titles, "no file" hints
- * and "<Tool>: <reason>" failures as the GTK and macOS frontends. */
+ * and "<Tool>: <reason>" failures as the GTK and macOS frontends. Until the
+ * Advanced view's tools grid (Phase 2) they are reached by their shortcuts,
+ * which run through the shared dispatcher (gui_main_actions.c). */
+static void run_shortcut(gui_shortcut_action shortcut);
 static void do_tool(gui_tool_id id)
 {
-    size_t size = 0;
-    char *path;
-    const char *message;
-    xxwidgets_status status = xxwidgets_widget_get_text(g_path, NULL, 0, &size);
-    if (status != XXWIDGETS_OK) { report_ui_error(CDIE_N_("Read file path"), status); return; }
-    path = HeapAlloc(GetProcessHeap(), 0, size ? size : 1);
-    if (!path) { report_ui_error(CDIE_N_("Read file path"), XXWIDGETS_OUT_OF_MEMORY); return; }
-    status = xxwidgets_widget_get_text(g_path, path, size ? size : 1, NULL);
-    if (status != XXWIDGETS_OK) report_ui_error(CDIE_N_("Read file path"), status);
-    else if ((message = gui_tool_run(g_window, id, path)) != NULL) {
-        xxwidgets_widget_set_text(g_status, message);
-        if (!path[0]) xxwidgets_widget_focus(g_path);
-    }
-    HeapFree(GetProcessHeap(), 0, path);
+    run_shortcut((gui_shortcut_action)(GUI_SHORTCUT_TOOL_FIRST + (int)id));
 }
-
 static void do_file_information(void) { do_tool(GUI_TOOL_FILE_INFORMATION); }
 static void do_entropy(void) { do_tool(GUI_TOOL_ENTROPY); }
 static void do_hash(void) { do_tool(GUI_TOOL_HASH); }
@@ -529,6 +524,19 @@ static xxwidgets_status current_options(gui_options_values *values)
     return xxwidgets_app_get_font_options(g_app, &values->fonts);
 }
 
+/* The engine row's Scan combo shows Scan/Engine (Options > Scan sets it too). */
+static void sync_engine(void)
+{
+    gui_backend_scan_preferences scan;
+    xxwidgets_widget *engine = g_panel ? xxwidgets_scan_panel_control(g_panel, XXWIDGETS_SCAN_PANEL_ENGINE) : NULL;
+    size_t i;
+    if (!engine || !gui_backend_get_scan_preferences(&scan)) return;
+    for (i = 0; i < gui_backend_engine_count() && i < xxwidgets_combobox_count(engine); ++i) {
+        const char *id = gui_backend_engine_id(i);
+        if (id && !strcmp(id, scan.engine)) { (void)xxwidgets_widget_set_value(engine, (int)i); return; }
+    }
+}
+
 /* Applies settings from Options or from the store; fonts only when changed. */
 static xxwidgets_status apply_options(const gui_options_values *values)
 {
@@ -547,25 +555,19 @@ static xxwidgets_status apply_options(const gui_options_values *values)
     if (status != XXWIDGETS_OK) return status;
     gui_hex_view_set_options(&values->hex);
     status = xxwidgets_app_get_font_options(g_app, &fonts);
-    if (status == XXWIDGETS_OK && memcmp(&values->fonts, &fonts, sizeof(fonts))) {
-        RECT bounds;
-        int width, height;
+    if (status == XXWIDGETS_OK && memcmp(&values->fonts, &fonts, sizeof(fonts)))
         status = xxwidgets_app_set_font_options(g_app, &values->fonts);
-        if (status != XXWIDGETS_OK) return status;
-        layout();
-        GetWindowRect(native(g_window), &bounds);
-        width = bounds.right - bounds.left; height = bounds.bottom - bounds.top;
-        if (width < g_minWindowWidth || height < g_minWindowHeight)
-            SetWindowPos(native(g_window), NULL, 0, 0,
-                width < g_minWindowWidth ? g_minWindowWidth : width,
-                height < g_minWindowHeight ? g_minWindowHeight : height,
-                SWP_NOMOVE | SWP_NOZORDER);
-    }
     if (status == XXWIDGETS_OK) status = gui_frontend_apply_preferences(g_app, values);
+    /* A new font or language: the panel's captions, its minimum (the window
+     * grows to it, never shrinks) and its layout follow. */
+    if (status == XXWIDGETS_OK && g_main) status = xxwidgets_die_main_panel_retranslate(g_main);
     if (status == XXWIDGETS_OK) {
         SetWindowPos(native(g_window), values->appearance.stay_on_top ? HWND_TOPMOST : HWND_NOTOPMOST,
                      0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-        if (g_recent) xxwidgets_widget_set_enabled(g_recent, values->file.save_recent_files);
+        if (g_main) (void)xxwidgets_file_name_bar_set_recent_available(xxwidgets_die_main_panel_file_name_bar(g_main),
+                                                                       values->file.save_recent_files);
+        sync_engine();
+        apply_loaded(g_loaded);
     }
     return status;
 }
@@ -659,7 +661,7 @@ static int do_settings(gui_options_page_id start)
         status = refresh_panel_tags();
         if (status != XXWIDGETS_OK) { xx_str_free(program); report_ui_error("Refresh signature tags", status); return -1; }
         cdie_translation_swprintf(text, sizeof(text)/sizeof(text[0]), CDIE_N_(L"Database reloaded: %d signatures. Choose a file and press Scan."), gui_backend_signature_count());
-        set_status_wide(text);
+        note_message_wide(text);
     }
     if (!accepted) { xx_str_free(program); return 0; }
     if (program && !g_settingsSmoke && !g_memorySettings) {
@@ -693,16 +695,17 @@ static int do_settings(gui_options_page_id start)
         char message[384];
         xx_rt_snprintf(message, sizeof(message), "%s: %s%s", CDIE_TR("Options applied; File integration failed"),
             gui_error_status_text(file_status), saved ? "" : CDIE_TR(" Options could not be saved for the next start."));
-        xxwidgets_widget_set_text(g_status, message);
+        show_error(message);
     } else if (!saved)
-        xxwidgets_widget_set_text(g_status, CDIE_TR("Options applied, but they could not be saved for the next start."));
-    else if (!reloaded) xxwidgets_widget_set_text(g_status, CDIE_TR("Options applied."));
+        show_error(CDIE_TR("Options applied, but they could not be saved for the next start."));
+    else if (!reloaded) note_message(CDIE_TR("Options applied."));
     return 1;
 }
 
 /* Update database: the source stored under Options > Scan, progress and
- * Cancel in a dialog owned by @p owner (NULL shows none), the outcome in the
- * status bar. A reloaded database replaces the results of the old one. */
+ * Cancel in a dialog owned by @p owner (NULL shows none), which also shows a
+ * failure; the outcome is kept as the last message. A reloaded database
+ * replaces the results of the old one. */
 static gui_update_result do_update_database(xxwidgets_widget *owner)
 {
     gui_options_values values;
@@ -718,7 +721,7 @@ static gui_update_result do_update_database(xxwidgets_widget *owner)
         status = refresh_panel_tags();
         if (status != XXWIDGETS_OK) { report_ui_error("Refresh signature tags", status); return result; }
     }
-    xxwidgets_widget_set_text(g_status, message);
+    note_message(message);
     return result;
 }
 
@@ -742,11 +745,8 @@ static void do_report(void)
     if (status != XXWIDGETS_OK) report_ui_error(CDIE_N_("Open scan report"), status);
 }
 
-/* The native backend intentionally uses text-cell rectangles. Pixel placement
- * here allows the scan panel's result tree to fill
- * the available client area, including sizes between whole text cells. */
 /* A control's text in its own font: one line, or wrapped at wrap pixels.
- * The layout sizes buttons with it; the smoke test checks dialogs with it. */
+ * The smoke test checks dialogs and the main window with it. */
 static SIZE window_text_size(HWND handle, int wrap)
 {
     WCHAR text[512], class_name[16];
@@ -768,12 +768,6 @@ static SIZE window_text_size(HWND handle, int wrap)
     return size;
 }
 
-static int control_text_width(xxwidgets_widget *widget, int minimum)
-{
-    SIZE size = window_text_size(native(widget), 0);
-    return size.cx + 24 > minimum ? size.cx + 24 : minimum;
-}
-
 static TEXTMETRICW control_font_metrics(xxwidgets_widget *widget)
 {
     TEXTMETRICW metrics = {0};
@@ -788,202 +782,13 @@ static TEXTMETRICW control_font_metrics(xxwidgets_widget *widget)
     return metrics;
 }
 
-static int combo_text_width(xxwidgets_widget *widget, int minimum)
-{
-    HDC dc = GetDC(native(widget));
-    size_t i;
-    int width = control_text_width(widget, minimum);
-    if (dc) {
-        HFONT font = (HFONT)SendMessageW(native(widget), WM_GETFONT, 0, 0);
-        HGDIOBJ old = font ? SelectObject(dc, font) : NULL;
-        for (i = 0; i < xxwidgets_combobox_count(widget); ++i) {
-            const xx_meta_string *record;
-            SIZE size = {0};
-            if (xxwidgets_combobox_get_record(widget, i, &record) == XXWIDGETS_OK &&
-                record->meta_string->length <= INT_MAX &&
-                GetTextExtentPoint32W(dc, record->meta_string->data, (int)record->meta_string->length, &size) &&
-                size.cx + 32 > width) width = size.cx + 32;
-        }
-        if (old) SelectObject(dc, old);
-        ReleaseDC(native(widget), dc);
-    }
-    return width;
-}
-
-static void layout(void)
-{
-    RECT bounds, window_bounds;
-    TEXTMETRICW metrics, edit_metrics;
-    int width, height, row = 26, label = 16, i, x, path_y, fact_label_y, fact_y, results_y, results_bottom;
-    int row_a, row_b, status_y, tools_y, tools2_y, required_width, status_height = 36, fact_width = 90, type_width;
-    int scan_width, browse_width, signatures_width, flags_width, databases_width, tags_width, directory_width, log_width, update_width;
-    int report_width, elapsed_width = 100, settings_width[7], tool_width[8], exit_width, tags_room, recent_width;
-    xxwidgets_widget *tools[8];
-    const int margin = 10, gap = 8, spacing = 6;
-    if (!g_results) return;
-    tools[0] = g_fileInformationButton; tools[1] = g_entropyButton; tools[2] = g_hashButton;
-    tools[3] = g_stringsButton; tools[4] = g_hexViewButton; tools[5] = g_disasmButton; tools[6] = g_memoryMapButton; tools[7] = NULL;
-    metrics = control_font_metrics(g_scan);
-    edit_metrics = control_font_metrics(g_path);
-    if (metrics.tmHeight + metrics.tmExternalLeading + 10 > row)
-        row = metrics.tmHeight + metrics.tmExternalLeading + 10;
-    if (edit_metrics.tmHeight + edit_metrics.tmExternalLeading + 10 > row)
-        row = edit_metrics.tmHeight + edit_metrics.tmExternalLeading + 10;
-    if (metrics.tmHeight + metrics.tmExternalLeading + 2 > label)
-        label = metrics.tmHeight + metrics.tmExternalLeading + 2;
-    if (2 * label > status_height) status_height = 2 * label;
-    scan_width = control_text_width(g_scan, 110);
-    browse_width = control_text_width(g_browse, 44);
-    signatures_width = control_text_width(g_signaturesButton, 92);
-    directory_width = control_text_width(g_directoryButton, 92);
-    log_width = control_text_width(g_logButton, 70);
-    update_width = control_text_width(g_updateButton, 110);
-    report_width = control_text_width(g_reportButton, 36);
-    /* Recent files is a symbol: the usual 26 pixels, wider only for a large font. */
-    recent_width = window_text_size(native(g_recent), 0).cx + 14;
-    if (recent_width < 26) recent_width = 26;
-    flags_width = combo_text_width(g_flags, 130);
-    databases_width = combo_text_width(g_databases, 130);
-    exit_width = control_text_width(g_exit, 92);
-    for (i = 0; i < 4; ++i) {
-        int needed = control_text_width(g_factLabels[i], 60) + 16;
-        if (needed > fact_width) fact_width = needed;
-    }
-    settings_width[0] = control_text_width(g_options, 110);
-    settings_width[1] = control_text_width(g_aboutButton, 90);
-    settings_width[2] = control_text_width(g_importsButton, 90);
-    settings_width[3] = control_text_width(g_exportsButton, 90);
-    settings_width[4] = control_text_width(g_resourcesButton, 110);
-    settings_width[5] = control_text_width(g_symbolsButton, 90);
-    settings_width[6] = control_text_width(g_extractorButton, 100);
-    for (i = 0; tools[i]; ++i) tool_width[i] = control_text_width(tools[i], i == 0 ? 150 : 90);
-    /* The widest of: the tool rows, DIE's top row, the two button rows. */
-    required_width = 2 * margin + exit_width + gap;
-    for (i = 0; tools[i]; ++i) required_width += tool_width[i] + spacing;
-    x = 2 * margin + settings_width[0] + settings_width[1] + settings_width[2] + settings_width[3] + settings_width[4] + settings_width[5] + settings_width[6] + 6 * spacing;
-    if (x > required_width) required_width = x;
-    x = 2 * margin + 190 + 4 * (fact_width + spacing);
-    if (x > required_width) required_width = x;
-    x = 2 * margin + signatures_width + flags_width + databases_width + 2 * 120 + 5 * spacing + gap + scan_width;
-    if (x > required_width) required_width = x;
-    x = 2 * margin + directory_width + log_width + update_width + report_width + elapsed_width + 4 * spacing + 2 * gap + scan_width;
-    if (x > required_width) required_width = x;
-    if (30 * edit_metrics.tmAveCharWidth + browse_width + gap + 2 * margin > required_width)
-        required_width = 30 * edit_metrics.tmAveCharWidth + browse_width + gap + 2 * margin;
-    path_y = margin + label + 2;
-    fact_label_y = path_y + row + gap;
-    fact_y = fact_label_y + label + 2;
-    results_y = fact_y + row + gap;
-    GetClientRect(native(g_window), &bounds);
-    width = bounds.right; height = bounds.bottom;
-    GetWindowRect(native(g_window), &window_bounds);
-    g_minWindowWidth = required_width + (window_bounds.right - window_bounds.left - width);
-    if (g_minWindowWidth < 720) g_minWindowWidth = 720;
-    g_minWindowHeight = results_y + 60 + 4 * row + status_height + 5 * gap + 4 + margin +
-        (window_bounds.bottom - window_bounds.top - height);
-    if (g_minWindowHeight < 420) g_minWindowHeight = 420;
-    /* From the bottom: two tool rows, the status, DIE's two button rows. */
-    tools2_y = height - margin - row;
-    tools_y = tools2_y - gap - row;
-    status_y = tools_y - gap - status_height;
-    row_b = status_y - gap - row;
-    row_a = row_b - 4 - row;
-    results_bottom = row_a - gap;
-    if (results_bottom < results_y + 40) results_bottom = results_y + 40;
-    MoveWindow(native(g_fileLabel), margin, margin, width - 2 * margin, label, TRUE);
-    MoveWindow(native(g_recent), margin, path_y, recent_width, row, TRUE);
-    MoveWindow(native(g_path), margin + recent_width + 4, path_y, width - 2 * margin - browse_width - gap - recent_width - 4, row, TRUE);
-    MoveWindow(native(g_browse), width - margin - browse_width, path_y, browse_width, row, TRUE);
-    /* Top row: Scan (the file type) and the file's Endianness, Mode, Architecture, Type. */
-    type_width = width - 2 * margin - 4 * (fact_width + spacing);
-    MoveWindow(native(g_typeLabel), margin, fact_label_y, type_width, label, TRUE);
-    /* ComboBox height includes its dropdown list. */
-    SendMessageW(native(g_type), CB_SETITEMHEIGHT, (WPARAM)-1, row - 6);
-    SendMessageW(native(g_type), CB_SETITEMHEIGHT, 0, row - 6);
-    MoveWindow(native(g_type), margin, fact_y, type_width, row + 10 * row, TRUE);
-    for (i = 0; i < 4; ++i) {
-        x = margin + type_width + spacing + i * (fact_width + spacing);
-        MoveWindow(native(g_factLabels[i]), x, fact_label_y, fact_width, label, TRUE);
-        MoveWindow(native(g_facts[i]), x, fact_y, fact_width, row, TRUE);
-    }
-    MoveWindow(native(g_results), margin, results_y, width - 2 * margin, results_bottom - results_y, TRUE);
-    /* Signatures, Flags, Database, the tag filters | a tall Scan button. */
-    MoveWindow(native(g_scan), width - margin - scan_width, row_a, scan_width, row_b + row - row_a, TRUE);
-    tags_room = width - 2 * margin - scan_width - gap - signatures_width - flags_width - databases_width - 4 * spacing;
-    tags_width = tags_room / 2 > 250 ? 250 : tags_room / 2;
-    if (tags_width < 60) tags_width = 60;
-    x = margin;
-    MoveWindow(native(g_signaturesButton), x, row_a, signatures_width, row, TRUE);
-    x += signatures_width + spacing;
-    MoveWindow(native(g_flags), x, row_a, flags_width, row, TRUE);
-    x += flags_width + spacing;
-    MoveWindow(native(g_databases), x, row_a, databases_width, row, TRUE);
-    x += databases_width + spacing;
-    MoveWindow(native(g_includeTags), x, row_a, tags_width, row, TRUE);
-    x += tags_width + spacing;
-    MoveWindow(native(g_excludeTags), x, row_a, tags_width, row, TRUE);
-    /* Explicitly hide scan panel labels which are not part of DIE's active layout. */
-    if (g_flagLabel) ShowWindow(native(g_flagLabel), SW_HIDE);
-    if (g_databaseLabel) ShowWindow(native(g_databaseLabel), SW_HIDE);
-    if (g_includeTagsLabel) ShowWindow(native(g_includeTagsLabel), SW_HIDE);
-    if (g_excludeTagsLabel) ShowWindow(native(g_excludeTagsLabel), SW_HIDE);
-    /* Directory, Log, Update database | the report (">") and the scan time beside Scan. */
-    MoveWindow(native(g_directoryButton), margin, row_b, directory_width, row, TRUE);
-    MoveWindow(native(g_logButton), margin + directory_width + spacing, row_b, log_width, row, TRUE);
-    MoveWindow(native(g_updateButton), margin + directory_width + log_width + 2 * spacing, row_b, update_width, row, TRUE);
-    x = width - margin - scan_width - gap - elapsed_width;
-    MoveWindow(native(g_msec), x, row_b, elapsed_width, row, TRUE);
-    MoveWindow(native(g_reportButton), x - spacing - report_width, row_b, report_width, row, TRUE);
-    MoveWindow(native(g_status), margin, status_y, width - 2 * margin, status_height, TRUE);
-    x = margin;
-    MoveWindow(native(g_options), x, tools_y, settings_width[0], row, TRUE);
-    x += settings_width[0] + spacing;
-    MoveWindow(native(g_aboutButton), x, tools_y, settings_width[1], row, TRUE);
-    x += settings_width[1] + spacing;
-    MoveWindow(native(g_importsButton), x, tools_y, settings_width[2], row, TRUE);
-    x += settings_width[2] + spacing;
-    MoveWindow(native(g_exportsButton), x, tools_y, settings_width[3], row, TRUE);
-    x += settings_width[3] + spacing;
-    MoveWindow(native(g_resourcesButton), x, tools_y, settings_width[4], row, TRUE);
-    x += settings_width[4] + spacing;
-    MoveWindow(native(g_symbolsButton), x, tools_y, settings_width[5], row, TRUE);
-    x += settings_width[5] + spacing;
-    MoveWindow(native(g_extractorButton), x, tools_y, settings_width[6], row, TRUE);
-    x = margin;
-    for (i = 0; tools[i]; ++i) {
-        MoveWindow(native(tools[i]), x, tools2_y, tool_width[i], row, TRUE);
-        x += tool_width[i] + spacing;
-    }
-    MoveWindow(native(g_exit), width - margin - exit_width, tools2_y, exit_width, row, TRUE);
-}
-
-static LRESULT CALLBACK path_subclass(HWND handle, UINT message, WPARAM wp, LPARAM lp,
-                                      UINT_PTR subclass_id, DWORD_PTR reference)
-{
-    (void)subclass_id; (void)reference;
-    if (message == WM_GETDLGCODE) {
-        MSG *key = (MSG *)lp;
-        LRESULT code = DefSubclassProc(handle, message, wp, lp);
-        if (key && key->wParam == VK_RETURN) code |= DLGC_WANTMESSAGE;
-        return code;
-    }
-    if (message == WM_KEYDOWN && wp == VK_RETURN) { g_pending = ACTION_SCAN; return 0; }
-    if (message == WM_CHAR && wp == VK_RETURN) return 0;
-    if (message == WM_NCDESTROY) RemoveWindowSubclass(handle, path_subclass, 1);
-    return DefSubclassProc(handle, message, wp, lp);
-}
-
+/* Another instance hands its file over; the panel's own layout and the
+ * window minimum belong to xxwidgets (WM_GETMINMAXINFO in the backend). */
 static LRESULT CALLBACK window_subclass(HWND handle, UINT message, WPARAM wp, LPARAM lp,
                                         UINT_PTR subclass_id, DWORD_PTR reference)
 {
     (void)subclass_id; (void)reference;
     switch (message) {
-    case WM_GETMINMAXINFO: {
-        MINMAXINFO *info = (MINMAXINFO *)lp;
-        info->ptMinTrackSize.x = g_minWindowWidth;
-        info->ptMinTrackSize.y = g_minWindowHeight;
-        return 0;
-    }
     case WM_COPYDATA: {
         const COPYDATASTRUCT *data = (const COPYDATASTRUCT *)lp;
         if (data && data->dwData == GUI_FRONTEND_COPYDATA_ID && data->cbData > 1 && data->cbData <= GUI_PREFERENCE_PATH_MAX &&
@@ -991,7 +796,7 @@ static LRESULT CALLBACK window_subclass(HWND handle, UINT message, WPARAM wp, LP
             !memchr(data->lpData, 0, data->cbData - 1)) {
             if (xxwidgets_widget_set_text(g_path, (const char *)data->lpData) == XXWIDGETS_OK) {
                 gui_frontend_remember_file((const char *)data->lpData);
-                if (gui_frontend_scan_after_open()) g_pending = ACTION_SCAN;
+                g_pending = ACTION_OPEN;
                 return TRUE;
             }
         }
@@ -1003,130 +808,205 @@ static LRESULT CALLBACK window_subclass(HWND handle, UINT message, WPARAM wp, LP
     return DefSubclassProc(handle, message, wp, lp);
 }
 
+static void do_recent(void)
+{
+    char path[GUI_PREFERENCE_PATH_MAX];
+    int accepted = 0;
+    xxwidgets_status status = gui_frontend_recent_dialog(g_window, path, sizeof(path), &accepted);
+    if (status == XXWIDGETS_OK && accepted) open_file(path);
+    else if (status != XXWIDGETS_OK) report_ui_error(CDIE_N_("Recent files"), status);
+}
+
+/* The path field as typed: opened (scanned when Options say so). */
+static void do_open(void)
+{
+    char *path = read_path(CDIE_N_("Read file name"));
+    if (!path) return;
+    if (gui_frontend_scan_after_open()) do_scan();
+    else if (path[0]) (void)load_file(path);
+    HeapFree(GetProcessHeap(), 0, path);
+}
+
+static void request_exit(void)
+{
+    g_running = 0;
+    g_quit = 1;
+    xxwidgets_app_quit(g_app, 0);
+}
+
+/* The scan bar's Signatures, Directory and Log open through gui_tree, as a
+ * click of theirs always did: marked here, shown by gui_tree_process. */
+static void tree_button(xxwidgets_widget *button)
+{
+    xxwidgets_event click;
+    memset(&click, 0, sizeof(click));
+    click.type = XXWIDGETS_EVENT_CLICK;
+    click.widget = button;
+    (void)gui_tree_event(g_panel, &click);
+}
+
+static int do_settings(gui_options_page_id start);
+static gui_update_result do_update_database(xxwidgets_widget *owner);
+static void do_about(void);
+static void do_report(void);
+static void do_browse(void);
+static xxwidgets_status current_options(gui_options_values *values);
+
+/* The hooks of the shared dispatcher (gui_main_actions.h). */
+static void hook_browse(void *user) { (void)user; do_browse(); }
+static void hook_recent(void *user) { (void)user; do_recent(); }
+/* Return in the path field scans it, as it always did. */
+static void hook_open_path(void *user) { (void)user; do_scan(); }
+/* The dispatcher picked the type (g_fileTypes); do_scan scans with it. */
+static void hook_scan(void *user, int type_id) { (void)user; (void)type_id; do_scan(); }
+static void hook_report(void *user) { (void)user; do_report(); }
+static void hook_signatures(void *user) { (void)user; tree_button(g_signaturesButton); }
+static void hook_directory(void *user) { (void)user; tree_button(g_directoryButton); }
+static void hook_log(void *user) { (void)user; tree_button(g_logButton); }
+static void hook_update(void *user) { (void)user; (void)do_update_database(g_window); }
+static void hook_options(void *user, int page) { (void)user; (void)do_settings(page < 0 ? g_optionsPage : (gui_options_page_id)page); }
+static void hook_about(void *user) { (void)user; do_about(); }
+static void hook_exit(void *user) { (void)user; request_exit(); }
+static void hook_error(void *user, const char *text) { (void)user; show_error(text); }
+
+/* Changes only: View/Advanced and Scan/Engine reach die.ini as Qt writes them. */
+static void hook_settings_changed(void *user)
+{
+    gui_options_values values;
+    (void)user;
+    if (!g_settings || current_options(&values) != XXWIDGETS_OK) return;
+    if (!gui_settings_save(g_settings, &values, g_optionsPage))
+        show_error(CDIE_TR("Options applied, but they could not be saved for the next start."));
+}
+
+static void main_hooks(gui_main_hooks *hooks)
+{
+    memset(hooks, 0, sizeof(*hooks));
+    hooks->browse = hook_browse; hooks->recent = hook_recent; hooks->open_path = hook_open_path;
+    hooks->scan = hook_scan; hooks->report = hook_report; hooks->signatures = hook_signatures;
+    hooks->directory = hook_directory; hooks->log = hook_log; hooks->update = hook_update;
+    hooks->options = hook_options; hooks->about = hook_about; hooks->exit = hook_exit;
+    hooks->settings_changed = hook_settings_changed; hooks->error = hook_error;
+    hooks->with_update = gui_update_supported();
+    hooks->file_types = &g_fileTypes;
+}
+
+/* An action of the main panel, carried out by the shared dispatcher. */
+static void run_die_action(const xxwidgets_die_action *action)
+{
+    gui_main_hooks hooks;
+    char *path = read_path(CDIE_N_("Read file path"));
+    main_hooks(&hooks);
+    (void)gui_main_run_action(g_window, g_main, path ? path : "", action, &hooks);
+    if (path) HeapFree(GetProcessHeap(), 0, path);
+}
+
+static void run_shortcut(gui_shortcut_action shortcut)
+{
+    gui_main_hooks hooks;
+    char *path = read_path(CDIE_N_("Read file path"));
+    main_hooks(&hooks);
+    if (!gui_main_run_shortcut(g_window, g_main, path ? path : "", shortcut, &hooks) && path && !path[0])
+        xxwidgets_widget_focus(g_path);
+    if (path) HeapFree(GetProcessHeap(), 0, path);
+}
+
+/* What the main loop does once app_poll returns. */
+static void run_pending(int action)
+{
+    if (action == ACTION_OPEN) do_open();
+    else if (action == ACTION_DIE) {
+        xxwidgets_die_action die = g_pendingDie;
+        memset(&g_pendingDie, 0, sizeof(g_pendingDie));
+        run_die_action(&die);
+    } else if (action >= ACTION_SHORTCUT) {
+        gui_shortcut_action shortcut = gui_shortcuts_action(action, ACTION_SHORTCUT);
+        if (shortcut != GUI_SHORTCUT_NONE) run_shortcut(shortcut);
+    }
+}
+
 static void on_event(xxwidgets_app *app, const xxwidgets_event *event, void *user_data)
 {
-    (void)user_data;
-    if ((event->type == XXWIDGETS_EVENT_CLOSE && event->widget == g_window) ||
-        (event->type == XXWIDGETS_EVENT_CLICK && event->widget == g_exit)) {
-        g_running = 0;
-        xxwidgets_app_quit(app, 0);
-    } else if (event->type == XXWIDGETS_EVENT_RESIZE && event->widget == g_window) layout();
-    else if (event->type == XXWIDGETS_EVENT_DROP_FILES && event->widget == g_window && event->path_count) {
-        if (xxwidgets_widget_set_text(g_path, event->paths[0]) == XXWIDGETS_OK) {
+    xxwidgets_die_action action;
+    (void)app; (void)user_data;
+    if (event->type == XXWIDGETS_EVENT_CLOSE && event->widget == g_window) {
+        request_exit();
+        return;
+    }
+    if (event->type == XXWIDGETS_EVENT_DROP_FILES && event->widget == g_window) {
+        if (event->path_count && xxwidgets_widget_set_text(g_path, event->paths[0]) == XXWIDGETS_OK) {
             gui_frontend_remember_file(event->paths[0]);
-            if (gui_frontend_scan_after_open()) g_pending = ACTION_SCAN;
+            g_pending = ACTION_OPEN;
         }
-    } else if (gui_tree_event(g_panel, event)) {
+        return;
+    }
+    if (event->type == XXWIDGETS_EVENT_SHORTCUT) {
+        g_pending = event->value;
+        return;
+    }
+    if (g_main && xxwidgets_die_main_panel_handle_event(g_main, event, &action)) {
+        switch (action.id) {
+        case XXWIDGETS_DIE_ACTION_NONE: break;
+        case XXWIDGETS_DIE_ACTION_ADVANCED_CHANGED:
+            /* The view is applied; storing it opens nothing. */
+            run_die_action(&action);
+            break;
+        case XXWIDGETS_DIE_ACTION_PATH_EDITED:
+            /* The types describe the last opened file: none is chosen for a
+             * newly typed path before it is opened. */
+            if (g_type) xxwidgets_widget_set_enabled(g_type, 0);
+            break;
+        default:
+            g_pendingDie = action;
+            g_pending = ACTION_DIE;
+            break;
+        }
+        return;
+    }
+    if (gui_tree_event(g_panel, event)) {
         /* S or ? on a result row: shown after polling returns. */
-    } else if (event->type == XXWIDGETS_EVENT_CLICK) {
-        if (event->widget == g_scan) g_pending = ACTION_SCAN;
-        else if (event->widget == g_browse) g_pending = ACTION_BROWSE;
-        else if (event->widget == g_recent) g_pending = ACTION_RECENT;
-        else if (event->widget == g_options) g_pending = ACTION_OPTIONS;
-        else if (event->widget == g_aboutButton) g_pending = ACTION_ABOUT;
-        else if (event->widget == g_reportButton) g_pending = ACTION_REPORT;
-        else if (event->widget == g_fileInformationButton) g_pending = ACTION_FILE_INFORMATION;
-        else if (event->widget == g_entropyButton) g_pending = ACTION_ENTROPY;
-        else if (event->widget == g_hashButton) g_pending = ACTION_HASH;
-        else if (event->widget == g_stringsButton) g_pending = ACTION_STRINGS;
-        else if (event->widget == g_hexViewButton) g_pending = ACTION_HEX_VIEW;
-        else if (event->widget == g_disasmButton) g_pending = ACTION_DISASM;
-        else if (event->widget == g_memoryMapButton) g_pending = ACTION_MEMORY_MAP;
-        else if (event->widget == g_importsButton) g_pending = ACTION_IMPORTS;
-        else if (event->widget == g_exportsButton) g_pending = ACTION_EXPORTS;
-        else if (event->widget == g_resourcesButton) g_pending = ACTION_RESOURCES;
-        else if (event->widget == g_symbolsButton) g_pending = ACTION_SYMBOLS;
-        else if (event->widget == g_extractorButton) g_pending = ACTION_EXTRACTOR;
-        else if (event->widget == g_updateButton) g_pending = ACTION_UPDATE;
     } else if (event->type == XXWIDGETS_EVENT_CHANGE &&
                (event->widget == g_flags || event->widget == g_databases ||
                 event->widget == g_includeTags || event->widget == g_excludeTags)) {
         xxwidgets_status status = read_panel_options();
         if (status != XXWIDGETS_OK) report_ui_error(CDIE_N_("Read scan options"), status);
-    } else if (event->type == XXWIDGETS_EVENT_CHANGE && event->widget == g_path && g_type) {
-        /* These choices describe the last scanned file. Refresh them before
-         * allowing a type to be selected for a newly entered path. */
-        xxwidgets_widget_set_enabled(g_type, 0);
-    } else if (event->type == XXWIDGETS_EVENT_SELECT && event->widget == g_type) {
-        SIZE_T required = 0;
-        if (xxwidgets_widget_get_text(g_path, NULL, 0, &required) == XXWIDGETS_OK && required > 1)
-            g_pending = ACTION_SCAN;
-    } else if (event->type == XXWIDGETS_EVENT_SHORTCUT) g_pending = event->value;
-}
-
-static int create_control(xxwidgets_widget **control, xxwidgets_kind kind, const char *text, int id)
-{
-    xxwidgets_rect bounds = {1, 1, 12, 1};
-    xxwidgets_status status = xxwidgets_widget_create(g_app, g_window, kind, CDIE_TR(text), bounds, control);
-    if (status != XXWIDGETS_OK) return 0;
-    if (id) SetWindowLongPtrW(native(*control), GWLP_ID, id);
-    return 1;
+    }
 }
 
 /* A shortcut does what its button does, so nothing while the button is
  * disabled (no report yet, history off, no updater). */
 static int shortcut_allowed(xxwidgets_widget *window, int action, void *user)
 {
+    gui_shortcut_action shortcut = gui_shortcuts_action(action, ACTION_SHORTCUT);
     (void)window; (void)user;
-    if (action == ACTION_REPORT) return IsWindowEnabled(native(g_reportButton)) != 0;
-    if (action == ACTION_RECENT) return IsWindowEnabled(native(g_recent)) != 0;
-    if (action == ACTION_UPDATE) return IsWindowEnabled(native(g_updateButton)) != 0;
+    if (shortcut == GUI_SHORTCUT_REPORT) return IsWindowEnabled(native(g_reportButton)) != 0;
+    if (shortcut == GUI_SHORTCUT_RECENT) return IsWindowEnabled(native(g_recent)) != 0;
+    if (shortcut == GUI_SHORTCUT_UPDATE) return IsWindowEnabled(native(g_updateButton)) != 0;
     return 1;
-}
-
-static void add_tooltip(xxwidgets_widget *button, const char *text)
-{
-    TOOLINFOW tool;
-    WCHAR *wide = xx_str_utf8_to_unicode(CDIE_TR(text));
-    if (!wide) return;
-    ZeroMemory(&tool, sizeof(tool));
-    tool.cbSize = sizeof(tool);
-    tool.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
-    tool.hwnd = native(g_window);
-    tool.uId = (UINT_PTR)native(button);
-    tool.lpszText = wide;
-    SendMessageW(g_tooltip, TTM_ADDTOOLW, 0, (LPARAM)&tool);
-    xx_str_wfree(wide);
 }
 
 static int create_controls(void)
 {
-    xxwidgets_rect panel_bounds = {1, 4, 96, 18};
-    /* As on GTK: F2 Options, Ctrl+Shift+R the report (Cmd+Shift+R on macOS). */
-    xxwidgets_shortcut shortcuts[] = {
-        {"F5", ACTION_SCAN}, {"Ctrl+O", ACTION_BROWSE}, {"Ctrl+R", ACTION_RECENT}, {"F1", ACTION_ABOUT}, {"F2", ACTION_OPTIONS}, {"Ctrl+Shift+R", ACTION_REPORT},
-        {"Ctrl+Shift+D", ACTION_DATABASE_PATHS}, {"Ctrl+I", ACTION_FILE_INFORMATION}, {"Ctrl+E", ACTION_ENTROPY}, {"Ctrl+H", ACTION_HASH}, {"Ctrl+Shift+S", ACTION_STRINGS}, {"Ctrl+Shift+X", ACTION_HEX_VIEW}, {"Ctrl+Shift+A", ACTION_DISASM}, {"Ctrl+M", ACTION_MEMORY_MAP}, {"Ctrl+Shift+I", ACTION_IMPORTS}, {"Ctrl+Shift+E", ACTION_EXPORTS}, {"Ctrl+Shift+U", ACTION_RESOURCES}, {"Ctrl+Shift+Y", ACTION_SYMBOLS}, {"Ctrl+Shift+T", ACTION_EXTRACTOR}, {"Ctrl+U", ACTION_UPDATE}
-    };
-    if (!create_control(&g_fileLabel, XXWIDGETS_LABEL, CDIE_N_("File name"), 0) ||
-        !create_control(&g_path, XXWIDGETS_EDIT, "", IDC_EDIT_PATH) ||
-        /* A down arrow, as a history list; ">" belongs to the report. */
-        !create_control(&g_recent, XXWIDGETS_BUTTON, "\xE2\x96\xBC", IDC_BTN_RECENT) ||
-        !create_control(&g_browse, XXWIDGETS_BUTTON, CDIE_N_("..."), IDC_BTN_BROWSE)) return 0;
-    /* Tab follows creation order (IsDialogMessage), so controls are created in
-     * screen order: the scan panel, Update database (in the panel's lower row),
-     * the upper tool row (Options ... Extractor), the lower one, then Exit. */
-    if (xxwidgets_scan_panel_create(g_window, panel_bounds, &g_panel) != XXWIDGETS_OK) return 0;
-    if (!create_control(&g_updateButton, XXWIDGETS_BUTTON, CDIE_N_("Update database"), IDC_BTN_UPDATE) ||
-        !create_control(&g_status, XXWIDGETS_LABEL, "", IDC_STATUS) ||
-        !create_control(&g_options, XXWIDGETS_BUTTON, CDIE_N_("Options"), IDC_BTN_OPTIONS) ||
-        !create_control(&g_aboutButton, XXWIDGETS_BUTTON, CDIE_N_("About"), IDC_BTN_ABOUT) ||
-        !create_control(&g_importsButton, XXWIDGETS_BUTTON, CDIE_N_("Imports"), IDC_BTN_IMPORTS) ||
-        !create_control(&g_exportsButton, XXWIDGETS_BUTTON, CDIE_N_("Exports"), IDC_BTN_EXPORTS) ||
-        !create_control(&g_resourcesButton, XXWIDGETS_BUTTON, CDIE_N_("Resources"), IDC_BTN_RESOURCES) ||
-        !create_control(&g_symbolsButton, XXWIDGETS_BUTTON, CDIE_N_("Symbols"), IDC_BTN_SYMBOLS) ||
-        !create_control(&g_extractorButton, XXWIDGETS_BUTTON, CDIE_N_("Extractor"), IDC_BTN_EXTRACTOR) ||
-        !create_control(&g_fileInformationButton, XXWIDGETS_BUTTON, CDIE_N_("File Information"), IDC_BTN_FILE_INFORMATION) ||
-        !create_control(&g_entropyButton, XXWIDGETS_BUTTON, CDIE_N_("Entropy"), IDC_BTN_ENTROPY) ||
-        !create_control(&g_hashButton, XXWIDGETS_BUTTON, CDIE_N_("Hash"), IDC_BTN_HASH) ||
-        !create_control(&g_stringsButton, XXWIDGETS_BUTTON, CDIE_N_("Strings"), IDC_BTN_STRINGS) ||
-        !create_control(&g_hexViewButton, XXWIDGETS_BUTTON, CDIE_N_("Hex View"), IDC_BTN_HEX_VIEW) ||
-        !create_control(&g_disasmButton, XXWIDGETS_BUTTON, CDIE_N_("Disasm"), IDC_BTN_DISASM) ||
-        !create_control(&g_memoryMapButton, XXWIDGETS_BUTTON, CDIE_N_("Memory Map"), IDC_BTN_MEMORY_MAP) ||
-        !create_control(&g_exit, XXWIDGETS_BUTTON, CDIE_N_("Exit"), IDC_BTN_EXIT)) return 0;
-    /* A build without the updater keeps the button, disabled. */
-    if (!gui_update_supported() && xxwidgets_widget_set_enabled(g_updateButton, 0) != XXWIDGETS_OK) return 0;
-    g_type =xxwidgets_scan_panel_control(g_panel, XXWIDGETS_SCAN_PANEL_FILE_TYPE);
-    g_typeLabel = xxwidgets_scan_panel_control(g_panel, XXWIDGETS_SCAN_PANEL_FILE_TYPE_LABEL);
+    static xxwidgets_shortcut shortcuts[2 * GUI_SHORTCUT_COUNT];
+    static char storage[1024];
+    static const xxwidgets_scan_panel_control_id facts[4] = {
+        XXWIDGETS_SCAN_PANEL_ENDIANNESS, XXWIDGETS_SCAN_PANEL_MODE, XXWIDGETS_SCAN_PANEL_ARCHITECTURE, XXWIDGETS_SCAN_PANEL_TYPE};
+    xxwidgets_file_name_bar *bar;
+    size_t count;
+    int i;
+    /* Update database is in the right column above Shortcuts (Q2), disabled
+     * without an updater; the tag filters stay in the scan bar (Q3). */
+    if (xxwidgets_die_main_panel_create(g_window, XXWIDGETS_DIE_MAIN_PANEL_SHOW_UPDATE | XXWIDGETS_DIE_MAIN_PANEL_TAG_FILTERS,
+                                        &g_main) != XXWIDGETS_OK) return 0;
+    bar = xxwidgets_die_main_panel_file_name_bar(g_main);
+    g_header = xxwidgets_die_main_panel_file_header(g_main);
+    g_panel = xxwidgets_die_main_panel_scan_panel(g_main);
+    g_side = xxwidgets_die_main_panel_side_panel(g_main);
+    if (!bar || !g_header || !g_panel || !g_side) return 0;
+    g_path = xxwidgets_file_name_bar_control(bar, XXWIDGETS_FILE_NAME_BAR_PATH);
+    g_recent = xxwidgets_file_name_bar_control(bar, XXWIDGETS_FILE_NAME_BAR_RECENT);
+    g_browse = xxwidgets_file_name_bar_control(bar, XXWIDGETS_FILE_NAME_BAR_BROWSE);
+    g_type = xxwidgets_value_field_control(xxwidgets_file_header_field(g_header, XXWIDGETS_FILE_HEADER_FILE_TYPE), XXWIDGETS_VALUE_FIELD_VALUE);
     g_flags = xxwidgets_scan_panel_control(g_panel, XXWIDGETS_SCAN_PANEL_FLAGS);
     g_databases = xxwidgets_scan_panel_control(g_panel, XXWIDGETS_SCAN_PANEL_DATABASES);
     g_includeTags = xxwidgets_scan_panel_control(g_panel, XXWIDGETS_SCAN_PANEL_INCLUDE_TAGS);
@@ -1141,50 +1021,31 @@ static int create_controls(void)
     g_signaturesButton = xxwidgets_scan_panel_control(g_panel, XXWIDGETS_SCAN_PANEL_SIGNATURES);
     g_directoryButton = xxwidgets_scan_panel_control(g_panel, XXWIDGETS_SCAN_PANEL_DIRECTORY);
     g_logButton = xxwidgets_scan_panel_control(g_panel, XXWIDGETS_SCAN_PANEL_LOG);
+    /* With the engine row these are the boxed, centred VALUE fields. */
     g_msec = xxwidgets_scan_panel_control(g_panel, XXWIDGETS_SCAN_PANEL_ELAPSED);
-    {
-        static const xxwidgets_scan_panel_control_id facts[4][2] = {
-            {XXWIDGETS_SCAN_PANEL_ENDIANNESS_LABEL, XXWIDGETS_SCAN_PANEL_ENDIANNESS}, {XXWIDGETS_SCAN_PANEL_MODE_LABEL, XXWIDGETS_SCAN_PANEL_MODE},
-            {XXWIDGETS_SCAN_PANEL_ARCHITECTURE_LABEL, XXWIDGETS_SCAN_PANEL_ARCHITECTURE}, {XXWIDGETS_SCAN_PANEL_TYPE_LABEL, XXWIDGETS_SCAN_PANEL_TYPE}};
-        for (int i = 0; i < 4; ++i) {
-            g_factLabels[i] = xxwidgets_scan_panel_control(g_panel, facts[i][0]);
-            g_facts[i] = xxwidgets_scan_panel_control(g_panel, facts[i][1]);
-            if (!g_factLabels[i] || !g_facts[i]) return 0;
-            /* Boxed and centered, as DIE's read-only fields. */
-            SetWindowLongPtrW(native(g_facts[i]), GWL_STYLE, (GetWindowLongPtrW(native(g_facts[i]), GWL_STYLE) &
-                ~(LONG_PTR)SS_TYPEMASK) | SS_CENTER | SS_CENTERIMAGE | WS_BORDER);
-        }
-    }
-    if (!g_type || !g_typeLabel || !g_flags || !g_databases || !g_scan || !g_reportButton || !g_results ||
+    for (i = 0; i < 4; ++i)
+        if (!(g_facts[i] = xxwidgets_scan_panel_control(g_panel, facts[i]))) return 0;
+    g_advanced = xxwidgets_side_panel_control(g_side, XXWIDGETS_DIE_SIDE_ADVANCED);
+    g_updateButton = xxwidgets_side_panel_control(g_side, XXWIDGETS_DIE_SIDE_UPDATE);
+    g_shortcutsButton = xxwidgets_side_panel_control(g_side, XXWIDGETS_DIE_SIDE_SHORTCUTS);
+    g_options = xxwidgets_side_panel_control(g_side, XXWIDGETS_DIE_SIDE_OPTIONS);
+    g_aboutButton = xxwidgets_side_panel_control(g_side, XXWIDGETS_DIE_SIDE_ABOUT);
+    g_exit = xxwidgets_side_panel_control(g_side, XXWIDGETS_DIE_SIDE_EXIT);
+    if (!g_path || !g_recent || !g_browse || !g_type || !g_flags || !g_databases || !g_scan || !g_reportButton || !g_results ||
         !g_signaturesButton || !g_directoryButton || !g_logButton || !g_msec ||
         !g_flagLabel || !g_databaseLabel || !g_includeTags || !g_excludeTags ||
-        !g_includeTagsLabel || !g_excludeTagsLabel || sync_panel_options() != XXWIDGETS_OK) return 0;
-    /* Update database sits right of Log on screen: tab to it next. */
-    SetWindowPos(native(g_updateButton), native(g_logButton), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-    SetWindowLongPtrW(native(g_type), GWLP_ID, IDC_COMBO_TYPE);
-    SetWindowLongPtrW(native(g_flags), GWLP_ID, IDC_COMBO_FLAGS);
-    SetWindowLongPtrW(native(g_databases), GWLP_ID, IDC_COMBO_DATABASES);
-    SetWindowLongPtrW(native(g_includeTags), GWLP_ID, IDC_COMBO_INCLUDE_TAGS);
-    SetWindowLongPtrW(native(g_excludeTags), GWLP_ID, IDC_COMBO_EXCLUDE_TAGS);
-    SetWindowLongPtrW(native(g_scan), GWLP_ID, IDC_BTN_SCAN);
-    SetWindowLongPtrW(native(g_reportButton), GWLP_ID, IDC_BTN_REPORT);
-    SetWindowLongPtrW(native(g_results), GWLP_ID, IDC_SCANRESULTS);
-    xxwidgets_widget_set_text(g_databaseLabel, CDIE_TR("Databases (Main always)"));
-    if (!SetWindowSubclass(native(g_path), path_subclass, 1, 0) ||
-        !SetWindowSubclass(native(g_window), window_subclass, 1, 0)) return 0;
-    SetWindowLongPtrW(native(g_msec), GWLP_ID, IDC_STATIC_MSEC);
-    SetWindowLongPtrW(native(g_msec), GWL_STYLE,
-        (GetWindowLongPtrW(native(g_msec), GWL_STYLE) & ~(LONG_PTR)SS_TYPEMASK) | SS_CENTER | SS_CENTERIMAGE | WS_BORDER);
+        !g_includeTagsLabel || !g_excludeTagsLabel || !g_advanced || !g_updateButton || !g_shortcutsButton ||
+        !g_options || !g_aboutButton || !g_exit || sync_panel_options() != XXWIDGETS_OK) return 0;
+    if (gui_update_supported() &&
+        xxwidgets_side_panel_set_item_enabled(g_side, XXWIDGETS_DIE_SIDE_UPDATE, 1) != XXWIDGETS_OK) return 0;
+    if (!SetWindowSubclass(native(g_window), window_subclass, 1, 0)) return 0;
     if (xxwidgets_window_set_accept_file_drops(g_window, 1) != XXWIDGETS_OK) return 0;
-    /* Without tooltips (no common controls) the buttons still work. */
-    g_tooltip = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, NULL, WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX,
-                                CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, native(g_window), NULL, g_hInst, NULL);
-    if (g_tooltip) {
-        add_tooltip(g_recent, CDIE_N_("Recent files (Ctrl+R)"));
-        add_tooltip(g_reportButton, CDIE_N_("Scan report (Ctrl+Shift+R)"));
-    }
-    if (xxwidgets_window_set_shortcut_filter(g_window, shortcut_allowed, NULL) != XXWIDGETS_OK) return 0;
-    return xxwidgets_window_set_shortcuts(g_window, shortcuts, sizeof(shortcuts) / sizeof(shortcuts[0])) == XXWIDGETS_OK;
+    /* One shortcut table for the three desktop frontends (gui_shortcuts.c):
+     * every key the old buttons had keeps working, the tools' too. */
+    count = gui_shortcuts_bindings(gui_shortcuts_platform(), ACTION_SHORTCUT, gui_update_supported(), shortcuts,
+                                   sizeof(shortcuts) / sizeof(shortcuts[0]), storage, sizeof(storage));
+    if (!count || xxwidgets_window_set_shortcut_filter(g_window, shortcut_allowed, NULL) != XXWIDGETS_OK) return 0;
+    return xxwidgets_window_set_shortcuts(g_window, shortcuts, count) == XXWIDGETS_OK;
 }
 
 /* Explicit --smoke-test mode validates the real GUI and modal ownership with
@@ -1282,7 +1143,7 @@ enum { SMOKE_SCAN_CANCEL = 20, SMOKE_SCAN_OK, SMOKE_FONTS_CANCEL, SMOKE_FONTS_OK
        SMOKE_STRINGS_CONFIG, SMOKE_DISK_CANCEL, SMOKE_STRINGS_FILE, SMOKE_PAGE_CANCEL, SMOKE_COLORS_OK, SMOKE_SCAN_MISSING_DB,
        SMOKE_PICKERS, SMOKE_LOG, SMOKE_INFO, SMOKE_DIRECTORY, SMOKE_RECENT, SMOKE_RECENT_EMPTY, SMOKE_SIGNATURE_CONFIRM,
        SMOKE_UPDATE_CANCEL, SMOKE_UPDATE_FAILED, SMOKE_PROGRESS_CANCEL, SMOKE_TOOL_RESIZE, SMOKE_UNEXPECTED, SMOKE_TOOL_INNER,
-       SMOKE_SCAN_PAGE, SMOKE_UPDATE_QUESTION };
+       SMOKE_SCAN_PAGE, SMOKE_UPDATE_QUESTION, SMOKE_MAIN_LAYOUT, SMOKE_SHORTCUTS };
 static const WCHAR *g_smokeAnswer; /* SMOKE_UPDATE_QUESTION: the button to press */
 static const WCHAR *g_smokePage;
 static int g_smokePageState, g_smokeContextChecked;
@@ -2670,9 +2531,10 @@ static int smoke_failed(unsigned int line)
     char text[80], status[512];
     wsprintfA(text, "cdie GUI smoke failed at main_gui.c:%u\r\n", line);
     smoke_write(text);
-    /* The status line usually says why. */
-    if (g_status && xxwidgets_widget_get_text(g_status, status, sizeof(status), NULL) == XXWIDGETS_OK && status[0]) {
-        smoke_write("Status: ");
+    /* The last message usually says why. */
+    smoke_last_message(status, sizeof(status));
+    if (status[0]) {
+        smoke_write("Last message: ");
         smoke_write(status);
         smoke_write("\r\n");
     }
@@ -3062,6 +2924,8 @@ static void smoke_restoreenv(const WCHAR *name, WCHAR *previous)
 /* Update database against this machine only: a stalled server shows the
  * progress dialog, whose Cancel ends the request; the same port closed makes
  * the request fail, shown whole in a text dialog besides the status bar. */
+static xxwidgets_die_action_id smoke_click_action(xxwidgets_widget *control, int run);
+
 static int smoke_update(void)
 {
     smoke_listener listener;
@@ -3077,18 +2941,18 @@ static int smoke_update(void)
     wsprintfW(url, L"http://127.0.0.1:%u/db.zip", port);
     saved_url = smoke_setenv(L"CDIE_UPDATE_URL", url);
     saved_proxy = smoke_setenv(L"CDIE_UPDATE_NOPROXY", L"1");
+    /* Pressed in the right column (Q2), through the shared dispatcher. */
+    g_lastMessage[0] = 0;
     passed = smoke_begin(L"Updating Database", SMOKE_UPDATE_CANCEL);
-    result = passed ? do_update_database(g_window) : GUI_UPDATE_FAILED;
-    passed = smoke_finish() && passed && result == GUI_UPDATE_CANCELLED &&
-        xxwidgets_widget_get_text(g_status, status_text, sizeof(status_text), NULL) == XXWIDGETS_OK &&
-        !strcmp(status_text, CDIE_TR("Database update cancelled."));
+    passed = passed && smoke_click_action(g_updateButton, 1) == XXWIDGETS_DIE_ACTION_UPDATE;
+    smoke_last_message(status_text, sizeof(status_text));
+    passed = smoke_finish() && passed && !strcmp(status_text, CDIE_TR("Database update cancelled."));
     smoke_unlisten(&listener);
     if (passed && smoke_begin_ex(L"Update database", SMOKE_UPDATE_FAILED, 1)) {
         g_smokeExpectPart = L"Database update failed";
         result = do_update_database(g_window);
-        passed = smoke_finish() && result == GUI_UPDATE_FAILED &&
-            xxwidgets_widget_get_text(g_status, status_text, sizeof(status_text), NULL) == XXWIDGETS_OK &&
-            !strncmp(status_text, "Database update failed", 22);
+        smoke_last_message(status_text, sizeof(status_text));
+        passed = smoke_finish() && result == GUI_UPDATE_FAILED && !strncmp(status_text, "Database update failed", 22);
     } else passed = 0;
     smoke_restoreenv(L"CDIE_UPDATE_URL", saved_url);
     smoke_restoreenv(L"CDIE_UPDATE_NOPROXY", saved_proxy);
@@ -3145,7 +3009,8 @@ static int smoke_progress_cancel(void)
         g_smokeOptional = 1;
         do_scan();
         shown = g_smokeDone;
-        passed = smoke_finish() && xxwidgets_widget_get_text(g_status, status_text, sizeof(status_text), NULL) == XXWIDGETS_OK;
+        smoke_last_message(status_text, sizeof(status_text));
+        passed = smoke_finish();
         DeleteFileW(path);
         if (shown) return passed && !strcmp(status_text, CDIE_TR("Scan cancelled.")) && !xxwidgets_scan_panel_count(g_panel);
     }
@@ -3180,12 +3045,217 @@ static int smoke_options_pages(void)
     return 1;
 }
 
+/* The last message (there is no status line): what a step left behind. */
+static void smoke_last_message(char *text, size_t size)
+{
+    xx_rt_snprintf(text, size, "%s", g_lastMessage);
+}
+
+/* Presses a main-window control as a click arrives (a check box through
+ * BM_CLICK, which also toggles it) and returns the panel action it queued;
+ * run 1 then carries it out as the main loop would. */
+static xxwidgets_die_action_id smoke_click_action(xxwidgets_widget *control, int run)
+{
+    xxwidgets_die_action_id id;
+    int action;
+    g_pending = ACTION_NONE;
+    memset(&g_pendingDie, 0, sizeof(g_pendingDie));
+    if (xxwidgets_widget_kind(control) == XXWIDGETS_CHECKBOX) SendMessageW(native(control), BM_CLICK, 0, 0);
+    else smoke_press(control);
+    action = g_pending;
+    id = action == ACTION_DIE ? g_pendingDie.id : XXWIDGETS_DIE_ACTION_NONE;
+    g_pending = ACTION_NONE;
+    if (run) run_pending(action);
+    memset(&g_pendingDie, 0, sizeof(g_pendingDie));
+    return id;
+}
+
+/* The main window's own layout, as every dialog's is checked: inside the
+ * window, nothing overlapping but frames, text fitting (text_sized). */
+static int smoke_main_layout(int text_sized)
+{
+    int passed, sized = g_smokeFontSized, action = g_smokeAction;
+    g_smokeAction = SMOKE_MAIN_LAYOUT;
+    g_smokeFailed = 0;
+    g_smokeFontSized = text_sized;
+    passed = smoke_check_dialog(native(g_window), 0, 0) == 1;
+    g_smokeFontSized = sized;
+    g_smokeAction = action;
+    return passed;
+}
+
+static int smoke_shown(xxwidgets_widget *widget)
+{
+    return widget && IsWindowVisible(native(widget));
+}
+
+static int smoke_live(xxwidgets_widget *widget)
+{
+    return smoke_shown(widget) && IsWindowEnabled(native(widget));
+}
+
+/* A visible button of the main window with this caption (the old tool rows). */
+static int smoke_main_button(const WCHAR *caption)
+{
+    return smoke_child(native(g_window), L"Button", caption, 1) != NULL;
+}
+
+/* Every control of a view (DIE_LOOK.md 3b.5): present, visible and enabled
+ * as the view and the file state say; the old tool rows, the scan panel's
+ * own File type and labels gone. */
+static unsigned int smoke_view_controls(int advanced, int loaded)
+{
+    static const WCHAR *const old_tools[] = {L"File Information", L"Entropy", L"Hash", L"Strings", L"Hex View", L"Disasm",
+        L"Memory Map", L"Imports", L"Exports", L"Resources", L"Symbols", L"Extractor"};
+    xxwidgets_widget *always[] = {g_path, g_browse, g_results, g_advanced, g_shortcutsButton, g_options, g_aboutButton, g_exit};
+    xxwidgets_widget *with_file[] = {g_type, g_flags, g_databases, g_scan, g_signaturesButton, g_directoryButton, g_logButton,
+                                     g_facts[0], g_facts[1], g_facts[2], g_facts[3], g_msec};
+    xxwidgets_widget *hidden[] = {g_flagLabel, g_databaseLabel, g_includeTagsLabel, g_excludeTagsLabel,
+        xxwidgets_scan_panel_control(g_panel, XXWIDGETS_SCAN_PANEL_FILE_TYPE),
+        xxwidgets_scan_panel_control(g_panel, XXWIDGETS_SCAN_PANEL_FILE_TYPE_LABEL)};
+    xxwidgets_widget *base = xxwidgets_value_field_control(xxwidgets_file_header_field(g_header, XXWIDGETS_FILE_HEADER_BASE_ADDRESS),
+                                                           XXWIDGETS_VALUE_FIELD_VALUE);
+    xxwidgets_widget *entry = xxwidgets_value_field_control(xxwidgets_file_header_field(g_header, XXWIDGETS_FILE_HEADER_ENTRY_POINT),
+                                                            XXWIDGETS_VALUE_FIELD_VALUE);
+    xxwidgets_widget *size = xxwidgets_value_field_control(xxwidgets_file_header_field(g_header, XXWIDGETS_FILE_HEADER_FILE_SIZE),
+                                                           XXWIDGETS_VALUE_FIELD_VALUE);
+    int checked = 0;
+    size_t i;
+    for (i = 0; i < sizeof(always) / sizeof(always[0]); ++i) if (!smoke_live(always[i])) return __LINE__ * 100 + (unsigned int)i;
+    for (i = 0; i < sizeof(with_file) / sizeof(with_file[0]); ++i)
+        if (!smoke_shown(with_file[i]) || !IsWindowEnabled(native(with_file[i])) != !loaded) return __LINE__ * 100 + (unsigned int)i;
+    for (i = 0; i < sizeof(hidden) / sizeof(hidden[0]); ++i) if (smoke_shown(hidden[i])) return __LINE__ * 100 + (unsigned int)i;
+    for (i = 0; i < sizeof(old_tools) / sizeof(old_tools[0]); ++i) if (smoke_main_button(old_tools[i])) return __LINE__ * 100 + (unsigned int)i;
+    /* The tag filters stay in the scan bar (Q3); Update database is shown
+     * above Shortcuts, enabled only with an updater (Q2). */
+    if (!smoke_shown(g_includeTags) || !smoke_shown(g_excludeTags) || !smoke_shown(g_reportButton)) return __LINE__;
+    if (!smoke_shown(g_updateButton) || !IsWindowEnabled(native(g_updateButton)) != !gui_update_supported()) return __LINE__;
+    if (!smoke_shown(g_recent) || !smoke_shown(size) || !IsWindowEnabled(native(size)) != !loaded) return __LINE__;
+    /* Base address and Entry point belong to the Advanced view. */
+    if (!base || !entry || smoke_shown(base) != advanced || smoke_shown(entry) != advanced) return __LINE__;
+    if (xxwidgets_side_panel_get_checked(g_side, XXWIDGETS_DIE_SIDE_ADVANCED, &checked) != XXWIDGETS_OK || checked != advanced ||
+        xxwidgets_die_main_panel_get_advanced(g_main) != advanced || gui_frontend_advanced() != advanced) return __LINE__;
+    {
+        /* DIE's arrangement: the file name bar on top; the engine row over the
+         * tree, the scan bar under it; the right column beside them, Update
+         * database over Shortcuts, Options, About and Exit, in that order. */
+        RECT path, fact, results, signatures, adv, update, shortcuts, options, about, exit;
+        GetWindowRect(native(g_path), &path); GetWindowRect(native(g_facts[0]), &fact);
+        GetWindowRect(native(g_results), &results); GetWindowRect(native(g_signaturesButton), &signatures);
+        GetWindowRect(native(g_advanced), &adv); GetWindowRect(native(g_updateButton), &update);
+        GetWindowRect(native(g_shortcutsButton), &shortcuts); GetWindowRect(native(g_options), &options);
+        GetWindowRect(native(g_aboutButton), &about); GetWindowRect(native(g_exit), &exit);
+        if (path.bottom > adv.top || path.bottom > fact.top || fact.bottom > results.top || results.bottom > signatures.top ||
+            results.right > adv.left || adv.bottom > update.top || update.bottom > shortcuts.top || shortcuts.bottom > options.top ||
+            options.bottom > about.top || about.bottom > exit.top || exit.left < results.right) return __LINE__;
+    }
+    return 0;
+}
+
+static int smoke_view_failed(unsigned int line, unsigned int code)
+{
+    char text[96];
+    wsprintfA(text, "GUI smoke: view check code %u\r\n", code);
+    smoke_write(text);
+    return smoke_failed(line);
+}
+
+/* Both views with the file state as it is: their controls and layout, the
+ * Advanced check box toggled as a click does, the window grown for the
+ * Advanced view and never shrunk back. 0 passed, else the failing line. */
+static unsigned int smoke_views(int loaded)
+{
+    RECT simple, advanced, back;
+    unsigned int code = smoke_view_controls(0, loaded);
+    if (code) return code;
+    if (!smoke_main_layout(1)) return __LINE__;
+    GetWindowRect(native(g_window), &simple);
+    if (smoke_click_action(g_advanced, 1) != XXWIDGETS_DIE_ACTION_NONE || g_pending != ACTION_NONE) return __LINE__;
+    if ((code = smoke_view_controls(1, loaded)) != 0) return code;
+    if (!smoke_main_layout(1)) return __LINE__;
+    GetWindowRect(native(g_window), &advanced);
+    if (advanced.right - advanced.left < simple.right - simple.left || advanced.bottom - advanced.top < simple.bottom - simple.top)
+        return __LINE__;
+    if (smoke_click_action(g_advanced, 1) != XXWIDGETS_DIE_ACTION_NONE) return __LINE__;
+    if ((code = smoke_view_controls(0, loaded)) != 0) return code;
+    if (!smoke_main_layout(1)) return __LINE__;
+    GetWindowRect(native(g_window), &back);
+    if (back.right - back.left != advanced.right - advanced.left || back.bottom - back.top != advanced.bottom - advanced.top) return __LINE__;
+    return 0;
+}
+
+/* The right column's buttons, each pressed once and what opens closed
+ * (Update database in smoke_update, Advanced in smoke_views, Exit last). */
+static int smoke_right_column(void)
+{
+    /* Shortcuts is modal to the main window only (XXWIDGETS_WINDOW_MODAL). */
+    if (!smoke_begin_ex(L"Shortcuts", SMOKE_SHORTCUTS, 0)) return 0;
+    if (smoke_click_action(g_shortcutsButton, 1) != XXWIDGETS_DIE_ACTION_SHORTCUTS || !smoke_finish()) return 0;
+    if (!smoke_begin_page(L"Scan", SMOKE_PAGE_CANCEL, 1)) return 0;
+    if (smoke_click_action(g_options, 1) != XXWIDGETS_DIE_ACTION_OPTIONS || !smoke_finish()) return 0;
+    if (!smoke_begin(L"About", SMOKE_ABOUT_CLOSE)) return 0;
+    if (smoke_click_action(g_aboutButton, 1) != XXWIDGETS_DIE_ACTION_ABOUT || !smoke_finish()) return 0;
+    return 1;
+}
+
+/* An error is a message dialog now (Q1): its whole text, titled with the program. */
+static int smoke_error_dialog(void)
+{
+    WCHAR *title = xx_str_utf8_to_unicode(gui_backend_app_title());
+    int passed = title && smoke_begin_ex(title, SMOKE_UPDATE_FAILED, 1);
+    if (passed) {
+        g_smokeExpectPart = L"Smoke error text";
+        g_quietErrors = 0;
+        show_error("Smoke error text");
+        g_quietErrors = 1;
+        passed = smoke_finish() && !strcmp(g_lastMessage, "Smoke error text");
+    }
+    xx_str_wfree(title);
+    return passed;
+}
+
+/* Every key of the shortcut table (gui_shortcuts.c) reaches its action,
+ * the tools' keys too, so they stay reachable without their old buttons. */
+static int smoke_shortcut_keys(void)
+{
+    static const struct { UINT key; int control, shift; gui_shortcut_action action; } keys[] = {
+        {VK_F5, 0, 0, GUI_SHORTCUT_SCAN}, {'O', 1, 0, GUI_SHORTCUT_OPEN}, {VK_F1, 0, 0, GUI_SHORTCUT_ABOUT},
+        {VK_F2, 0, 0, GUI_SHORTCUT_OPTIONS}, {'D', 1, 1, GUI_SHORTCUT_DATABASE_PATHS}, {VK_F3, 0, 0, GUI_SHORTCUT_DATABASE_PATHS},
+        {VK_F4, 0, 0, GUI_SHORTCUT_FONTS},
+        {'I', 1, 0, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_FILE_INFORMATION}, {'E', 1, 0, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_ENTROPY},
+        {'H', 1, 0, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_HASH}, {'S', 1, 1, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_STRINGS},
+        {'X', 1, 1, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_HEX_VIEW}, {'A', 1, 1, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_DISASM},
+        {'M', 1, 0, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_MEMORY_MAP}, {'I', 1, 1, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_IMPORTS},
+        {'E', 1, 1, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_EXPORTS}, {'U', 1, 1, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_RESOURCES},
+        {'Y', 1, 1, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_SYMBOLS}, {'T', 1, 1, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_EXTRACTOR}};
+    size_t i;
+    for (i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i)
+        if (smoke_shortcut(keys[i].key, keys[i].control, keys[i].shift) != SHORTCUT_ACTION(keys[i].action)) {
+            char text[64];
+            wsprintfA(text, "GUI smoke: shortcut %u\r\n", (unsigned int)i);
+            smoke_write(text);
+            return 0;
+        }
+    /* Ctrl+U only with an updater; with one, it is Update database. */
+    if (smoke_shortcut('U', 1, 0) != (gui_update_supported() ? SHORTCUT_ACTION(GUI_SHORTCUT_UPDATE) : ACTION_NONE)) return 0;
+    /* A tool's key runs the tool through the shared dispatcher, on this program. */
+    {
+        WCHAR executable[MAX_PATH];
+        DWORD length = GetModuleFileNameW(NULL, executable, MAX_PATH);
+        if (!length || length >= MAX_PATH || !SetWindowTextW(native(g_path), executable)) return 0;
+    }
+    if (!smoke_begin(L"File Information", SMOKE_FILE_INFORMATION)) return 0;
+    g_smokeEscape = 1;
+    run_pending(SHORTCUT_ACTION(GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_FILE_INFORMATION));
+    return smoke_finish();
+}
+
 static int run_smoke_steps(void)
 {
     xxwidgets_scan_result row = {"Compiler", "Microsoft Visual C/C++", "19.29", "Smoke test"};
     unsigned int flags, databases;
-    RECT include_bounds, exclude_bounds, results_bounds, fact_bounds, signatures_bounds, scan_bounds, directory_bounds, msec_bounds;
-    WCHAR class_name[32], executable[32768], recent_text[16], report_text[16];
+    unsigned int view;
+    WCHAR class_name[32], executable[32768];
     DWORD executable_length = GetModuleFileNameW(NULL, executable, (DWORD)(sizeof(executable) / sizeof(executable[0])));
     SIZE_T report_length = 0;
     xxwidgets_status status;
@@ -3200,36 +3270,10 @@ static int run_smoke_steps(void)
         !GetClassNameW(native(g_databases), class_name, 32) || lstrcmpiW(class_name, L"COMBOBOX") ||
         !GetClassNameW(native(g_includeTags), class_name, 32) || lstrcmpiW(class_name, L"COMBOBOX") ||
         !GetClassNameW(native(g_excludeTags), class_name, 32) || lstrcmpiW(class_name, L"COMBOBOX")) return smoke_failed(__LINE__);
-    /* The two small buttons are told apart: Recent files by the path, the report by the scan. */
-    if (!GetWindowTextW(native(g_recent), recent_text, 16) || !GetWindowTextW(native(g_reportButton), report_text, 16) ||
-        !lstrcmpW(recent_text, report_text) || !g_tooltip || SendMessageW(g_tooltip, TTM_GETTOOLCOUNT, 0, 0) != 2) return smoke_failed(__LINE__);
-    /* DIE's arrangement: the file's facts above the tree; Signatures, the
-     * combo boxes and the tag filters below it, Directory under them, and a
-     * tall Scan button beside both rows. The tag labels are gone. */
-    GetWindowRect(native(g_includeTags), &include_bounds);
-    GetWindowRect(native(g_excludeTags), &exclude_bounds);
-    GetWindowRect(native(g_results), &results_bounds);
-    GetWindowRect(native(g_facts[0]), &fact_bounds);
-    GetWindowRect(native(g_signaturesButton), &signatures_bounds);
-    GetWindowRect(native(g_scan), &scan_bounds);
-    GetWindowRect(native(g_directoryButton), &directory_bounds);
-    GetWindowRect(native(g_msec), &msec_bounds);
-    if (fact_bounds.bottom > results_bounds.top || results_bounds.bottom > signatures_bounds.top ||
-        signatures_bounds.bottom > directory_bounds.top || include_bounds.right >= exclude_bounds.left ||
-        include_bounds.top != signatures_bounds.top || exclude_bounds.right > scan_bounds.left ||
-        msec_bounds.right > scan_bounds.left || scan_bounds.top != signatures_bounds.top ||
-        scan_bounds.bottom != directory_bounds.bottom || IsWindowVisible(native(g_includeTagsLabel)) ||
-        IsWindowVisible(native(g_flagLabel))) return smoke_failed(__LINE__);
-    {
-        /* Update database follows Log on Directory's row, left of the report button. */
-        RECT log_bounds, update_bounds, report_bounds;
-        GetWindowRect(native(g_logButton), &log_bounds);
-        GetWindowRect(native(g_updateButton), &update_bounds);
-        GetWindowRect(native(g_reportButton), &report_bounds);
-        if (update_bounds.left <= log_bounds.right || update_bounds.right >= report_bounds.left ||
-            update_bounds.top != directory_bounds.top || !IsWindowEnabled(native(g_updateButton)) != !gui_update_supported())
-            return smoke_failed(__LINE__);
-    }
+    /* No file yet: both views, the Advanced toggle, every control and the
+     * layout (DIE_LOOK.md 3b.5). */
+    if ((view = smoke_views(0)) != 0) return smoke_view_failed(__LINE__, view);
+    if (!smoke_error_dialog()) return smoke_failed(__LINE__);
     if (xxwidgets_widget_kind(g_results) != XXWIDGETS_TREEVIEW ||
         xxwidgets_widget_kind(g_type) != XXWIDGETS_COMBOBOX ||
         xxwidgets_widget_kind(g_flags) != XXWIDGETS_CHECKCOMBOBOX ||
@@ -3289,22 +3333,33 @@ static int run_smoke_steps(void)
             }
         }
         if (binary_index == SIZE_MAX || binary_type <= 0) return smoke_failed(__LINE__);
+        /* A file is loaded: both views again, everything for a file enabled. */
+        if ((view = smoke_views(1)) != 0) return smoke_view_failed(__LINE__, view);
+        /* Choosing a type rescans with it (gui_main_actions.c). */
         SendMessageW(native(g_type), CB_SETCURSEL, binary_index, 0);
-        SendMessageW(native(g_window), WM_COMMAND, MAKEWPARAM(IDC_COMBO_TYPE, CBN_SELCHANGE), (LPARAM)native(g_type));
-        if (g_pending != ACTION_SCAN || selected_file_type(&type_id) != XXWIDGETS_OK || type_id != binary_type) return smoke_failed(__LINE__);
-        g_pending = ACTION_NONE;
+        SendMessageW(native(g_window), WM_COMMAND, MAKEWPARAM(GetDlgCtrlID(native(g_type)), CBN_SELCHANGE), (LPARAM)native(g_type));
+        if (g_pending != ACTION_DIE || g_pendingDie.id != XXWIDGETS_DIE_ACTION_FILE_TYPE || g_pendingDie.value != (int)binary_index ||
+            g_pendingDie.type_id != (uint64_t)binary_type) return smoke_failed(__LINE__);
         smoke_trace("GUI smoke binary self-scan");
-        do_scan();
+        {
+            int action = g_pending;
+            g_pending = ACTION_NONE;
+            run_pending(action);
+        }
         smoke_trace("GUI smoke binary self-scan complete");
+        smoke_last_message(status_text, sizeof(status_text));
         if (g_pending != ACTION_NONE || selected_file_type(&type_id) != XXWIDGETS_OK || type_id != binary_type ||
-            xxwidgets_widget_get_text(g_status, status_text, sizeof(status_text), NULL) != XXWIDGETS_OK ||
             !strstr(status_text, "Scan complete (Binary)")) return smoke_failed(__LINE__);
-        SendMessageW(native(g_type), CB_SETCURSEL, 0, 0);
-        SendMessageW(native(g_window), WM_COMMAND, MAKEWPARAM(IDC_COMBO_TYPE, CBN_SELCHANGE), (LPARAM)native(g_type));
-        if (g_pending != ACTION_SCAN) return smoke_failed(__LINE__);
-        g_pending = ACTION_NONE;
+        /* The preferred (most specific) type again: back to the type-0 scan. */
+        SendMessageW(native(g_type), CB_SETCURSEL, g_fileTypes.preferred, 0);
+        SendMessageW(native(g_window), WM_COMMAND, MAKEWPARAM(GetDlgCtrlID(native(g_type)), CBN_SELCHANGE), (LPARAM)native(g_type));
+        if (g_pending != ACTION_DIE || g_pendingDie.id != XXWIDGETS_DIE_ACTION_FILE_TYPE) return smoke_failed(__LINE__);
         smoke_trace("GUI smoke final self-scan");
-        do_scan();
+        {
+            int action = g_pending;
+            g_pending = ACTION_NONE;
+            run_pending(action);
+        }
         smoke_trace("GUI smoke final self-scan complete");
         if (g_pending != ACTION_NONE || selected_file_type(&type_id) != XXWIDGETS_OK || type_id != 0 ||
             !xxwidgets_scan_panel_count(g_panel)) return smoke_failed(__LINE__);
@@ -3328,8 +3383,8 @@ static int run_smoke_steps(void)
         {
             /* The Signatures button opens the editor on the first signature; an
              * edited signature asks before Open discards it. */
-            smoke_press(g_signaturesButton);
-            if (!smoke_begin(L"Signatures", SMOKE_SIGNATURE_CONFIRM) || gui_tree_process(g_window) != NULL || !smoke_finish())
+            if (smoke_click_action(g_signaturesButton, 1) != XXWIDGETS_DIE_ACTION_SIGNATURES ||
+                !smoke_begin(L"Signatures", SMOKE_SIGNATURE_CONFIRM) || gui_tree_process(g_window) != NULL || !smoke_finish())
                 return smoke_failed(__LINE__);
         }
         {
@@ -3338,24 +3393,20 @@ static int run_smoke_steps(void)
             xx_str_free(utf8);
             if (!passed) return smoke_failed(__LINE__);
         }
-        smoke_press(g_logButton);
-        if (!smoke_begin(L"Log", SMOKE_LOG)) return smoke_failed(__LINE__);
+        if (smoke_click_action(g_logButton, 1) != XXWIDGETS_DIE_ACTION_LOG || !smoke_begin(L"Log", SMOKE_LOG)) return smoke_failed(__LINE__);
         g_smokeEscape = 1;
         if (gui_tree_process(g_window) != NULL || !smoke_finish()) return smoke_failed(__LINE__);
         /* Scan directory on the scratch folder, with a look at its Scan options. */
-        smoke_press(g_directoryButton);
-        if (!smoke_begin(L"Scan directory", SMOKE_DIRECTORY) || gui_tree_process(g_window) != NULL || !smoke_finish()) return smoke_failed(__LINE__);
+        if (smoke_click_action(g_directoryButton, 1) != XXWIDGETS_DIE_ACTION_DIRECTORY ||
+            !smoke_begin(L"Scan directory", SMOKE_DIRECTORY) || gui_tree_process(g_window) != NULL || !smoke_finish()) return smoke_failed(__LINE__);
         {
             /* Recent files lists the scanned file; OK picks it. */
             char chosen[GUI_PREFERENCE_PATH_MAX] = "", *expected = xx_str_unicode_to_utf8(executable);
             int accepted = 0, same;
-            g_pending = ACTION_NONE;
-            smoke_press(g_recent);
-            if (!expected || g_pending != ACTION_RECENT || !smoke_begin(L"Recent files", SMOKE_RECENT)) {
+            if (!expected || smoke_click_action(g_recent, 0) != XXWIDGETS_DIE_ACTION_RECENT || !smoke_begin(L"Recent files", SMOKE_RECENT)) {
                 xx_str_free(expected);
                 return smoke_failed(__LINE__);
             }
-            g_pending = ACTION_NONE;
             g_smokeExpect = executable;
             status = gui_frontend_recent_dialog(g_window, chosen, sizeof(chosen), &accepted);
             same = !lstrcmpiA(chosen, expected);
@@ -3448,36 +3499,38 @@ static int run_smoke_steps(void)
          * common screen (an Options dialog must fit it), placement and focus. */
         for (unsigned int pass = 0; pass < 2; ++pass) {
             xxwidgets_font_options large = after;
-            xxwidgets_widget *buttons[] = {g_scan, g_options, g_aboutButton, g_reportButton, g_fileInformationButton, g_entropyButton, g_hashButton, g_stringsButton, g_hexViewButton, g_disasmButton, g_memoryMapButton, g_importsButton, g_exportsButton, g_resourcesButton, g_symbolsButton, g_extractorButton, g_updateButton, g_exit};
-            RECT original, button_bounds, flags_bounds, database_bounds, scan_bounds, update_bounds, report_bounds;
+            xxwidgets_widget *buttons[] = {g_scan, g_options, g_aboutButton, g_reportButton, g_signaturesButton, g_directoryButton, g_logButton,
+                                           g_updateButton, g_shortcutsButton, g_exit};
+            RECT original, button_bounds;
             size_t i;
             large.fonts[XXWIDGETS_FONT_CONTROLS].point_size = pass ? 24 : 12;
             large.fonts[XXWIDGETS_FONT_TEXT_EDITS].point_size = pass ? 28 : 14;
             GetWindowRect(native(g_window), &original);
             if (xxwidgets_app_set_font_options(g_app, &large) != XXWIDGETS_OK) return smoke_failed(__LINE__);
-            layout();
-            SetWindowPos(native(g_window), NULL, 0, 0, g_minWindowWidth, g_minWindowHeight, SWP_NOMOVE | SWP_NOZORDER);
+            /* The panel measures again and raises the minimum; then the window
+             * is dragged as small as it goes, in both views. */
+            if (xxwidgets_die_main_panel_retranslate(g_main) != XXWIDGETS_OK) return smoke_failed(__LINE__);
+            for (int advanced = 1; advanced >= 0; --advanced) {
+                if (xxwidgets_die_main_panel_set_advanced(g_main, advanced) != XXWIDGETS_OK) return smoke_failed(__LINE__);
+                SetWindowPos(native(g_window), NULL, 0, 0, 1, 1, SWP_NOMOVE | SWP_NOZORDER);
+                if (!smoke_main_layout(!pass)) return smoke_failed(__LINE__);
+            }
             for (i = 0; i < sizeof(buttons) / sizeof(buttons[0]); ++i) {
                 TEXTMETRICW metrics = control_font_metrics(buttons[i]);
                 GetClientRect(native(buttons[i]), &button_bounds);
-                if (button_bounds.right < control_text_width(buttons[i], 0) ||
-                    button_bounds.bottom < metrics.tmHeight + 8) return smoke_failed(__LINE__);
+                if (button_bounds.bottom < metrics.tmHeight + 4) return smoke_failed(__LINE__);
             }
-            /* The symbol on Recent files keeps room for itself and its frame. */
-            GetClientRect(native(g_recent), &button_bounds);
-            if (button_bounds.right < window_text_size(native(g_recent), 0).cx + 6) return smoke_failed(__LINE__);
-            GetWindowRect(native(g_flags), &flags_bounds);
-            GetWindowRect(native(g_databases), &database_bounds);
-            GetWindowRect(native(g_scan), &scan_bounds);
-            if (flags_bounds.right >= database_bounds.left || database_bounds.right >= scan_bounds.left) return smoke_failed(__LINE__);
-            GetWindowRect(native(g_updateButton), &update_bounds);
-            GetWindowRect(native(g_reportButton), &report_bounds);
-            if (update_bounds.right >= report_bounds.left) return smoke_failed(__LINE__);
             GetClientRect(native(g_path), &button_bounds);
             {
                 TEXTMETRICW metrics = control_font_metrics(g_path);
                 /* The edit's client rectangle excludes its four-pixel border. */
-                if (button_bounds.bottom < metrics.tmHeight + metrics.tmExternalLeading + 4) return smoke_failed(__LINE__);
+                if (button_bounds.bottom < metrics.tmHeight + metrics.tmExternalLeading + 4) {
+                    char text[128];
+                    wsprintfA(text, "GUI smoke: path edit client height %ld, its font needs %ld (pass %u)\r\n", button_bounds.bottom,
+                              metrics.tmHeight + metrics.tmExternalLeading + 4, pass);
+                    smoke_write(text);
+                    return smoke_failed(__LINE__);
+                }
             }
             /* The dialogs under the larger font: placement, controls inside, focus,
              * and at 12 points text and overlaps, unless the backend held the
@@ -3522,8 +3575,8 @@ static int run_smoke_steps(void)
             do_hash();
             g_smokeFontSized = 1;
             if (!smoke_finish()) return smoke_failed(__LINE__);
-            if (xxwidgets_app_set_font_options(g_app, &after) != XXWIDGETS_OK) return smoke_failed(__LINE__);
-            layout();
+            if (xxwidgets_app_set_font_options(g_app, &after) != XXWIDGETS_OK ||
+                xxwidgets_die_main_panel_retranslate(g_main) != XXWIDGETS_OK) return smoke_failed(__LINE__);
             SetWindowPos(native(g_window), NULL, 0, 0, original.right - original.left,
                 original.bottom - original.top, SWP_NOMOVE | SWP_NOZORDER);
         }
@@ -3672,7 +3725,7 @@ static int run_smoke_steps(void)
         if (xxwidgets_scan_panel_get_report(g_panel, NULL, 0, &report_length) != XXWIDGETS_OK || report_length <= 1 ||
             !(report = (char *)HeapAlloc(GetProcessHeap(), 0, report_length))) return smoke_failed(__LINE__);
         passed = xxwidgets_scan_panel_get_report(g_panel, report, report_length, NULL) == XXWIDGETS_OK &&
-            smoke_shortcut('R', 1, 1) == ACTION_REPORT && smoke_begin(L"Scan report", SMOKE_REPORT);
+            smoke_shortcut('R', 1, 1) == SHORTCUT_ACTION(GUI_SHORTCUT_REPORT) && smoke_begin(L"Scan report", SMOKE_REPORT);
         if (passed) {
             g_smokeExpectText = report;
             do_report();
@@ -3722,14 +3775,19 @@ static int run_smoke_steps(void)
     /* Last: the cancelled scan leaves the panel empty. */
     if (!smoke_progress_cancel()) return smoke_failed(__LINE__);
     /* Options and Recent files have keys; the report key needs a report. */
-    if (smoke_shortcut(VK_F2, 0, 0) != ACTION_OPTIONS || smoke_shortcut('R', 1, 0) != ACTION_RECENT) return smoke_failed(__LINE__);
+    if (smoke_shortcut(VK_F2, 0, 0) != SHORTCUT_ACTION(GUI_SHORTCUT_OPTIONS) ||
+        smoke_shortcut('R', 1, 0) != SHORTCUT_ACTION(GUI_SHORTCUT_RECENT) || !smoke_shortcut_keys()) return smoke_failed(__LINE__);
     if (xxwidgets_scan_panel_clear(g_panel) != XXWIDGETS_OK ||
         xxwidgets_scan_panel_count(g_panel) != 0 || TreeView_GetCount(native(g_results)) != 0) return smoke_failed(__LINE__);
     if (IsWindowEnabled(native(g_reportButton)) || smoke_shortcut('R', 1, 1) != ACTION_NONE) return smoke_failed(__LINE__);
     if (!smoke_begin_ex(L"Scan report", SMOKE_UNEXPECTED, 0)) return smoke_failed(__LINE__);
     g_smokeOptional = 1;
     do_report();
-    return !smoke_finish();
+    if (!smoke_finish()) return smoke_failed(__LINE__);
+    /* The right column, each button once; Exit last: it ends the program. */
+    if (!smoke_right_column()) return smoke_failed(__LINE__);
+    if (smoke_click_action(g_exit, 1) != XXWIDGETS_DIE_ACTION_EXIT || !g_quit || g_running) return smoke_failed(__LINE__);
+    return 0;
 }
 
 static int run_smoke(void)
@@ -3794,13 +3852,9 @@ static int run_update_smoke(void)
     DWORD written;
     int passed, dialogs = 1;
     /* The startup text must not pass for the outcome. */
-    xxwidgets_widget_set_text(g_status, "");
-    g_pending = ACTION_NONE;
-    if (IsWindowEnabled(native(g_updateButton))) {
-        SendMessageW(native(g_window), WM_COMMAND, MAKEWPARAM(IDC_BTN_UPDATE, BN_CLICKED), (LPARAM)native(g_updateButton));
-        if (g_pending != ACTION_UPDATE) return smoke_failed(__LINE__);
-        g_pending = ACTION_NONE;
-    }
+    g_lastMessage[0] = 0;
+    if (IsWindowEnabled(native(g_updateButton)) && smoke_click_action(g_updateButton, 0) != XXWIDGETS_DIE_ACTION_UPDATE)
+        return smoke_failed(__LINE__);
     if (g_updateSmoke >= UPDATE_SMOKE_BOX_CURRENT) {
         xxwidgets_widget_set_visible(g_window, 1);
         /* The text dialog is application-modal; the question is owned by the main window only. */
@@ -3812,7 +3866,7 @@ static int run_update_smoke(void)
         result = do_update_database(g_window);
         dialogs = smoke_finish();
     } else result = do_update_database(NULL);
-    if (xxwidgets_widget_get_text(g_status, status_text, sizeof(status_text), NULL) != XXWIDGETS_OK) status_text[0] = 0;
+    smoke_last_message(status_text, sizeof(status_text));
     xx_rt_snprintf(line, sizeof(line), "smoke-update: %s %s\r\n", gui_update_result_name(result), status_text);
     WriteFile(GetStdHandle(STD_ERROR_HANDLE), line, (DWORD)lstrlenA(line), &written, NULL);
     passed = dialogs && result == expected && (result != GUI_UPDATE_INSTALLED || (gui_backend_signature_count() > 0 && status_text[0]));
@@ -3942,12 +3996,14 @@ int gui_run(void)
     int result = 0, smoke = is_smoke_requested();
     WCHAR title[160], ready[512];
     WCHAR *base;
+    const char *startup_error = NULL;
     char *utf8_title;
 
     g_updateSmoke = update_smoke_requested();
     if (g_updateSmoke < 0) return 2;
     g_memorySettings = smoke || g_updateSmoke;
     g_settingsSmoke = settings_smoke_requested();
+    g_quietErrors = smoke || g_updateSmoke || g_settingsSmoke != 0;
     if (g_settingsSmoke < 0 || (g_settingsSmoke && (smoke || !settings_smoke_portable()))) return 2;
     if (g_updateSmoke && (smoke || g_settingsSmoke)) return 2;
 
@@ -3987,12 +4043,6 @@ int gui_run(void)
         if (large_icon) SendMessageW(native(g_window), WM_SETICON, ICON_BIG, (LPARAM)large_icon);
         if (small_icon) SendMessageW(native(g_window), WM_SETICON, ICON_SMALL, (LPARAM)small_icon);
     }
-    SetWindowPos(native(g_window), NULL, 0, 0, 850, 580, SWP_NOMOVE | SWP_NOZORDER);
-    /* The first layout measures the controls; never start below that minimum. */
-    layout();
-    if (g_minWindowWidth > 850 || g_minWindowHeight > 580)
-        SetWindowPos(native(g_window), NULL, 0, 0, g_minWindowWidth > 850 ? g_minWindowWidth : 850,
-                     g_minWindowHeight > 580 ? g_minWindowHeight : 580, SWP_NOMOVE | SWP_NOZORDER);
     (void)gui_backend_init();
     {
         /* Stored Options apply before the first scan; the full GUI smoke stays in memory. */
@@ -4007,22 +4057,28 @@ int gui_run(void)
         if (gui_backend_signature_count()) {
             cdie_translation_swprintf(ready, sizeof(ready)/sizeof(ready[0]), CDIE_N_(L"Ready. %d signatures loaded. Choose a file or drag one here, then press Scan."),
                       gui_backend_signature_count());
-            set_status_wide(ready);
-        } else {
-            xxwidgets_widget_set_text(g_status,
-                CDIE_TR("Main signature database not found. Use Options > Scan to select the database folder."));
-        }
+            note_message_wide(ready);
+        } else
+            startup_error = CDIE_TR("Main signature database not found. Use Options > Scan to select the database folder.");
         if (!databases)
-            xxwidgets_widget_set_text(g_status, CDIE_TR("The saved signature folders cannot be loaded; the default ones are active."));
+            startup_error = CDIE_TR("The saved signature folders cannot be loaded; the default ones are active.");
         else if (!stored)
-            xxwidgets_widget_set_text(g_status, CDIE_TR("Saved options cannot be read; the defaults are used."));
+            startup_error = CDIE_TR("Saved options cannot be read; the defaults are used.");
         if (status == XXWIDGETS_OK) status = apply_options(&values);
         if (status != XXWIDGETS_OK) report_ui_error("Apply saved options", status);
     }
     status = refresh_panel_tags();
     if (status != XXWIDGETS_OK) report_ui_error(CDIE_N_("Load signature tags"), status);
     apply_flags_to_backend();
-    layout();
+    {
+        /* The stored view (View/Advanced, shared with Qt DIE), then Qt's
+         * 720 x 500 default, or the view's minimum when that is larger. */
+        int width = 0, height = 0, advanced = gui_frontend_advanced() ? 1 : 0;
+        status = xxwidgets_die_main_panel_set_advanced(g_main, advanced);
+        if (status == XXWIDGETS_OK) status = xxwidgets_die_main_panel_get_default_size(g_main, advanced, &width, &height);
+        if (status == XXWIDGETS_OK) status = xxwidgets_widget_set_frame(g_window, (xxwidgets_rect){0, 0, width, height});
+        if (status != XXWIDGETS_OK) { result = 1; goto finish; }
+    }
     if (smoke) { result = run_smoke(); goto finish; }
     if (g_settingsSmoke) { result = run_settings_smoke(); goto finish; }
     if (g_updateSmoke) { result = run_update_smoke(); goto finish; }
@@ -4034,7 +4090,9 @@ int gui_run(void)
         if (instance <= 0) { result = instance < 0 ? 1 : 0; goto finish; }
         xxwidgets_widget_set_visible(g_window, 1);
         xxwidgets_widget_focus(g_path);
-        if (startup) { gui_frontend_remember_file(path); if (gui_frontend_scan_after_open()) do_scan(); }
+        /* No status line (Q1): what the start found wrong is said once the window shows. */
+        if (startup_error) show_error(startup_error);
+        if (startup) open_file(path);
     }
     g_running = 1;
     while (g_running) {
@@ -4044,48 +4102,18 @@ int gui_run(void)
         if (!g_running) break;
         {
             const char *message = gui_tree_process(g_window);
-            if (message) xxwidgets_widget_set_text(g_status, message);
+            if (message) show_error(message);
         }
         action = g_pending; g_pending = ACTION_NONE;
         /* All modal loops and scans start after returning from app_poll. */
-        switch (action) {
-        case ACTION_SCAN: do_scan(); break;
-        case ACTION_BROWSE: do_browse(); break;
-        case ACTION_RECENT: {
-            char path[GUI_PREFERENCE_PATH_MAX]; int accepted = 0;
-            status = gui_frontend_recent_dialog(g_window, path, sizeof(path), &accepted);
-            if (status == XXWIDGETS_OK && accepted) {
-                xxwidgets_widget_set_text(g_path, path); gui_frontend_remember_file(path);
-                if (gui_frontend_scan_after_open()) do_scan();
-            } else if (status != XXWIDGETS_OK) report_ui_error(CDIE_N_("Recent files"), status);
-            break;
-        }
-        case ACTION_OPTIONS: do_settings(g_optionsPage); break;
-        case ACTION_ABOUT: do_about(); break;
-        case ACTION_DATABASE_PATHS: do_settings(GUI_OPTIONS_SCAN); break;
-        case ACTION_FILE_INFORMATION: do_file_information(); break;
-        case ACTION_ENTROPY: do_entropy(); break;
-        case ACTION_HASH: do_hash(); break;
-        case ACTION_STRINGS: do_strings(); break;
-        case ACTION_HEX_VIEW: do_hex_view(); break;
-        case ACTION_DISASM: do_disasm(); break;
-        case ACTION_MEMORY_MAP: do_memory_map(); break;
-        case ACTION_IMPORTS: do_imports(); break;
-        case ACTION_EXPORTS: do_exports(); break;
-        case ACTION_RESOURCES: do_resources(); break;
-        case ACTION_SYMBOLS: do_symbols(); break;
-        case ACTION_EXTRACTOR: do_extractor(); break;
-        case ACTION_UPDATE: do_update_database(g_window); break;
-        case ACTION_REPORT: do_report(); break;
-        default: break;
-        }
+        run_pending(action);
     }
 finish:
     if (g_smokeTimer) KillTimer(NULL, g_smokeTimer);
     g_smokeTimer = 0;
     smoke_modal_cleanup();
     gui_frontend_instance_close();
-    if (!smoke && !g_settingsSmoke && !g_updateSmoke && g_settings && g_panel) {
+    if (!smoke && !g_settingsSmoke && !g_updateSmoke && g_settings && g_main) {
         gui_options_values final_values;
         if (current_options(&final_values) == XXWIDGETS_OK) (void)gui_settings_save(g_settings, &final_values, g_optionsPage);
     }
@@ -4095,8 +4123,10 @@ finish:
     gui_backend_shutdown();
     if (g_about && xxwidgets_about_dialog_destroy(g_about) != XXWIDGETS_OK) result = 1;
     g_about = NULL;
-    if (g_panel && xxwidgets_scan_panel_destroy(g_panel) != XXWIDGETS_OK) result = 1;
+    if (g_main && xxwidgets_die_main_panel_destroy(g_main) != XXWIDGETS_OK) result = 1;
+    g_main = NULL;
     g_panel = NULL;
+    gui_main_file_types_clear(&g_fileTypes);
     if (g_typePath) xx_str_free(g_typePath);
     g_typePath = NULL;
     cdie_translation_close();

@@ -60,6 +60,8 @@ escaping and multi-file documents. These tests deliberately point at a missing
 signature database to prove that native information commands do not load it.
 Native DataStructs output has a separate documented schema; the `diec`
 differential suite below continues to cover signature-scan output.
+For fat Mach-O files, cdie intentionally shows the fat table plus the selected
+slice, whereas Detect It Easy File Information shows only generic rows.
 
 When xxwidgets is built, `cdie_test_file_information` compares the GUI model
 with console DataStructs for all generated executable fixtures, including

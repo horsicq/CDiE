@@ -356,6 +356,8 @@ often the input is read, never a result.
 
 Scan-output compatibility is checked separately from File Information; see
 TESTING.md for the reference-version differences and historical corpus results.
+Fat Mach-O File Information is a documented exception: cdie shows the fat table
+and the selected slice, while Detect It Easy shows only the generic rows.
 The short options are `diec`'s, which are not always the
 mnemonic letter — `-a` is `--alltypes`, `-p` is `--plaintext`, `-l` is
 `--profiling` and `-s` is `--showdatabase`. Where this port previously used a
