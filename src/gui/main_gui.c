@@ -4077,6 +4077,8 @@ int gui_run(void)
         status = xxwidgets_die_main_panel_set_advanced(g_main, advanced);
         if (status == XXWIDGETS_OK) status = xxwidgets_die_main_panel_get_default_size(g_main, advanced, &width, &height);
         if (status == XXWIDGETS_OK) status = xxwidgets_widget_set_frame(g_window, (xxwidgets_rect){0, 0, width, height});
+        /* set_frame emits no RESIZE: lay the panel out over the new client area. */
+        if (status == XXWIDGETS_OK) status = xxwidgets_die_main_panel_layout(g_main);
         if (status != XXWIDGETS_OK) { result = 1; goto finish; }
     }
     if (smoke) { result = run_smoke(); goto finish; }

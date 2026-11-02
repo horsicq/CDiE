@@ -33,6 +33,8 @@
 
 #include <xxfclib/die_engine/die_engine.h>
 #include <xxfclib/buf/xx_buf.h>
+#include <xxfclib/data/xx_pd.h>
+#include <xxfclib/fs/xx_fs.h>
 #include <xxfclib/rt/xx_rt.h>
 #include <xxfclib/global/xx_global.h>
 
@@ -45,13 +47,24 @@
 #define SF_RECURSIVESCAN 0x00000008
 #define SF_VERBOSE 0x00000010
 #define SF_AGGRESSIVESCAN 0x00000020
+#define SF_OVERLAYSCAN 0x00000040
+#define SF_RESOURCESSCAN 0x00000080
+#define SF_ARCHIVESSCAN 0x00000100
+#define SF_FIRSTWRAPPERONLY 0x00000200
 #define SF_RESULTASXML 0x00010000
 #define SF_RESULTASJSON 0x00020000
 #define SF_RESULTASTSV 0x00040000
 #define SF_RESULTASCSV 0x00080000
+#define SF_USECACHE 0x01000000
 #define SF_SORT 0x02000000
 #define SF_HIDEUNKNOWN 0x04000000
 #define SF_FORMATRESULT 0x10000000
+
+#if defined(_WIN32)
+typedef DIE_VB_CALLBACK die_scan_callback_fn;
+#else
+typedef void *die_scan_callback_fn;
+#endif
 
 /* The database loaded by DIE_LoadDatabase for the *Ex scan variants. */
 static DBase g_db;
@@ -76,6 +89,10 @@ static void die_options_from_flags(xx_scan_options *pOptions, unsigned int nFlag
     pOptions->heuristic_scan = (nFlags & SF_HEURISTICSCAN) ? 1 : 0;
     pOptions->all_types_scan = (nFlags & SF_ALLTYPESSCAN) ? 1 : 0;
     pOptions->recursive_scan = (nFlags & SF_RECURSIVESCAN) ? 1 : 0;
+    pOptions->overlay_scan = (nFlags & SF_OVERLAYSCAN) ? 1 : 0;
+    pOptions->resources_scan = (nFlags & SF_RESOURCESSCAN) ? 1 : 0;
+    pOptions->archives_scan = (nFlags & SF_ARCHIVESSCAN) ? 1 : 0;
+    pOptions->first_wrapper_only = (nFlags & SF_FIRSTWRAPPERONLY) ? 1 : 0;
     pOptions->verbose = (nFlags & SF_VERBOSE) ? 1 : 0;
     pOptions->aggressive_scan = (nFlags & SF_AGGRESSIVESCAN) ? 1 : 0;
     pOptions->hide_unknown = (nFlags & SF_HIDEUNKNOWN) ? 1 : 0;
@@ -83,26 +100,30 @@ static void die_options_from_flags(xx_scan_options *pOptions, unsigned int nFlag
     pOptions->result_as_json = (nFlags & SF_RESULTASJSON) ? 1 : 0;
     pOptions->result_as_xml = (nFlags & SF_RESULTASXML) ? 1 : 0;
     pOptions->result_as_csv = (nFlags & SF_RESULTASCSV) ? 1 : 0;
-    pOptions->result_as_tsv = (nFlags & SF_RESULTASTSV) ? 1 : 0;
+    /* XScanEngine::setScanFlags currently omits SF_RESULTASTSV. Keep that
+     * observable die_library behaviour: the public TSV bit produces the
+     * ordinary text result. */
+    pOptions->result_as_tsv = 0;
 }
 
 /* Formats a result the same way the console (and ScanItemModel) does. */
 static char *die_format(xx_scan_result *pResult, xx_scan_options *pOptions)
 {
-    if (pOptions->result_as_json) {
-        return xx_scan_format_json(pResult, pOptions);
-    }
-
-    if (pOptions->result_as_xml) {
-        return xx_scan_format_xml(pResult, pOptions);
-    }
-
+    /* ScanItemModel::toString tests the formats in this exact order. */
     if (pOptions->result_as_csv) {
         return xx_scan_format_csv(pResult, pOptions, ';');
     }
 
+    if (pOptions->result_as_json) {
+        return xx_scan_format_json(pResult, pOptions);
+    }
+
     if (pOptions->result_as_tsv) {
         return xx_scan_format_csv(pResult, pOptions, '\t');
+    }
+
+    if (pOptions->result_as_xml) {
+        return xx_scan_format_xml(pResult, pOptions);
     }
 
     return xx_scan_format_text(pResult, pOptions);
@@ -113,33 +134,48 @@ static char *die_format(xx_scan_result *pResult, xx_scan_options *pOptions)
  * caller frees the result. */
 static char *die_resolve_database(const char *pDatabase)
 {
-    const char *pMarker = NULL;
+    const char *pPath = pDatabase;
 
-    if (pDatabase == NULL) {
-        return cdie_strdup("");
+    /* XScanEngine::loadDatabase treats NULL/empty as "$data/db". */
+    if ((pPath == NULL) || (pPath[0] == 0)) {
+        pPath = "$data/db";
     }
 
-    pMarker = pDatabase;
-
     /* Only the "$data" prefix is handled (the form the samples use). */
-    if ((pMarker[0] == '$') && (xx_rt_strncmp(pMarker, "$data", 5) == 0)) {
+    if ((pPath[0] == '$') && (xx_rt_strncmp(pPath, "$data", 5) == 0)) {
         char *pAppDir = cdie_app_dir();
         char *pResult = NULL;
 
         if (pAppDir != NULL) {
             xx_buf_t buf;
+            char *pTar = NULL;
 
             xx_buf_init(&buf);
             xx_buf_append_str(&buf, pAppDir);
-            xx_buf_append_str(&buf, pDatabase + 5); /* the part after "$data" */
+            xx_buf_append_str(&buf, pPath + 5); /* the part after "$data" */
             pResult = xx_buf_detach(&buf, NULL);
             xx_rt_free(pAppDir);
 
-            return pResult;
+            if (xx_fs_is_dir(pResult) || xx_fs_is_file(pResult)) {
+                return pResult;
+            }
+
+            xx_buf_init(&buf);
+            xx_buf_append_str(&buf, pResult);
+            xx_buf_append_str(&buf, ".tar");
+            pTar = xx_buf_detach(&buf, NULL);
+
+            if (xx_fs_is_file(pTar)) {
+                xx_rt_free(pResult);
+                return pTar;
+            }
+
+            xx_rt_free(pTar);
+            xx_rt_free(pResult);
         }
     }
 
-    return cdie_strdup(pDatabase);
+    return cdie_strdup(pPath);
 }
 
 /* Copies a UTF-8 string into a fresh buffer the caller frees with
@@ -315,6 +351,120 @@ static wchar_t *die_dup_result_w(const char *pUtf8)
     return pResult;
 }
 
+#if defined(_WIN32)
+typedef struct die_callback_context {
+    DBase *pDb;
+    xx_scan_options *pOptions;
+    DIE_VB_CALLBACK pfnCallback;
+    XFileType preferredType;
+    int bHasPreferredType;
+    int bIsCliAssembly;
+    uint64_t nLastIndex;
+} die_callback_context;
+
+static void die_callback_detect_type(XFileType fileType, void *pUserData)
+{
+    die_callback_context *pContext = (die_callback_context *)pUserData;
+
+    if (!pContext->bHasPreferredType) {
+        pContext->preferredType = fileType;
+        pContext->bHasPreferredType = 1;
+    }
+
+    if (fileType == XFT_CLI_ASSEMBLY) {
+        pContext->bIsCliAssembly = 1;
+    }
+}
+
+static int die_callback_prefix_is(const char *pName, const char *pPrefix)
+{
+    size_t i = 0;
+
+    if ((pName == NULL) || (pPrefix == NULL)) {
+        return 0;
+    }
+
+    for (i = 0; pPrefix[i] != 0; i++) {
+        char nName = pName[i];
+
+        if ((nName >= 'a') && (nName <= 'z')) {
+            nName = (char)(nName - 'a' + 'A');
+        }
+
+        if (nName != pPrefix[i]) {
+            return 0;
+        }
+    }
+
+    return (pName[i] == '.') || (pName[i] == 0);
+}
+
+static int die_callback_record_runs(const die_callback_context *pContext, const DBSignature *pRecord)
+{
+    if ((pRecord == NULL) || (pRecord->pName == NULL) || !pContext->bHasPreferredType) {
+        return 0;
+    }
+
+    if (pRecord->fileType == XFT_CLI_ASSEMBLY) {
+        if (!pContext->bIsCliAssembly) {
+            return 0;
+        }
+    } else if (!xft_check(pRecord->fileType, pContext->preferredType)) {
+        return 0;
+    }
+
+    if ((!pContext->pOptions->deep_scan) && (die_callback_prefix_is(pRecord->pName, "DS") || die_callback_prefix_is(pRecord->pName, "EP"))) {
+        return 0;
+    }
+
+    if ((!pContext->pOptions->heuristic_scan) && die_callback_prefix_is(pRecord->pName, "HEUR")) {
+        return 0;
+    }
+
+    if (xx_rt_strcmp(pRecord->pName, "_init") == 0) {
+        return 0;
+    }
+
+    return pRecord->databaseType == DB_MAIN;
+}
+
+/* Bridge xxfclib's synchronous signature progress to die_library's VB
+ * callback. Returning true asks the engine to stop. */
+static bool die_callback_observer(const xx_pd_struct *pProgress, void *pUserData)
+{
+    die_callback_context *pContext = (die_callback_context *)pUserData;
+    int i = 0;
+
+    for (i = 0; i < XX_PD_LEVELS; i++) {
+        const xx_pd_record *pProgressRecord = &pProgress->records[i];
+
+        if (pProgressRecord->is_busy && (xx_rt_strcmp(pProgressRecord->status, "DIE signatures") == 0)) {
+            uint64_t nIndex = pProgressRecord->current;
+
+            if ((nIndex == pContext->nLastIndex) || (nIndex >= (uint64_t)pContext->pDb->nCount)) {
+                return false;
+            }
+
+            pContext->nLastIndex = nIndex;
+
+            if (die_callback_record_runs(pContext, &pContext->pDb->pRecords[nIndex])) {
+                wchar_t *pName = die_utf8_to_wide(pContext->pDb->pRecords[nIndex].pName);
+                int nContinue = pContext->pfnCallback(pName, (int)nIndex, pContext->pDb->nCount);
+
+                xx_rt_free(pName);
+                return nContinue == 0;
+            }
+
+            return false;
+        }
+    }
+
+    pContext->nLastIndex = UINT64_MAX;
+
+    return false;
+}
+#endif
+
 /* --- the actual scans --------------------------------------------------- */
 
 /* Loads pDatabasePath as the single main database, scans pFileName (bFileMode)
@@ -326,7 +476,7 @@ static wchar_t *die_dup_result_w(const char *pUtf8)
  * which would report a fabricated "Binary / Unknown" for a file that was
  * never opened. */
 static char *die_scan_common(int bFileMode, const char *pFileName, const void *pMemory, int nMemorySize, unsigned int nFlags, const char *pDatabasePath,
-                             DBase *pPreloaded)
+                             DBase *pPreloaded, die_scan_callback_fn pfnCallback)
 {
     xx_scan_options options;
     xx_scan_result result;
@@ -335,10 +485,6 @@ static char *die_scan_common(int bFileMode, const char *pFileName, const void *p
     char *pFormatted = NULL;
     char *pResultString = NULL;
     int bOk = 0;
-
-    if (bFileMode && (pFileName == NULL)) {
-        return cdie_strdup("");
-    }
 
     die_options_from_flags(&options, nFlags);
 
@@ -353,7 +499,26 @@ static char *die_scan_common(int bFileMode, const char *pFileName, const void *p
     }
 
     if (bFileMode) {
-        bOk = die_engine_scan_file(pFileName, pDb, &options, &result);
+#if defined(_WIN32)
+        if (pfnCallback != NULL) {
+            xx_pd_struct progress = xx_pd_init();
+            die_callback_context callbackContext;
+            xx_pd_observer previousObserver;
+
+            xx_rt_memset(&callbackContext, 0, sizeof(callbackContext));
+            callbackContext.pDb = pDb;
+            callbackContext.pOptions = &options;
+            callbackContext.pfnCallback = pfnCallback;
+            callbackContext.nLastIndex = UINT64_MAX;
+            die_engine_detect_file_types(pFileName, die_callback_detect_type, &callbackContext);
+            previousObserver = xx_pd_set_observer(&progress, die_callback_observer, &callbackContext);
+            bOk = die_engine_scan_file_type_pd(pFileName, pDb, &options, XFT_UNKNOWN, &result, &progress);
+            xx_pd_set_observer(previousObserver.progress, previousObserver.callback, previousObserver.user_data);
+        } else
+#endif
+        {
+            bOk = die_engine_scan_file(pFileName, pDb, &options, &result);
+        }
     } else {
         bOk = die_engine_scan_memory(pMemory, (int64_t)nMemorySize, pDb, &options, &result);
     }
@@ -380,14 +545,14 @@ static char *die_scan_common(int bFileMode, const char *pFileName, const void *p
 
 DIE_API char *DIE_ScanFileA(char *pszFileName, unsigned int nFlags, char *pszDatabase)
 {
-    return die_scan_common(1, pszFileName, NULL, 0, nFlags, pszDatabase, NULL);
+    return die_scan_common(1, pszFileName, NULL, 0, nFlags, pszDatabase, NULL, NULL);
 }
 
 DIE_API wchar_t *DIE_ScanFileW(wchar_t *pwszFileName, unsigned int nFlags, wchar_t *pwszDatabase)
 {
     char *pFileName = die_wide_to_utf8(pwszFileName);
     char *pDatabase = die_wide_to_utf8(pwszDatabase);
-    char *pResult = die_scan_common(1, pFileName, NULL, 0, nFlags, pDatabase, NULL);
+    char *pResult = die_scan_common(1, pFileName, NULL, 0, nFlags, pDatabase, NULL, NULL);
     wchar_t *pWide = die_dup_result_w(pResult);
 
     xx_rt_free(pFileName);
@@ -399,13 +564,13 @@ DIE_API wchar_t *DIE_ScanFileW(wchar_t *pwszFileName, unsigned int nFlags, wchar
 
 DIE_API char *DIE_ScanMemoryA(char *pMemory, int nMemorySize, unsigned int nFlags, char *pszDatabase)
 {
-    return die_scan_common(0, NULL, pMemory, nMemorySize, nFlags, pszDatabase, NULL);
+    return die_scan_common(0, NULL, pMemory, nMemorySize, nFlags, pszDatabase, NULL, NULL);
 }
 
 DIE_API wchar_t *DIE_ScanMemoryW(char *pMemory, int nMemorySize, unsigned int nFlags, wchar_t *pwszDatabase)
 {
     char *pDatabase = die_wide_to_utf8(pwszDatabase);
-    char *pResult = die_scan_common(0, NULL, pMemory, nMemorySize, nFlags, pDatabase, NULL);
+    char *pResult = die_scan_common(0, NULL, pMemory, nMemorySize, nFlags, pDatabase, NULL, NULL);
     wchar_t *pWide = die_dup_result_w(pResult);
 
     xx_rt_free(pDatabase);
@@ -445,13 +610,13 @@ DIE_API int DIE_LoadDatabaseW(wchar_t *pwszDatabase)
 
 DIE_API char *DIE_ScanFileExA(char *pszFileName, unsigned int nFlags)
 {
-    return die_scan_common(1, pszFileName, NULL, 0, nFlags, NULL, g_bDbLoaded ? &g_db : NULL);
+    return die_scan_common(1, pszFileName, NULL, 0, nFlags, NULL, g_bDbLoaded ? &g_db : NULL, NULL);
 }
 
 DIE_API wchar_t *DIE_ScanFileExW(wchar_t *pwszFileName, unsigned int nFlags)
 {
     char *pFileName = die_wide_to_utf8(pwszFileName);
-    char *pResult = die_scan_common(1, pFileName, NULL, 0, nFlags, NULL, g_bDbLoaded ? &g_db : NULL);
+    char *pResult = die_scan_common(1, pFileName, NULL, 0, nFlags, NULL, g_bDbLoaded ? &g_db : NULL, NULL);
     wchar_t *pWide = die_dup_result_w(pResult);
 
     xx_rt_free(pFileName);
@@ -462,12 +627,12 @@ DIE_API wchar_t *DIE_ScanFileExW(wchar_t *pwszFileName, unsigned int nFlags)
 
 DIE_API char *DIE_ScanMemoryExA(char *pMemory, int nMemorySize, unsigned int nFlags)
 {
-    return die_scan_common(0, NULL, pMemory, nMemorySize, nFlags, NULL, g_bDbLoaded ? &g_db : NULL);
+    return die_scan_common(0, NULL, pMemory, nMemorySize, nFlags, NULL, g_bDbLoaded ? &g_db : NULL, NULL);
 }
 
 DIE_API wchar_t *DIE_ScanMemoryExW(char *pMemory, int nMemorySize, unsigned int nFlags)
 {
-    char *pResult = die_scan_common(0, NULL, pMemory, nMemorySize, nFlags, NULL, g_bDbLoaded ? &g_db : NULL);
+    char *pResult = die_scan_common(0, NULL, pMemory, nMemorySize, nFlags, NULL, g_bDbLoaded ? &g_db : NULL, NULL);
     wchar_t *pWide = die_dup_result_w(pResult);
 
     xx_rt_free(pResult);
@@ -490,7 +655,7 @@ DIE_API int __stdcall DIE_VB_ScanFile(wchar_t *pwszFileName, unsigned int nFlags
 {
     char *pFileName = die_wide_to_utf8(pwszFileName);
     char *pDatabase = die_wide_to_utf8(pwszDatabase);
-    char *pResult = die_scan_common(1, pFileName, NULL, 0, nFlags, pDatabase, NULL);
+    char *pResult = die_scan_common(1, pFileName, NULL, 0, nFlags, pDatabase, NULL, NULL);
     wchar_t *pWide = die_utf8_to_wide(pResult);
     int nLen = 0;
     int nOut = 0;
@@ -521,10 +686,33 @@ DIE_API int __stdcall DIE_VB_ScanFile(wchar_t *pwszFileName, unsigned int nFlags
 DIE_API int __stdcall DIE_VB_ScanFileCallback(wchar_t *pwszFileName, unsigned int nFlags, wchar_t *pwszDatabase, wchar_t *pwszBuffer, int nBufferSize,
                                               DIE_VB_CALLBACK pfnCallback)
 {
-    /* The per-signature progress callback is not surfaced by the cdie engine;
-     * the scan still runs and the buffer is filled exactly as DIE_VB_ScanFile. */
-    (void)pfnCallback;
+    char *pFileName = die_wide_to_utf8(pwszFileName);
+    char *pDatabase = die_wide_to_utf8(pwszDatabase);
+    char *pResult = die_scan_common(1, pFileName, NULL, 0, nFlags, pDatabase, NULL, pfnCallback);
+    wchar_t *pWide = die_utf8_to_wide(pResult);
+    int nLen = 0;
+    int nOut = 0;
 
-    return DIE_VB_ScanFile(pwszFileName, nFlags, pwszDatabase, pwszBuffer, nBufferSize);
+    while (pWide && (pWide[nLen] != 0)) {
+        nLen++;
+    }
+
+    if (nLen < nBufferSize) {
+        int i = 0;
+
+        for (i = 0; i < nLen; i++) {
+            pwszBuffer[i] = pWide[i];
+        }
+
+        pwszBuffer[nLen] = 0;
+        nOut = nLen;
+    }
+
+    xx_rt_free(pFileName);
+    xx_rt_free(pDatabase);
+    xx_rt_free(pResult);
+    xx_rt_free(pWide);
+
+    return nOut;
 }
 #endif
