@@ -32,6 +32,7 @@
 
 #include "platform/platform.h"
 #include "panels/strings.h"
+#include "core/i18n.h"
 #include "theme/theme.h"
 
 #define MINLEN       4                    /* minimum string length          */
@@ -335,13 +336,13 @@ static void paint_list(Dlg* d, PlCanvas* c)
   int x0 = d->r_list.l;
 
   /* column titles */
-  pl_text(c, d->fontb, mkr(x0 + COL_OFF, hd.t, x0 + COL_TYPE, hd.b), "OFFSET", CLR_TEXT_SECONDARY, PL_TEXT_LEFT);
-  pl_text(c, d->fontb, mkr(x0 + COL_TYPE, hd.t, x0 + COL_TXT, hd.b), "TYPE", CLR_TEXT_SECONDARY, PL_TEXT_LEFT);
-  pl_text(c, d->fontb, mkr(x0 + COL_TXT, hd.t, d->r_list.r - 10, hd.b), "TEXT", CLR_TEXT_SECONDARY, PL_TEXT_LEFT);
+  pl_text(c, d->fontb, mkr(x0 + COL_OFF, hd.t, x0 + COL_TYPE, hd.b), translate("OFFSET"), CLR_TEXT_SECONDARY, PL_TEXT_LEFT);
+  pl_text(c, d->fontb, mkr(x0 + COL_TYPE, hd.t, x0 + COL_TXT, hd.b), translate("TYPE"), CLR_TEXT_SECONDARY, PL_TEXT_LEFT);
+  pl_text(c, d->fontb, mkr(x0 + COL_TXT, hd.t, d->r_list.r - 10, hd.b), translate("TEXT"), CLR_TEXT_SECONDARY, PL_TEXT_LEFT);
 
   if (d->nvis == 0) {
     pl_text(c, d->font, mkr(x0 + COL_OFF, d->r_list.t + 8, d->r_list.r - 10, d->r_list.t + 8 + ROW_H),
-      d->n == 0 ? "No strings found." : "No strings match the filter.", CLR_TEXT_CODE, PL_TEXT_LEFT);
+      d->n == 0 ? translate("No strings found.") : translate("No strings match the filter."), CLR_TEXT_CODE, PL_TEXT_LEFT);
     return;
   }
 
@@ -390,7 +391,7 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
   {
     PlRect tr = mkr(d->r_filter.l + 34, d->r_filter.t, d->r_filter.r - 150, d->r_filter.b);
     if (d->filter.len == 0)
-      pl_text(c, d->font, tr, "Filter strings", CLR_TEXT_CODE, PL_TEXT_ELLIPSIS);
+      pl_text(c, d->font, tr, translate("Filter strings"), CLR_TEXT_CODE, PL_TEXT_ELLIPSIS);
     else
       pl_text(c, d->font, tr, d->filter.s, CLR_TEXT_PRIMARY, PL_TEXT_ELLIPSIS);
     if (d->focus == F_FILTER) {
@@ -401,7 +402,7 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
       if (x < tr.r) pl_line(c, x, tr.t + 5, x, tr.b - 5, CLR_TEXT_PRIMARY);
     }
   }
-  snprintf(t, sizeof(t), "%d of %d", d->nvis, (int)d->n);
+  snprintf(t, sizeof(t), translate("%d of %d"), d->nvis, (int)d->n);
   text_right(c, d->font, mkr(d->r_filter.r - 140, d->r_filter.t, d->r_filter.r - 12, d->r_filter.b),
     t, CLR_TEXT_CODE);
 
@@ -413,15 +414,15 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
   name = strrchr(d->path, PSEP);
   name = name ? name + 1 : d->path;
   if (d->truncated)
-    snprintf(t, sizeof(t), "%s  \xC2\xB7  first %u MiB scanned  \xC2\xB7  min length %d",
+    snprintf(t, sizeof(t), translate("%s  \xC2\xB7  first %u MiB scanned  \xC2\xB7  min length %d"),
       name, (unsigned)(SCAN_LIMIT / (1024u * 1024u)), MINLEN);
   else
-    snprintf(t, sizeof(t), "%s  \xC2\xB7  %llu bytes scanned  \xC2\xB7  min length %d",
+    snprintf(t, sizeof(t), translate("%s  \xC2\xB7  %llu bytes scanned  \xC2\xB7  min length %d"),
       name, (unsigned long long)d->scanned, MINLEN);
   pl_text(c, d->font, mkr(14, d->r_bar.t, d->r_close.l - 12, d->r_bar.b), t, CLR_TEXT_SECONDARY, PL_TEXT_ELLIPSIS);
 
   pl_round_rect(c, d->r_close, d->hov_close ? CLR_BTN_GHOST_HOVER : CLR_BTN_GHOST, CLR_BTN_GHOST_BD, 8);
-  pl_text(c, d->font, d->r_close, "Close", CLR_TEXT_PRIMARY, PL_TEXT_CENTER);
+  pl_text(c, d->font, d->r_close, translate("Close"), CLR_TEXT_PRIMARY, PL_TEXT_CENTER);
 }
 
 static void layout(Dlg* d)
@@ -557,7 +558,7 @@ void strings_show(xxwidgets_app* app, xxwidgets_widget* owner, const char* path)
   load_and_extract(d, d->path);
   rebuild_vis(d);
 
-  win = pl_window_create(ow, "Strings", 1000, 700, 700, 450, on_win_size, on_win_close, d);
+  win = pl_window_create(ow, translate("Strings"), 1000, 700, 700, 450, on_win_size, on_win_close, d);
   if (!win) { on_destroy(d); return; }
   d->win = win;
   d->w = pl_widget_create(pl_window_client(win), &s_ops, d, 0, 0, 1000, 700);

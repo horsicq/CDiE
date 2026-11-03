@@ -36,6 +36,7 @@
 #include <libnotify/notify.h>
 #endif
 #include "core/tray.h"
+#include "core/i18n.h"
 
 #if defined(_WIN32)
 
@@ -55,6 +56,12 @@ static NOTIFYICONDATAW g_nid;
 static TrayExitFn g_exit_cb;     static void* g_exit_user;
 static TrayClickFn g_click_cb;   static void* g_click_user;
 static TrayMonitorFn g_monitor_cb; static void* g_monitor_user;
+
+static const WCHAR* wtr(const char* key, WCHAR* buf, int cap)
+{
+  if (!MultiByteToWideChar(CP_UTF8, 0, translate(key), -1, buf, cap)) buf[0] = 0;
+  return buf;
+}
 
 void tray_init(TrayExitFn exit_cb, void* user)
 {
@@ -137,11 +144,12 @@ static void tray_menu(HWND hwnd)
   POINT pt;
   int cmd;
   HMENU menu = CreatePopupMenu();
+  WCHAR t1[128], t2[128], t3[128];
   if (!menu) return;
-  AppendMenuW(menu, MF_STRING, IDM_TRAY_SHOW, L"Show cdie");
-  AppendMenuW(menu, MF_STRING | (g_monitor ? MF_CHECKED : 0), IDM_TRAY_MONITOR, L"Monitor downloads");
+  AppendMenuW(menu, MF_STRING, IDM_TRAY_SHOW, wtr("Show cdie", t1, 128));
+  AppendMenuW(menu, MF_STRING | (g_monitor ? MF_CHECKED : 0), IDM_TRAY_MONITOR, wtr("Monitor downloads", t2, 128));
   AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
-  AppendMenuW(menu, MF_STRING, IDM_TRAY_EXIT, L"Exit");
+  AppendMenuW(menu, MF_STRING, IDM_TRAY_EXIT, wtr("Exit", t3, 128));
   SetMenuDefaultItem(menu, IDM_TRAY_SHOW, FALSE);
   GetCursorPos(&pt);
   SetForegroundWindow(hwnd);
@@ -257,10 +265,10 @@ static void ensure_item(void)
   g_tray.item = [[NSStatusBar systemStatusBar]statusItemWithLength:NSVariableStatusItemLength];
   g_tray.item.button.title = @"cdie";                  /* replace with a template image if you have one */
   NSMenu* m = [NSMenu new];
-  NSMenuItem* show = [m addItemWithTitle:@"Show cdie" action:@selector(show:) keyEquivalent:@""];
-  g_tray.monitorItem = [m addItemWithTitle:@"Monitor downloads" action:@selector(toggleMonitor:) keyEquivalent:@""];
+  NSMenuItem* show = [m addItemWithTitle:[NSString stringWithUTF8String:translate("Show cdie")] action : @selector(show:) keyEquivalent:@""];
+  g_tray.monitorItem = [m addItemWithTitle:[NSString stringWithUTF8String:translate("Monitor downloads")] action : @selector(toggleMonitor:) keyEquivalent:@""];
   [m addItem:[NSMenuItem separatorItem] ] ;
-  NSMenuItem* quit = [m addItemWithTitle : @"Exit" action:@selector(quit:) keyEquivalent:@""];
+  NSMenuItem* quit = [m addItemWithTitle:[NSString stringWithUTF8String:translate("Exit")] action : @selector(quit:) keyEquivalent:@""];
   show.target = g_tray; g_tray.monitorItem.target = g_tray; quit.target = g_tray;
   g_tray.monitorItem.state = g_monitor ? NSControlStateValueOn : NSControlStateValueOff;
   g_tray.item.menu = m;
@@ -370,10 +378,10 @@ static void ensure_indicator(void)
   if (g_ind) return;
   g_ind = app_indicator_new("cdie", "cdie", APP_INDICATOR_CATEGORY_APPLICATION_STATUS);
   menu = gtk_menu_new();
-  show = gtk_menu_item_new_with_label("Show cdie");
-  g_mon_item = gtk_check_menu_item_new_with_label("Monitor downloads");
+  show = gtk_menu_item_new_with_label(translate("Show cdie"));
+  g_mon_item = gtk_check_menu_item_new_with_label(translate("Monitor downloads"));
   sep = gtk_separator_menu_item_new();
-  quit = gtk_menu_item_new_with_label("Exit");
+  quit = gtk_menu_item_new_with_label(translate("Exit"));
   g_block = 1;
   gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(g_mon_item), g_monitor);
   g_block = 0;
@@ -432,7 +440,7 @@ void tray_notify(const char* title, const char* text)
   if (!g_notify_ready) g_notify_ready = notify_init("cdie");
   if (!g_notify_ready) return;
   n = notify_notification_new(title, text, "cdie");
-  notify_notification_add_action(n, "default", "Open", on_note_click, NULL, NULL);
+  notify_notification_add_action(n, "default", translate("Open"), on_note_click, NULL, NULL);
   g_signal_connect(n, "closed", G_CALLBACK(on_note_closed), NULL);
   if (!notify_notification_show(n, NULL)) g_object_unref(n);
 }

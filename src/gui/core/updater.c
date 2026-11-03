@@ -25,6 +25,7 @@
 #include "core/updater.h"
 #include "core/config.h"
 #include "core/gui_backend.h"
+#include "core/i18n.h"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -50,20 +51,24 @@ typedef struct { Updater* u; int total, done; } CopyCtx;
 
 static void notify(Updater* u) { if (u->notify) u->notify(u->user); }
 static void set_pct(Updater* u, int p) { if (p != u->pct) { u->pct = p; notify(u); } }
+
 static void set_label(Updater* u, const char* l)
 {
   snprintf(u->label, sizeof(u->label), "%s", l);
   notify(u);
 }
+
 static void fail(Updater* u, const char* m)
 {
   snprintf(u->error, sizeof(u->error), "%s", m);
   u->phase = UPD_ERROR;
 }
+
 static void join_path(char* out, size_t cap, const char* dir, const char* name)
 {
   snprintf(out, cap, "%s%c%s", dir, SEP, name);
 }
+
 static int ci_eq(const char* a, const char* b)
 {
   for (;; ++a, ++b) {
@@ -74,6 +79,7 @@ static int ci_eq(const char* a, const char* b)
     if (!x) return 1;
   }
 }
+
 static int is_sep(char c)
 {
 #ifdef _WIN32
@@ -93,6 +99,7 @@ static FILE* u8fopen(const char* p, const char* m)
   if (!to_w(p, wp, 2048) || !to_w(m, wm, 8)) return NULL;
   return _wfopen(wp, wm);
 }
+
 static void del_file(const char* p) { WCHAR w[2048]; if (to_w(p, w, 2048)) DeleteFileW(w); }
 static void del_dir(const char* p) { WCHAR w[2048]; if (to_w(p, w, 2048)) RemoveDirectoryW(w); }
 static void mk1(const char* p) { WCHAR w[2048]; if (to_w(p, w, 2048)) CreateDirectoryW(w, NULL); }

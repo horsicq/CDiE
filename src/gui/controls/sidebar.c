@@ -22,6 +22,7 @@
 #include "controls/sidebar.h"
 #include "theme/theme.h"
 #include "theme/logo_data.h"
+#include "core/i18n.h"
 
 #define LOGO_DRAW 24 
 
@@ -83,7 +84,7 @@ static void draw_search(Sidebar* d, PlCanvas* c, int width)
 	pl_round_rect(c, box, CLR_SEARCH_BG, CLR_PANEL_BORDER, 6);
 	pl_ellipse(c, cx - 5, cy - 5, cx + 5, cy + 5, PL_NONE, CLR_TEXT_SECONDARY);
 	pl_line(c, cx + 4, cy + 4, cx + 8, cy + 8, CLR_TEXT_SECONDARY);
-	pl_text(c, d->fontNav, tr, "Search", CLR_TEXT_SECONDARY, PL_TEXT_LEFT);
+	pl_text(c, d->fontNav, tr, translate("Search"), CLR_TEXT_SECONDARY, PL_TEXT_LEFT);
 }
 
 static void draw_item(Sidebar* d, PlCanvas* c, int i, int w, int h)
@@ -95,7 +96,7 @@ static void draw_item(Sidebar* d, PlCanvas* c, int i, int w, int h)
 
 	pl_fill(c, 0, y, w, y + NAV_H, bg);
 	if (sel) pl_fill(c, 0, y, 3, y + NAV_H, CLR_ACCENT);
-	pl_text(c, d->fontNav, r, s_labels[i],
+	pl_text(c, d->fontNav, r, translate(s_labels[i]),
 		sel ? CLR_TEXT_PRIMARY : CLR_TEXT_SECONDARY, PL_TEXT_ELLIPSIS);
 }
 
@@ -131,7 +132,7 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 
 	pl_image(c, 14, (LOGO_H - LOGO_DRAW) / 2, LOGO_DRAW, LOGO_DRAW,
 		LOGO_IMG_W, LOGO_IMG_H, logo_rgba);
-	pl_text(c, d->fontTitle, tr, "Detect It Easy", CLR_TEXT_PRIMARY, PL_TEXT_ELLIPSIS);
+	pl_text(c, d->fontTitle, tr, translate("Detect It Easy"), CLR_TEXT_PRIMARY, PL_TEXT_ELLIPSIS);
 	pl_line(c, 0, LOGO_H, w, LOGO_H, CLR_SEPARATOR);
 
 	draw_search(d, c, w);

@@ -38,6 +38,7 @@
 #include "core/gui_backend.h"
 #include "core/config.h" 
 #include "core/updater.h"
+#include "core/i18n.h"
 #include "theme/theme.h"
 
 #define SG_BG     CLR_BG
@@ -447,7 +448,7 @@ static void rebuild_tree(Sig* s)
   s->count = (root && root[0]) ? add_dir(s, -1, 0, root, s->filter.s) : 0;
   rebuild_vis(s);
   if (!root || !root[0])
-    out_log(s, "Signature folder not found. Use Database paths in the main window.");
+    out_log(s, translate("Signature folder not found. Use Database paths in the main window."));
   redraw(s);
 }
 
@@ -693,7 +694,7 @@ static void save_file(Sig* s)
 
   if (!s->cur[0]) return;
   f = fopen_u8(s->cur, "wb");
-  if (!f) { out_log(s, "Cannot save the file."); return; }
+  if (!f) { out_log(s, translate("Cannot save the file.")); return; }
   for (i = 0; i <= s->len && ok; ++i) {
     if (i == s->len || s->buf[i] == '\n') {
       if (i > run && fwrite(s->buf + run, 1, i - run, f) != i - run) ok = 0;
@@ -707,10 +708,10 @@ static void save_file(Sig* s)
   if (fclose(f) != 0) ok = 0;
   if (ok) {
     s->dirty = 0;
-    snprintf(msg, sizeof(msg), "Saved %s", s->cur);
+    snprintf(msg, sizeof(msg), translate("Saved %s"), s->cur);
     out_log(s, msg);
   }
-  else out_log(s, "Cannot save the file.");
+  else out_log(s, translate("Cannot save the file."));
   set_save_state(s);
   redraw(s);
 }
@@ -741,7 +742,7 @@ static void do_find(Sig* s, int from_start)
       if (k == nl) goto found;
     }
   }
-  out_log(s, "Text not found.");
+  out_log(s, translate("Text not found."));
   return;
 found:
   s->ma = i; s->mb = i + nl; s->caret = s->mb;
@@ -850,12 +851,14 @@ static void card(PlCanvas* c, PlRect r, int headH)
 
 static void paint_btn(Sig* s, PlCanvas* c, int i)
 {
-  Btn* b = &s->b[i];
+  Btn bb = s->b[i];
+  Btn* b = &bb;
   PlRect r = b->r, tr = r;
   int hov = s->hov == i, en = b->enabled, on = b->on, w = r.r - r.l, h = r.b - r.t;
   PlColor fill, bd, fg;
 
-  if (r.r <= r.l) return;          
+  if (r.r <= r.l) return;
+  bb.text = translate(bb.text);
 
   switch (b->kind) {
   case K_ACCENT:
@@ -903,7 +906,7 @@ static void paint_btn(Sig* s, PlCanvas* c, int i)
 static void paint_edit(Sig* s, PlCanvas* c, Edit* e, PlRect tr, int focused, const char* cue)
 {
   if (e->len == 0) {
-    txt(c, s->font, SG_DIM, tr, 0, cue);
+    txt(c, s->font, SG_DIM, tr, 0, translate(cue));
   }
   else txt(c, s->font, SG_TEXT, tr, 0, e->s);
   if (focused) {
@@ -1055,7 +1058,7 @@ static void paint_banner(Sig* s, PlCanvas* c)
 
   if (ph == UPD_RUNNING) {
     int bx = x + 214, bw = bl - 56 - bx, fw = bw * u->pct / 100;
-    snprintf(t, sizeof(t), "%s...", u->label[0] ? u->label : "Updating");
+    snprintf(t, sizeof(t), "%s...", translate(u->label[0] ? u->label : "Updating"));
     txt(c, s->fontb, SG_TEXT, mkr(x, r.t, x + 204, r.b), 0, t);
     if (bw > 20) {
       pl_round_rect(c, mkr(bx, cy - 4, bx + bw, cy + 4), SG_BTNB, SG_BTNB, 4);
@@ -1074,12 +1077,12 @@ static void paint_banner(Sig* s, PlCanvas* c)
     dcol = SG_TEXT2;
     if (ph == UPD_DONE) {
       title = "Database updated";
-      snprintf(t, sizeof(t), "Now at %s  \xC2\xB7  %d added, %d changed  \xC2\xB7  your db_custom was not changed",
+      snprintf(t, sizeof(t), translate("Now at %s  \xC2\xB7  %d added, %d changed  \xC2\xB7  your db_custom was not changed"),
         u->installed, u->added, u->changed);
     }
     else {
       title = "Signature database is up to date";
-      snprintf(t, sizeof(t), "Version %s", u->installed);
+      snprintf(t, sizeof(t), translate("Version %s"), u->installed);
     }
   }
   else {
@@ -1087,15 +1090,16 @@ static void paint_banner(Sig* s, PlCanvas* c)
     pl_ellipse(c, x, cy - 4, x + 9, cy + 5, d, d);
     x += 23;
     if (ph == UPD_READY)
-      snprintf(t, sizeof(t), "Installed %s  \xE2\x86\x92  latest %s",
-        u->installed[0] ? u->installed : "unknown", u->latest);
-    else if (ph == UPD_ERROR) { snprintf(t, sizeof(t), "%s", u->error); dcol = red; }
-    else if (ph == UPD_CHECKING) snprintf(t, sizeof(t), "Checking for updates...");
-    else snprintf(t, sizeof(t), "Not checked yet");
+      snprintf(t, sizeof(t), translate("Installed %s  \xE2\x86\x92  latest %s"),
+        u->installed[0] ? u->installed : translate("unknown"), u->latest);
+    else if (ph == UPD_ERROR) { snprintf(t, sizeof(t), "%s", translate(u->error)); dcol = red; }
+    else if (ph == UPD_CHECKING) snprintf(t, sizeof(t), "%s", translate("Checking for updates..."));
+    else snprintf(t, sizeof(t), "%s", translate("Not checked yet"));
   }
   {
-    int tw = pl_text_width(s->fontb, title);
-    txt(c, s->fontb, SG_TEXT, mkr(x, r.t, x + tw + 4, r.b), 0, title);
+    const char* ttl = translate(title);
+    int tw = pl_text_width(s->fontb, ttl);
+    txt(c, s->fontb, SG_TEXT, mkr(x, r.t, x + tw + 4, r.b), 0, ttl);
     txt(c, s->font, ph == UPD_DONE ? green : dcol, mkr(x + tw + 16, r.t, bl, r.b), 0, t);
   }
 }
@@ -1133,7 +1137,7 @@ static void on_paint(void* u, PlCanvas* c, int w, int h) {
 
   card(c, s->r_edcard, HEAD_ED);
   name = s->cur[0] ? strrchr(s->cur, PSEP) : NULL;
-  name = name ? name + 1 : (s->cur[0] ? s->cur : "No file selected");
+  name = name ? name + 1 : (s->cur[0] ? s->cur : translate("No file selected"));
   {
     int nx = s->r_edcard.l + 14, nw = pl_text_width(s->fontb, name);
     txt(c, s->fontb, SG_TEXT, mkr(nx, s->r_edcard.t, nx + nw + 4, s->r_edcard.t + HEAD_ED), 0, name);
@@ -1144,7 +1148,7 @@ static void on_paint(void* u, PlCanvas* c, int w, int h) {
       txt(c, s->font, CLR_TEXT_ACCENT, badge, 1, s->type);
     }
     if (s->cur[0]) {
-      snprintf(t, sizeof(t), "%d lines  \xC2\xB7  UTF-8", s->nl);
+      snprintf(t, sizeof(t), translate("%d lines  \xC2\xB7  UTF-8"), s->nl);
       tr = mkr(s->r_edcard.r - 220, s->r_edcard.t, s->r_edcard.r - 14, s->r_edcard.t + HEAD_ED);
       txt(c, s->font, SG_TEXT2, tr, 2, t);
     }
@@ -1158,7 +1162,7 @@ static void on_paint(void* u, PlCanvas* c, int w, int h) {
   for (i = 0; i < NB; ++i) paint_btn(s, c, i);
   if (s->upd.phase == UPD_RUNNING)
     txt(c, s->font, SG_TEXT2, mkr(s->b[B_RO].r.r + 14, s->b[B_RO].r.t, s->r_findbox.l - 10, s->b[B_RO].r.b),
-      0, "Editing is locked while the database updates");
+      0, translate("Editing is locked while the database updates"));
 
   if (s->popup) {
     PlRect p = mkr(s->b[B_DROP].r.l, s->b[B_DROP].r.t - 38, s->b[B_DROP].r.r, s->b[B_DROP].r.t - 4);
@@ -1229,7 +1233,7 @@ static void run_cmd(Sig* s, int id)
   case B_FIND: do_find(s, 1); break;
   case B_NEXT: do_find(s, 0); break;
   case B_CLEAR: out_clear(s); break;
-  case B_RUN: out_log(s, "Run is not connected to the scan engine yet."); break;
+  case B_RUN: out_log(s, translate("Run is not connected to the scan engine yet.")); break;
   case B_DROP: s->popup = 1; break;
   case B_UPD:
     if (s->upd.phase == UPD_READY) updater_install(&s->upd);
@@ -1492,18 +1496,18 @@ void signatures_show(xxwidgets_app* app, xxwidgets_widget* owner)
     s->aw[127] = s->sp;
   }
 
-  init_btn(s, B_SAVE, K_NORMAL, "Save", 0, 0);
-  init_btn(s, B_RO, K_SWITCH, "Readonly", 1, 1);
-  init_btn(s, B_FIND, K_NORMAL, "Find", 0, 1);
-  init_btn(s, B_NEXT, K_NORMAL, "Next", 0, 1);
-  init_btn(s, B_CLEAR, K_LINK, "Clear result", 0, 1);
+  init_btn(s, B_SAVE, K_NORMAL, translate("Save"), 0, 0);
+  init_btn(s, B_RO, K_SWITCH, translate("Readonly"), 1, 1);
+  init_btn(s, B_FIND, K_NORMAL, translate("Find"), 0, 1);
+  init_btn(s, B_NEXT, K_NORMAL, translate("Next"), 0, 1);
+  init_btn(s, B_CLEAR, K_LINK, translate("Clear result"), 0, 1);
   for (i = 0; i < NCHIPS; ++i) init_btn(s, B_CH0 + i, K_CHIP, s_chip_text[i], i < 4, 1);
-  init_btn(s, B_DROP, K_DROP, "detect", 0, 1);
-  init_btn(s, B_RUN, K_ACCENT, "Run", 0, 1);
-  init_btn(s, B_CLOSE, K_NORMAL, "Close", 0, 1);
-  init_btn(s, B_UPD, K_NORMAL, "Checking", 0, 0);
+  init_btn(s, B_DROP, K_DROP, translate("detect"), 0, 1);
+  init_btn(s, B_RUN, K_ACCENT, translate("Run"), 0, 1);
+  init_btn(s, B_CLOSE, K_NORMAL, translate("Close"), 0, 1);
+  init_btn(s, B_UPD, K_NORMAL, translate("Checking"), 0, 0);
 
-  win = pl_window_create(ow, "Signatures", 1280, 780, 1000, 640, on_win_size, on_win_close, s);
+  win = pl_window_create(ow, translate("Signatures"), 1280, 780, 1000, 640, on_win_size, on_win_close, s);
   if (!win) { on_destroy(s); return; }
   s->win = win;
   s->w = pl_widget_create(pl_window_client(win), &s_ops, s, 0, 0, 1280, 780);

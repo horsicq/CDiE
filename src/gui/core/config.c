@@ -320,6 +320,7 @@ int config_load(CdieConfig* cfg)
     else if (!strncmp(line, "extra=", 6))  copy_field(cfg->extra_db, sizeof(cfg->extra_db), line + 6);
     else if (!strncmp(line, "custom=", 7)) copy_field(cfg->custom_db, sizeof(cfg->custom_db), line + 7);
     else if (!strncmp(line, "db_version=", 11)) copy_field(cfg->db_version, sizeof(cfg->db_version), line + 11);
+    else if (!strncmp(line, "language=", 9))   copy_field(cfg->language, sizeof(cfg->language), line + 9);
     else if (int_key(line, "prefs", &cfg->has_prefs)) {}
     else if (int_key(line, "deep", &cfg->deep)) {}
     else if (int_key(line, "heuristic", &cfg->heuristic)) {}
@@ -363,6 +364,7 @@ int config_save(const CdieConfig* cfg)
   fprintf(f, "extra=%s\n", cfg->extra_db);
   fprintf(f, "custom=%s\n", cfg->custom_db);
   fprintf(f, "db_version=%s\n", ver);
+	fprintf(f, "language=%s\n", cfg->language);
   if (cfg->has_prefs) {
     int k;
     fprintf(f, "\n[scan]\n");

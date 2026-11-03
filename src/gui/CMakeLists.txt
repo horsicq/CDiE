@@ -27,6 +27,7 @@ if(WIN32)
         ${CMAKE_CURRENT_LIST_DIR}/core/config.c
         ${CMAKE_CURRENT_LIST_DIR}/core/dlwatch.c
         ${CMAKE_CURRENT_LIST_DIR}/core/updater.c
+        ${CMAKE_CURRENT_LIST_DIR}/core/i18n.c
         ${CMAKE_CURRENT_LIST_DIR}/panels/header.c
         ${CMAKE_CURRENT_LIST_DIR}/panels/infobar.c
         ${CMAKE_CURRENT_LIST_DIR}/panels/options.c
@@ -43,19 +44,22 @@ target_sources(cdie_gui PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/controls/tabbar.c
     ${CMAKE_CURRENT_LIST_DIR}/controls/bottombar.c
     ${CMAKE_CURRENT_LIST_DIR}/controls/treeview.c
-    ${CMAKE_CURRENT_LIST_DIR}/controls/hexviewer.c)
+    ${CMAKE_CURRENT_LIST_DIR}/controls/hexviewer.c
+    ${CMAKE_CURRENT_LIST_DIR}/controls/disasmview.c     
+    ${CMAKE_CURRENT_LIST_DIR}/core/disasm_backend.c)     
 
 target_include_directories(cdie_gui PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/..
     ${CMAKE_CURRENT_LIST_DIR}
     ${CMAKE_CURRENT_LIST_DIR}/resource)
 
-target_link_libraries(cdie_gui PRIVATE xxfclib::die_engine xxwidgets::xxwidgets)
+target_link_libraries(cdie_gui PRIVATE xxfclib::die_engine xxwidgets::xxwidgets cdisasm)
 
 if(WIN32)
     if(CDIE_STORE_BUILD)
         target_compile_definitions(cdie_gui PRIVATE CDIE_STORE_BUILD)
     endif()
+	    target_compile_definitions(cdie_gui PRIVATE CDISASM_STATIC)
     target_sources(cdie_gui PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/platform/platform_win32.c
         ${CMAKE_CURRENT_LIST_DIR}/resource/cdie_gui.rc)
@@ -91,4 +95,36 @@ if(MSVC)
     endif()
 endif()
 
+# Add headers so they appear in Solution Explorer (they are not compiled).
+file(GLOB_RECURSE _cdie_gui_headers CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_LIST_DIR}/*.h"
+    "${CMAKE_SOURCE_DIR}/src/app/*.h"
+    "${CMAKE_SOURCE_DIR}/src/global.h")
+target_sources(cdie_gui PRIVATE ${_cdie_gui_headers})
+
+# Group files in Solution Explorer: separate Source/Header/Resource roots,
+# each mirroring the folder layout under src\.
+get_target_property(_cdie_gui_all cdie_gui SOURCES)
+list(FILTER _cdie_gui_all EXCLUDE REGEX "^\\$<")
+
+set(_cdie_gui_abs "")
+foreach(_f IN LISTS _cdie_gui_all)
+    get_filename_component(_abs "${_f}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+    list(APPEND _cdie_gui_abs "${_abs}")
+endforeach()
+# Only files under src\ can be grouped by TREE.
+list(FILTER _cdie_gui_abs INCLUDE REGEX "^${CMAKE_SOURCE_DIR}/src/")
+
+set(_cdie_gui_grp_h ${_cdie_gui_abs})
+list(FILTER _cdie_gui_grp_h INCLUDE REGEX "\\.(h|hpp)$")
+
+set(_cdie_gui_grp_rc ${_cdie_gui_abs})
+list(FILTER _cdie_gui_grp_rc INCLUDE REGEX "\\.(rc|ico|manifest)$")
+
+set(_cdie_gui_grp_c ${_cdie_gui_abs})
+list(FILTER _cdie_gui_grp_c INCLUDE REGEX "\\.(c|cpp|m)$")
+
+source_group(TREE "${CMAKE_SOURCE_DIR}/src" PREFIX "Source Files"   FILES ${_cdie_gui_grp_c})
+source_group(TREE "${CMAKE_SOURCE_DIR}/src" PREFIX "Header Files"   FILES ${_cdie_gui_grp_h})
+source_group(TREE "${CMAKE_SOURCE_DIR}/src" PREFIX "Resource Files" FILES ${_cdie_gui_grp_rc})
 install(TARGETS cdie_gui RUNTIME DESTINATION ".")

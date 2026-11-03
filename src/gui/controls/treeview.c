@@ -22,6 +22,7 @@
 #include <string.h>
 #include "treeview.h"
 #include "theme/theme.h"
+#include "core/i18n.h"
 
 #define HDR_H     40
 #define DET_H     28
@@ -100,6 +101,26 @@ static void badge_colors(const char* type, PlColor* bg, PlColor* fg)
   *bg = CLR_BTN_GHOST; *fg = CLR_TEXT_SECONDARY;
 }
 
+/* "(Heur) Packer" -> "(Heur) <translated Packer>". Colours still use the English type. */
+static void type_label(const char* type, char* out, size_t cap)
+{
+  char prefix[40];
+  const char* base = type;
+  prefix[0] = 0;
+  if (type[0] == '(') {
+    const char* close = strchr(type, ')');
+    if (close) {
+      size_t n = (size_t)(close + 1 - type);
+      if (n < sizeof prefix) {
+        memcpy(prefix, type, n); prefix[n] = 0;
+        base = close + 1;
+        while (*base == ' ') ++base;
+      }
+    }
+  }
+  snprintf(out, cap, "%s%s%s", prefix, prefix[0] ? " " : "", translate(base));
+}
+
 static int item_height(const Item* it) { return HDR_H + (it->open ? DET_ROWS * DET_H : 0); }
 
 static int content_height(const ResultsTree* t)
@@ -141,13 +162,14 @@ static void paint_header(ResultsTree* t, PlCanvas* c, const Item* it,
   PlRect card = { MX + 16, y + GAP, w - MX - SCROLL_W, y + HDR_H - GAP };
   int mid = (card.t + card.b) / 2;
   int pill_w = PILL_W, x;
-  char up[80]; size_t i;
+  char up[80], label[80]; size_t i;
 
   pl_round_rect(c, card, CLR_PANEL, CLR_PANEL_BORDER, 16);
   pl_line(c, MX + 2, mid, card.l, mid, CLR_PANEL_BORDER);
 
-  for (i = 0; it->type[i] && i < sizeof up - 1; ++i) {
-    char ch = it->type[i];
+  type_label(it->type, label, sizeof label);
+  for (i = 0; label[i] && i < sizeof up - 1; ++i) {
+    char ch = label[i];
     up[i] = (ch >= 'a' && ch <= 'z') ? (char)(ch - 32) : ch;
   }
   up[i] = 0;
@@ -201,10 +223,14 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
       paint_header(t, c, it, y, w);
       if (it->open) {
         int dy = y + HDR_H;
-        paint_detail(t, c, "Type", it->type, dy, w);
-        paint_detail(t, c, "Name", it->name, dy + DET_H, w);
-        paint_detail(t, c, "Version", it->version, dy + 2 * DET_H, w);
-        paint_detail(t, c, "Info", it->info, dy + 3 * DET_H, w);
+        {
+          char tl[80];
+          type_label(it->type, tl, sizeof tl);
+          paint_detail(t, c, translate("Type"), tl, dy, w);
+        }
+        paint_detail(t, c, translate("Name"), it->name, dy + DET_H, w);
+        paint_detail(t, c, translate("Version"), it->version, dy + 2 * DET_H, w);
+        paint_detail(t, c, translate("Info"), it->info, dy + 3 * DET_H, w);
       }
     }
     y += ih;

@@ -15,6 +15,7 @@ enum {
   OPTIONS_PAGE_DATABASES,
   OPTIONS_PAGE_OPTIMIZATION,
   OPTIONS_PAGE_FONTS,
+  OPTIONS_PAGE_LANGUAGE,
   OPTIONS_PAGE_CONTEXT,
   OPTIONS_PAGE_ABOUT
 };
@@ -37,8 +38,6 @@ typedef struct OptionsOptimization {
   int use_sse2, use_avx2;
   int has_sse2, has_avx2;        /* host-reported CPU/OS support */
 } OptionsOptimization;
-
-
 
 typedef struct OptionsFont {
   char family[128];            /* empty = default family */
@@ -69,7 +68,13 @@ typedef struct OptionsHost {
   int  (*check_update)(void* user, char* out, size_t cap);
   int  (*list_fonts)(void* user, int fixed_only,
   void (*add)(const char* family, void* ud), void* ud);
+
+  int  (*list_languages)(void* user,
+    void (*add)(const char* code, const char* name, void* ud), void* ud);
+  const char* (*get_language)(void* user);
+  int  (*set_language)(void* user, const char* code);
 } OptionsHost;
+
 
 int options_show(xxwidgets_app* app, xxwidgets_widget* owner,
   const OptionsHost* host, int start_page);

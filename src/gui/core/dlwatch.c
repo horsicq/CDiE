@@ -51,6 +51,7 @@
 #include "core/gui_backend.h"
 #include "core/config.h"
 #include "core/tray.h"
+#include "core/i18n.h"
 
 
 #define PLAT_PATH_MAX 4096
@@ -153,7 +154,7 @@ static void quick_cb(const char* type, const char* name, const char* version,
   quick_scan* q = (quick_scan*)u;
   size_t used;
 
-  if (!type || (!ci_contains(type, "Packer") && !ci_contains(type, "Protector")) && !ci_contains(type, "Malware"))
+  if (!type || (!ci_contains(type, translate("Packer")) && !ci_contains(type, translate("Protector"))) && !ci_contains(type, translate("Malware")))
     return;
 
   q->count++;
@@ -192,9 +193,9 @@ static void on_download_found(const char* path)
   if (g_host.restore_flags) g_host.restore_flags(g_host.user);
 
   scan_ms = (unsigned)(dlp_tick_ms() - t0);
-  snprintf(text, sizeof(text), "%s\n%s (%u ms)", base_name(path),
-    q.count ? q.text : "No packer or protector found", scan_ms);
-  tray_notify("New download scanned", text);
+  snprintf(text, sizeof(text), translate("%s\n%s (%u ms)"), base_name(path),
+    q.count ? q.text : translate("No packer or protector found"), scan_ms);
+  tray_notify(translate("New download scanned"), text);
 
   keep = (char*)malloc(strlen(path) + 1);
   if (keep) {
@@ -291,13 +292,13 @@ void dlwatch_set_enabled(int on)
     if (!dlp_start()) {
       g_on = 0;
       tray_set_monitor(0);
-      host_status("Could not watch the Downloads folder.");
+      host_status(translate("Could not watch the Downloads folder."));
       return;
     }
     g_on = 1;
     tray_set_monitor(1);
     tray_set_persistent(1);
-    host_status("Download monitoring on. Closing the window keeps cdie in the tray.");
+    host_status(translate("Download monitoring on. Closing the window keeps cdie in the tray."));
   }
   else {
     dlp_stop();
@@ -305,7 +306,7 @@ void dlwatch_set_enabled(int on)
     g_on = 0;
     tray_set_monitor(0);
     tray_set_persistent(0);
-    host_status("Download monitoring off.");
+    host_status(translate("Download monitoring off."));
   }
 }
 
