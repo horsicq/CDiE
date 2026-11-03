@@ -30,6 +30,10 @@
 #include "core/i18n.h"
 #include "theme/theme.h"
 
+#ifndef _WIN32
+#define _strdup strdup
+#endif
+
 #define HEAD    44
 #define NAV_H   38
 #define ROW_H   34
@@ -609,6 +613,7 @@ static void lang_add(const char* code, const char* name, void* ud)
   o->lcodes[o->nlang] = _strdup(code);
   o->lnames[o->nlang] = _strdup(name);
   if (o->lcodes[o->nlang] && o->lnames[o->nlang]) o->nlang++;
+  else { free(o->lcodes[o->nlang]); free(o->lnames[o->nlang]); }
 }
 
 static void load_languages(Opt* o)
