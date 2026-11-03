@@ -22,6 +22,7 @@
 #include <string.h>
 #include "controls/bottombar.h"
 #include "theme/theme.h"
+#include "core/i18n.h"
 
 #define BB_PAD 12
 #define BB_VERSION "cdie 4.0.0 (x64)"
@@ -36,7 +37,7 @@ struct Bottombar {
 static void on_paint(void* u, PlCanvas* c, int w, int h)
 {
   Bottombar* d = (Bottombar*)u;
-  const char* status = d->status[0] ? d->status : "Ready";
+  const char* status = d->status[0] ? d->status : translate("Ready");
   PlRect left, right;
   int vw;
 

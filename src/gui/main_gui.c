@@ -57,6 +57,8 @@
 #include "controls/hexviewer.h"
 #include "core/tray.h"
 #include "core/dlwatch.h"
+#include "controls/disasmview.h"
+#include "core/i18n.h"
 
  /* Store / VSIX builds get updates from Microsoft */
 #ifdef CDIE_STORE_BUILD
@@ -86,6 +88,9 @@ static Infobar* g_infobar_wnd;
 static Bottombar* g_bottombar;
 static ResultsTree* g_tree;
 static HexViewer* g_hex;
+static DisasmView* g_dasm;
+static Tabbar* g_tabbar;
+
 static int g_page = NAV_OVERVIEW;
 static HANDLE g_hexFile = INVALID_HANDLE_VALUE;
 
@@ -99,6 +104,8 @@ static int g_prefsReady;
 static int g_bFlagDeep = 1, g_bFlagHeur = 1, g_bFlagVerbose = 1;
 static int g_bFlagAggr, g_bFlagHideUnknown, g_bFlagFormat;
 static int g_bDbExtra = 1, g_bDbCustom = 1;
+static char g_lang[32];
+
 static void layout(void);
 
 static void on_tray_exit(void* user)
@@ -197,6 +204,17 @@ static void hex_close(void)
 {
 	if (g_hexFile != INVALID_HANDLE_VALUE) CloseHandle(g_hexFile);
 	g_hexFile = INVALID_HANDLE_VALUE;
+}
+
+static void dasm_load(void)
+{
+	LARGE_INTEGER sz;
+	if (!g_dasm) return;
+	if (g_hexFile == INVALID_HANDLE_VALUE || !GetFileSizeEx(g_hexFile, &sz)) {
+		disasmview_close(g_dasm);
+		return;
+	}
+	disasmview_open(g_dasm, hex_read, NULL, (uint64_t)sz.QuadPart);
 }
 
 static void hex_open(const char* utf8_path)
@@ -445,6 +463,7 @@ static void do_scan(void)
 		if (g_lastPath) HeapFree(GetProcessHeap(), 0, g_lastPath);
 		g_lastPath = copy_utf8(path);
 		hex_open(path);
+		dasm_load();
 	}
 	else {
 		set_status("Cannot open the file.");
@@ -773,6 +792,27 @@ static int opt_check_update(void* u, char* out, size_t cap)
 	return 1;
 }
 
+static int opt_list_languages(void* u,
+	void (*add)(const char*, const char*, void*), void* ud)
+{
+	(void)u;
+	return i18n_list(add, ud);
+}
+
+static const char* opt_get_language(void* u) { (void)u; return g_lang; }
+
+static int opt_set_language(void* u, const char* code)
+{
+	(void)u;
+	if (!i18n_load(code)) return 0;
+	snprintf(g_lang, sizeof(g_lang), "%s", code);
+	if (g_tabbar) tabbar_relayout(g_tabbar);
+	layout();
+	RedrawWindow(native(g_window), NULL, NULL,
+		RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+	return 1;
+}
+
 static void do_options_window(int page)
 {
 	OptionsHost host;
@@ -794,6 +834,9 @@ static void do_options_window(int page)
 	host.check_update = opt_check_update;
 	host.open_url = opt_open_url;
 	host.copy_text = opt_copy_text;
+	host.list_languages = opt_list_languages;
+	host.get_language = opt_get_language;
+	host.set_language = opt_set_language;
 	options_show(g_app, g_window, &host, page);
 }
 
@@ -833,14 +876,18 @@ static void layout(void)
 	{
 		int tx = cx + CONTENT_PAD, tw = cw - 2 * CONTENT_PAD;
 		int ty = cy + 4, th = H - cy - BOTTOMBAR_H - 8;
+		int on_tree = (g_page != NAV_HEX && g_page != NAV_DISASM);
 		if (tw < 40) tw = 40;
 		if (th < 40) th = 40;
 		if (g_tree)
 			pl_widget_set_rect(resultstree_widget(g_tree), tx, ty,
-				g_page == NAV_HEX ? 0 : tw, g_page == NAV_HEX ? 0 : th);
+				on_tree ? tw : 0, on_tree ? th : 0);
 		if (g_hex)
 			hexview_set_rect(g_hex, tx, ty,
 				g_page == NAV_HEX ? tw : 0, g_page == NAV_HEX ? th : 0);
+		if (g_dasm)
+			disasmview_set_rect(g_dasm, tx, ty,
+				g_page == NAV_DISASM ? tw : 0, g_page == NAV_DISASM ? th : 0);
 	}
 
 	GetWindowRect(native(g_window), &window_bounds);
@@ -876,6 +923,7 @@ static void on_nav(void* user, int nav_id)
 
 	case NAV_OVERVIEW:
 	case NAV_HEX:
+	case NAV_DISASM:
 		g_page = nav_id;
 		layout();
 		break;
@@ -1000,13 +1048,16 @@ static int create_controls(void)
 	g_hex = hexview_create(native(g_window), NULL, SIDEBAR_W, 0, 0, 0);
 	if (g_hex) hexview_set_callbacks(g_hex, NULL, opt_copy_text, NULL);
 
-	if (!g_sidebar || !g_header_wnd || !g_infobar_wnd || !g_bottombar || !g_tree || !g_hex) {
+	g_dasm = disasmview_create(native(g_window), NULL, SIDEBAR_W, 0, 0, 0);
+	if (g_dasm) disasmview_set_status_callback(g_dasm, mon_set_status, NULL);
+
+	if (!g_sidebar || !g_header_wnd || !g_infobar_wnd || !g_bottombar || !g_tree || !g_hex || !g_dasm) {
 		WCHAR msg[200];
 		wsprintfW(msg,
 			L"Chrome creation failed (1 = ok):\nsidebar=%d header=%d infobar=%d "
-			L"bottombar=%d tree=%d\nGetLastError=%lu",
+			L"bottombar=%d tree=%d dasm=%d\nGetLastError=%lu",
 			g_sidebar != NULL, g_header_wnd != NULL, g_infobar_wnd != NULL,
-			g_bottombar != NULL, g_tree != NULL, GetLastError());
+			g_bottombar != NULL, g_tree != NULL, g_dasm != NULL, GetLastError());
 		MessageBoxW(NULL, msg, L"cdie", MB_ICONERROR);
 		return 0;
 	}
@@ -1151,6 +1202,15 @@ int gui_run(void)
 	WCHAR title[160], ready[512];
 	WCHAR* base;
 	char* utf8_title;
+
+	{
+		CdieConfig lc;
+		if (config_load(&lc) && lc.language[0]) {
+			snprintf(g_lang, sizeof(g_lang), "%s", lc.language);
+			i18n_load(g_lang);
+		}
+	}
+
 
 	status = xxwidgets_app_create(&config, &g_app);
 	if (status != XXWIDGETS_OK) {

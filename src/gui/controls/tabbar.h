@@ -34,5 +34,7 @@ void      tabbar_destroy(Tabbar *t);
 PlWidget *tabbar_widget(const Tabbar *t);
 void      tabbar_set_active(Tabbar *t, int tab_id);
 int       tabbar_get_active(const Tabbar *t);
+void tabbar_relayout(Tabbar* t);
+
 
 #endif

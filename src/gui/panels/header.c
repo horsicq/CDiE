@@ -23,6 +23,7 @@
 #include <string.h>
 #include "panels/header.h"
 #include "theme/theme.h"
+#include "core/i18n.h"
 
 #define MAX_HDR_STR 4096
 #define BULLETS     "\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2"   /* ••• (UTF-8) */
@@ -83,7 +84,7 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
   else {
     PlRect r = { CONTENT_PAD, 0, w - 70, h };
     pl_text(c, d->fontCrumb, r,
-      "Drop a file here, or click " BULLETS " to open",
+      translate("Drop a file here, or click " BULLETS " to open"),
       CLR_TEXT_SECONDARY, TXT_LEFT);
   }
 

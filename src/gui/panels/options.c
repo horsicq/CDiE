@@ -27,6 +27,7 @@
 #include "panels/options.h"
 #include "core/gui_backend.h"
 #include "core/config.h"
+#include "core/i18n.h"
 #include "theme/theme.h"
 
 #define HEAD    44
@@ -38,12 +39,16 @@
 #define DD_ROW 26
 #define DD_MAXVIS 8
 
-enum { PG_SCAN, PG_DB, PG_OPT, PG_FONTS, PG_CTX, PG_UPDATE, PG_ABOUT, PG_COUNT };
+
+enum { PG_SCAN, PG_DB, PG_OPT, PG_FONTS, PG_LANG, PG_CTX, PG_UPDATE, PG_ABOUT, PG_COUNT };
 
 enum {
-  IK_HEAD, IK_TEXT, IK_NOTE, IK_CHECK, IK_BTN, IK_ACCENT, IK_VALUE, IK_PATH, IK_FVAL,
-  IK_PARA, IK_SCROLL
+  IK_HEAD, IK_TEXT, IK_NOTE, IK_CHECK, IK_BTN, IK_ACCENT, IK_VALUE, IK_PATH, IK_FVAL, IK_LVAL,
+  IK_PARA, IK_SCROLL 
 };
+
+enum { DD_FONT, DD_LANG };
+
 enum {
   ID_NONE,
   ID_DEEP, ID_HEUR, ID_AGGR, ID_VERBOSE, ID_HIDE, ID_FORMAT, ID_MONITOR,
@@ -55,6 +60,7 @@ enum {
   ID_FCHOOSE0, ID_FCHOOSE1, ID_FCHOOSE2, ID_FCHOOSE3,
   ID_FDEF0, ID_FDEF1, ID_FDEF2, ID_FDEF3,
   ID_FVAL0, ID_FVAL1, ID_FVAL2, ID_FVAL3,
+  ID_LANGVAL,
   ID_CTX_TOGGLE,
   ID_CHECK_UPDATE,
   ID_OPEN_SITE, ID_OPEN_GITHUB, ID_OPEN_RELEASES, ID_COPY_BOX,
@@ -93,19 +99,24 @@ typedef struct Opt {
   int  about_sel;
   char** fnames;
   int nfnames, capfnames, fonts_loaded;
-  int dd_open, dd_role, dd_scroll, dd_hov;
+  int dd_open, dd_kind, dd_role, dd_scroll, dd_hov;
+  int nlang, caplang, langs_loaded;
+  char** lcodes; char** lnames;
+  char lang_cur[32];
+  int langdirty;
   PlRect dd_r;
 } Opt;
 
 static Opt* s_opt;
 
 static const char* s_title[PG_COUNT] =
-{ "Scan", "Databases", "Optimization", "Fonts", "Context menu", "Update", "About" };
+{ "Scan", "Databases", "Optimization", "Fonts", "Language", "Context menu", "Update", "About" };
 static const char* s_sub[PG_COUNT] = {
   "How files are scanned and how results are shown",
   "Signature databases used by the scan engine",
   "Buffer sizes and CPU acceleration",
   "Interface fonts",
+  "Interface language",
   "Explorer integration",
   "Check for updates",
   "Version, license, and project info"
@@ -294,6 +305,11 @@ static void size_label(size_t v, char* out, size_t cap)
   else snprintf(out, cap, "%llu bytes", n);
 }
 
+static void add(Opt* o, int kind, int id, const char* text, int enabled,
+  int l, int t, int r, int b);
+static void add_stepper(Opt* o, const char* label, int dec, int inc, int val,
+  int x, int w, int y);
+
 static int* chk_ptr(Opt* o, int id)
 {
   switch (id) {
@@ -311,111 +327,6 @@ static int* chk_ptr(Opt* o, int id)
   case ID_CTX_TOGGLE: return &o->ctxenabled;
   default:         return NULL;
   }
-}
-
-static int apply_all(Opt* o)
-{
-  int ok = 1;
-  o->msg[0] = 0;
-
-  {
-    CdieConfig cfg;
-    int k;
-    config_load(&cfg);
-    snprintf(cfg.main_db, sizeof(cfg.main_db), "%s", o->dbpath[0]);
-    snprintf(cfg.extra_db, sizeof(cfg.extra_db), "%s", o->dbpath[1]);
-    snprintf(cfg.custom_db, sizeof(cfg.custom_db), "%s", o->dbpath[2]);
-    cfg.has_prefs = 1;
-    cfg.deep = o->scan.deep;           cfg.heuristic = o->scan.heuristic;
-    cfg.verbose = o->scan.verbose;     cfg.aggressive = o->scan.aggressive;
-    cfg.hide_unknown = o->scan.hide_unknown; cfg.format = o->scan.format;
-    cfg.db_extra = o->scan.db_extra;   cfg.db_custom = o->scan.db_custom;
-    cfg.monitor_downloads = o->scan.monitor_downloads;
-    if (o->have_opt) {
-      cfg.use_sse2 = o->opt.use_sse2;  cfg.use_avx2 = o->opt.use_avx2;
-      cfg.buffer_size = (unsigned long long)o->opt.buffer_size;
-      cfg.file_buffer_size = (unsigned long long)o->opt.file_buffer_size;
-    }
-    if (o->have_fonts)
-      for (k = 0; k < OPTIONS_FONT_ROLES && k < CDIE_FONT_ROLES; ++k) {
-        snprintf(cfg.font_family[k], sizeof(cfg.font_family[k]), "%s", o->fonts[k].family);
-        cfg.font_size[k] = o->fonts[k].point_size;
-        cfg.font_bold[k] = o->fonts[k].bold;
-        cfg.font_italic[k] = o->fonts[k].italic;
-      }
-    if (!config_save(&cfg)) {
-      const char* cp = config_file_path();
-      snprintf(o->msg, sizeof(o->msg), "Could not save settings to %s", cp ? cp : "(unknown path)");
-      return 0;
-    }
-  }
-
-  if (o->host.set_scan && !o->host.set_scan(o->host.user, &o->scan)) {
-    snprintf(o->msg, sizeof(o->msg), "Saved, but could not apply the scan options.");
-    ok = 0;
-  }
-  if (o->have_opt && o->host.set_optimization &&
-    !o->host.set_optimization(o->host.user, &o->opt)) {
-    snprintf(o->msg, sizeof(o->msg), "Saved, but could not apply the optimization settings.");
-    ok = 0;
-  }
-  if (o->dbdirty) {
-    if (!gui_backend_set_db_paths(o->dbpath[0], o->dbpath[1], o->dbpath[2])) {
-      snprintf(o->msg, sizeof(o->msg), "Cannot load the main signature database. Check its folder.");
-      return 0;
-    }
-    o->dbdirty = 0;
-    if (o->host.db_changed) o->host.db_changed(o->host.user);
-  }
-  if (o->fontsdirty && o->host.set_fonts) {
-    if (!o->host.set_fonts(o->host.user, o->fonts)) {
-      snprintf(o->msg, sizeof(o->msg), "Saved, but could not apply the fonts.");
-      ok = 0;
-    }
-    else o->fontsdirty = 0;
-  }
-  if (o->ctxdirty && o->host.context_set) {
-    if (!o->host.context_set(o->host.user, o->ctxenabled)) {
-      int actual = 0;
-      if (o->host.context_get && o->host.context_get(o->host.user, &actual))
-        o->ctxactual = o->ctxenabled = actual;
-      update_ctxmsg(o);
-      snprintf(o->msg, sizeof(o->msg), "Could not update the Explorer menu.");
-      ok = 0;
-    }
-    else {
-      o->ctxactual = o->ctxenabled;
-      o->ctxdirty = 0;
-      update_ctxmsg(o);
-    }
-  }
-  if (ok) snprintf(o->msg, sizeof(o->msg), "Settings applied.");
-  return ok;
-}
-
-static void finish(Opt* o, int result)
-{
-  o->result = result;
-  pl_window_close(o->win);
-}
-
-static void add(Opt* o, int kind, int id, const char* text, int enabled,
-  int l, int t, int r, int b)
-{
-  Item* it;
-  if (o->nit >= MAXIT) return;
-  it = &o->it[o->nit++];
-  it->kind = kind; it->id = id; it->text = text; it->enabled = enabled;
-  it->r = mkr(l, t, r, b);
-}
-
-static void add_stepper(Opt* o, const char* label, int dec, int inc, int val, int x, int w, int y)
-{
-  add(o, IK_TEXT, 0, label, 1, x, y, x + 170, y + 30);
-  add(o, IK_BTN, dec, "<", 1, x + 180, y, x + 212, y + 30);
-  add(o, IK_VALUE, val, "", 1, x + 220, y, x + 220 + 190, y + 30);
-  add(o, IK_BTN, inc, ">", 1, x + 220 + 198, y, x + 220 + 230, y + 30);
-  (void)w;
 }
 
 static void build_items(Opt* o)
@@ -491,37 +402,43 @@ static void build_items(Opt* o)
     add(o, IK_NOTE, 0, "Fonts are applied when you press Apply or OK.", 1, x, y, x + w, y + 22);
     break;
   }
+  case PG_LANG:
+    add(o, IK_HEAD, 0, translate("INTERFACE LANGUAGE"), 1, x, y, x + w, y + 20); y += 32;
+    add(o, IK_TEXT, 0, translate("Language"), 1, x, y, x + 150, y + 30);
+    add(o, IK_LVAL, ID_LANGVAL, "", 1, x + 160, y, x + w, y + 30); y += 50;
+    add(o, IK_NOTE, 0, translate("Language files are loaded from the \"lang\" folder."), 1, x, y, x + w, y + 22);
+    break;
 
   case PG_CTX:
-    add(o, IK_TEXT, 0, "Add or remove the \"Scan with cdie\" entry in the Explorer file menu.",
+    add(o, IK_TEXT, 0, translate("Add or remove the \"Scan with cdie\" entry in the Explorer file menu."),
       1, x, y, x + w, y + 24); y += 44;
     if (!o->have_ctx) {
-      add(o, IK_NOTE, 0, "Explorer integration is not available.", 1, x, y, x + w, y + 22);
+      add(o, IK_NOTE, 0, translate("Explorer integration is not available."), 1, x, y, x + w, y + 22);
       break;
     }
-    add(o, IK_CHECK, ID_CTX_TOGGLE, "Show \"Scan with cdie\" in the Explorer menu",
+    add(o, IK_CHECK, ID_CTX_TOGGLE, translate("Show \"Scan with cdie\" in the Explorer menu"),
       1, x, y, x + w, y + ROW_H); y += ROW_H + 8;
     add(o, IK_NOTE, 0, o->ctxmsg, 1, x, y, x + w, y + 22);
     break;
 
   case PG_UPDATE:
-    add(o, IK_HEAD, 0, "VERSION", 1, x, y, x + w, y + 20); y += 28;
+    add(o, IK_HEAD, 0, translate("VERSION"), 1, x, y, x + w, y + 20); y += 28;
     add(o, IK_TEXT, 0, o->verline, 1, x, y, x + w, y + 26); y += 44;
-    add(o, IK_BTN, ID_CHECK_UPDATE, "Check for updates", 1, x, y, x + 170, y + 34); y += 46;
+    add(o, IK_BTN, ID_CHECK_UPDATE, translate("Check for updates"), 1, x, y, x + 170, y + 34); y += 46;
     add(o, IK_NOTE, 0, o->updmsg, 1, x, y, x + w, y + 22);
     break;
 
   case PG_ABOUT: {
     int bh;
-    add(o, IK_HEAD, 0, "DETECT IT EASY - CDIE", 1, x, y, x + w, y + 20); y += 26;
+    add(o, IK_HEAD, 0, translate("DETECT IT EASY - CDIE"), 1, x, y, x + w, y + 20); y += 26;
     add(o, IK_TEXT, 0, o->verline, 1, x, y, x + w, y + 22); y += 22;
     add(o, IK_NOTE, 0, o->buildline, 1, x, y, x + w, y + 22); y += 22;
     add(o, IK_NOTE, 0, ABOUT_COPYRIGHT_OLD, 1, x, y, x + w, y + 22); y += 22;
     add(o, IK_NOTE, 0, o->copyline, 1, x, y, x + w, y + 22); y += 30;
-    add(o, IK_BTN, ID_OPEN_SITE, "Website", 1, x, y, x + 84, y + 32);
-    add(o, IK_BTN, ID_OPEN_GITHUB, "GitHub", 1, x + 92, y, x + 176, y + 32);
-    add(o, IK_BTN, ID_OPEN_RELEASES, "Releases", 1, x + 184, y, x + 268, y + 32);
-    add(o, IK_BTN, ID_COPY_BOX, "Copy text", 1, x + 276, y, x + 360, y + 32); y += 36;
+    add(o, IK_BTN, ID_OPEN_SITE, translate("Website"), 1, x, y, x + 84, y + 32);
+    add(o, IK_BTN, ID_OPEN_GITHUB, translate("GitHub"), 1, x + 92, y, x + 176, y + 32);
+    add(o, IK_BTN, ID_OPEN_RELEASES, translate("Releases"), 1, x + 184, y, x + 268, y + 32);
+    add(o, IK_BTN, ID_COPY_BOX, translate("Copy text"), 1, x + 276, y, x + 360, y + 32); y += 36;
     add(o, IK_NOTE, 0, o->aboutmsg, 1, x, y, x + w, y + 20); y += 24;
     bh = o->r_card.b - 16 - y;
     if (bh < 60) bh = 60;
@@ -532,10 +449,129 @@ static void build_items(Opt* o)
   default: break;
   }
 
-  add(o, IK_ACCENT, ID_OK, "OK", 1, o->W - 12 - 80, by, o->W - 12, by + 34);
-  add(o, IK_BTN, ID_APPLY, "Apply", 1, o->W - 12 - 80 - 8 - 80, by, o->W - 12 - 80 - 8, by + 34);
-  add(o, IK_BTN, ID_CANCEL, "Cancel", 1, o->W - 12 - 3 * 80 - 16, by, o->W - 12 - 2 * 80 - 16, by + 34);
+  add(o, IK_ACCENT, ID_OK, translate("OK"), 1, o->W - 12 - 80, by, o->W - 12, by + 34);
+  add(o, IK_BTN, ID_APPLY, translate("Apply"), 1, o->W - 12 - 80 - 8 - 80, by, o->W - 12 - 80 - 8, by + 34);
+  add(o, IK_BTN, ID_CANCEL, translate("Cancel"), 1, o->W - 12 - 3 * 80 - 16, by, o->W - 12 - 2 * 80 - 16, by + 34);
 }
+
+
+static int apply_all(Opt* o)
+{
+  int ok = 1;
+  o->msg[0] = 0;
+
+  {
+    CdieConfig cfg;
+    int k;
+    config_load(&cfg);
+    snprintf(cfg.main_db, sizeof(cfg.main_db), "%s", o->dbpath[0]);
+    snprintf(cfg.extra_db, sizeof(cfg.extra_db), "%s", o->dbpath[1]);
+    snprintf(cfg.custom_db, sizeof(cfg.custom_db), "%s", o->dbpath[2]);
+    cfg.has_prefs = 1;
+    snprintf(cfg.language, sizeof(cfg.language), "%s", o->lang_cur);
+    cfg.deep = o->scan.deep;           cfg.heuristic = o->scan.heuristic;
+    cfg.verbose = o->scan.verbose;     cfg.aggressive = o->scan.aggressive;
+    cfg.hide_unknown = o->scan.hide_unknown; cfg.format = o->scan.format;
+    cfg.db_extra = o->scan.db_extra;   cfg.db_custom = o->scan.db_custom;
+    cfg.monitor_downloads = o->scan.monitor_downloads;
+    if (o->have_opt) {
+      cfg.use_sse2 = o->opt.use_sse2;  cfg.use_avx2 = o->opt.use_avx2;
+      cfg.buffer_size = (unsigned long long)o->opt.buffer_size;
+      cfg.file_buffer_size = (unsigned long long)o->opt.file_buffer_size;
+    }
+    if (o->have_fonts)
+      for (k = 0; k < OPTIONS_FONT_ROLES && k < CDIE_FONT_ROLES; ++k) {
+        snprintf(cfg.font_family[k], sizeof(cfg.font_family[k]), "%s", o->fonts[k].family);
+        cfg.font_size[k] = o->fonts[k].point_size;
+        cfg.font_bold[k] = o->fonts[k].bold;
+        cfg.font_italic[k] = o->fonts[k].italic;
+      }
+    if (!config_save(&cfg)) {
+      const char* cp = config_file_path();
+      snprintf(o->msg, sizeof(o->msg), translate("Could not save settings to %s"), cp ? cp : "(unknown path)");
+      return 0;
+    }
+  }
+
+  if (o->host.set_scan && !o->host.set_scan(o->host.user, &o->scan)) {
+    snprintf(o->msg, sizeof(o->msg), translate("Saved, but could not apply the scan options."));
+    ok = 0;
+  }
+  if (o->have_opt && o->host.set_optimization &&
+    !o->host.set_optimization(o->host.user, &o->opt)) {
+    snprintf(o->msg, sizeof(o->msg), translate("Saved, but could not apply the optimization settings."));
+    ok = 0;
+  }
+  if (o->dbdirty) {
+    if (!gui_backend_set_db_paths(o->dbpath[0], o->dbpath[1], o->dbpath[2])) {
+      snprintf(o->msg, sizeof(o->msg), translate("Cannot load the main signature database. Check its folder."));
+      return 0;
+    }
+    o->dbdirty = 0;
+    if (o->host.db_changed) o->host.db_changed(o->host.user);
+  }
+  if (o->fontsdirty && o->host.set_fonts) {
+    if (!o->host.set_fonts(o->host.user, o->fonts)) {
+      snprintf(o->msg, sizeof(o->msg), translate("Saved, but could not apply the fonts."));
+      ok = 0;
+    }
+    else o->fontsdirty = 0;
+  }
+  if (o->langdirty && o->host.set_language) {
+    if (!o->host.set_language(o->host.user, o->lang_cur)) { 
+      snprintf(o->msg, sizeof(o->msg), translate("Could not load the language file."));
+      ok = 0;
+    }
+    else {
+      o->langdirty = 0;
+      build_items(o);  
+    }
+  }
+  if (o->ctxdirty && o->host.context_set) {
+    if (!o->host.context_set(o->host.user, o->ctxenabled)) {
+      int actual = 0;
+      if (o->host.context_get && o->host.context_get(o->host.user, &actual))
+        o->ctxactual = o->ctxenabled = actual;
+      update_ctxmsg(o);
+      snprintf(o->msg, sizeof(o->msg), translate("Could not update the Explorer menu."));
+      ok = 0;
+    }
+    else {
+      o->ctxactual = o->ctxenabled;
+      o->ctxdirty = 0;
+      update_ctxmsg(o);
+    }
+  }
+  if (ok) snprintf(o->msg, sizeof(o->msg), translate("Settings applied."));
+  return ok;
+}
+
+static void finish(Opt* o, int result)
+{
+  o->result = result;
+  pl_window_close(o->win);
+}
+
+static void add(Opt* o, int kind, int id, const char* text, int enabled,
+  int l, int t, int r, int b)
+{
+  Item* it;
+  if (o->nit >= MAXIT) return;
+  it = &o->it[o->nit++];
+  it->kind = kind; it->id = id; it->enabled = enabled;
+  it->text = (text && text[0]) ? translate(text) : text;
+  it->r = mkr(l, t, r, b);
+}
+
+static void add_stepper(Opt* o, const char* label, int dec, int inc, int val, int x, int w, int y)
+{
+  add(o, IK_TEXT, 0, label, 1, x, y, x + 170, y + 30);
+  add(o, IK_BTN, dec, "<", 1, x + 180, y, x + 212, y + 30);
+  add(o, IK_VALUE, val, "", 1, x + 220, y, x + 220 + 190, y + 30);
+  add(o, IK_BTN, inc, ">", 1, x + 220 + 198, y, x + 220 + 230, y + 30);
+  (void)w;
+}
+
 
 static void layout(Opt* o)
 {
@@ -557,10 +593,44 @@ static void set_page(Opt* o, int page)
   redraw(o);
 }
 
+static void lang_add(const char* code, const char* name, void* ud)
+{
+  Opt* o = (Opt*)ud;
+  if (o->nlang == o->caplang) {
+    int nc = o->caplang ? o->caplang * 2 : 16;
+    char** c = (char**)realloc(o->lcodes, (size_t)nc * sizeof(*c));
+    char** n;
+    if (!c) return;
+    o->lcodes = c;
+    n = (char**)realloc(o->lnames, (size_t)nc * sizeof(*n));
+    if (!n) return;
+    o->lnames = n; o->caplang = nc;
+  }
+  o->lcodes[o->nlang] = _strdup(code);
+  o->lnames[o->nlang] = _strdup(name);
+  if (o->lcodes[o->nlang] && o->lnames[o->nlang]) o->nlang++;
+}
+
+static void load_languages(Opt* o)
+{
+  if (o->langs_loaded) return;
+  o->langs_loaded = 1;
+  lang_add("", translate("English"), o);
+  if (o->host.list_languages) o->host.list_languages(o->host.user, lang_add, o);
+}
+
+static const char* lang_name(Opt* o)
+{
+  int i;
+  for (i = 0; i < o->nlang; ++i)
+    if (!strcmp(o->lcodes[i], o->lang_cur)) return o->lnames[i];
+  return o->lang_cur[0] ? o->lang_cur : translate("English");
+}
+
 static void paint_item(Opt* o, PlCanvas* c, int i)
 {
   Item* it = &o->it[i];
-  PlRect r = it->r, tr;
+  PlRect r = it->r, trc;
   int hov = (o->hov == i), h = r.b - r.t;
   char buf[96];
   const char* p;
@@ -589,8 +659,8 @@ static void paint_item(Opt* o, PlCanvas* c, int i)
       pl_line(c, bx + 3, by + 8, bx + 6, by + 11, CLR_TEXT_PRIMARY);
       pl_line(c, bx + 6, by + 11, bx + 12, by + 5, CLR_TEXT_PRIMARY);
     }
-    tr = mkr(r.l + 26, r.t, r.r - 6, r.b);
-    txt(c, o->font, it->enabled ? CLR_TEXT_PRIMARY : CLR_TEXT_SECONDARY, tr, 0, it->text);
+    trc = mkr(r.l + 26, r.t, r.r - 6, r.b);
+    txt(c, o->font, it->enabled ? CLR_TEXT_PRIMARY : CLR_TEXT_SECONDARY, trc, 0, it->text);
     break;
   }
 
@@ -603,7 +673,7 @@ static void paint_item(Opt* o, PlCanvas* c, int i)
   case IK_PATH: {
     int n = it->id - ID_PATH_MAIN;
     int foc = (o->dbfocus == n);
-    const char* p = o->dbpath[n][0] ? o->dbpath[n] : (foc ? "" : "(not set)");
+    const char* p = o->dbpath[n][0] ? o->dbpath[n] : (foc ? "" : translate("(not set)"));
     pl_round_rect(c, r, CLR_PANEL_HEADER, foc ? CLR_ACCENT : CLR_PANEL_BORDER, 8);
     txt(c, o->font, o->dbpath[n][0] ? CLR_TEXT_PRIMARY : CLR_TEXT_SECONDARY,
       mkr(r.l + 12, r.t, r.r - 12, r.b), 0, p);
@@ -630,6 +700,16 @@ static void paint_item(Opt* o, PlCanvas* c, int i)
         f->family[0] ? f->family : "Default",
         f->bold ? ", Bold" : "", f->italic ? ", Italic" : "");
     txt(c, o->font, CLR_TEXT_PRIMARY, mkr(r.l + 12, r.t, r.r - 30, r.b), 0, buf);
+    break;
+  }
+
+  case IK_LVAL: {
+    int cx = r.r - 18, cy = (r.t + r.b) / 2;
+    pl_round_rect(c, r, CLR_PANEL_HEADER, hov ? CLR_ACCENT : CLR_PANEL_BORDER, 8);
+    pl_line(c, cx - 4, cy - 2, cx, cy + 2, CLR_TEXT_SECONDARY);
+    pl_line(c, cx, cy + 2, cx + 4, cy - 2, CLR_TEXT_SECONDARY);
+    load_languages(o);
+    txt(c, o->font, CLR_TEXT_PRIMARY, mkr(r.l + 12, r.t, r.r - 30, r.b), 0, lang_name(o));
     break;
   }
 
@@ -698,18 +778,35 @@ static void load_fonts(Opt* o)
 {
   if (o->fonts_loaded) return;
   o->fonts_loaded = 1;
-  font_add("Default", o);
+  font_add(translate("Default"), o);
   if (o->host.list_fonts) o->host.list_fonts(o->host.user, 0, font_add, o);
+}
+
+
+static int dd_count(Opt* o) { return o->dd_kind == DD_LANG ? o->nlang : o->nfnames; }
+
+static const char* dd_label(Opt* o, int i)
+{
+  return o->dd_kind == DD_LANG ? o->lnames[i] : o->fnames[i];
+}
+
+static int dd_is_current(Opt* o, int i)
+{
+  if (o->dd_kind == DD_LANG) return !strcmp(o->lcodes[i], o->lang_cur);
+  {
+    const char* cur = o->fonts[o->dd_role].family;
+    return i == 0 ? cur[0] == 0 : !strcmp(o->fnames[i], cur);
+  }
 }
 
 static int dd_visible(Opt* o)
 {
-  return o->nfnames < DD_MAXVIS ? o->nfnames : DD_MAXVIS;
+  return dd_count(o) < DD_MAXVIS ? dd_count(o) : DD_MAXVIS;
 }
 
 static void dd_clamp(Opt* o)
 {
-  int max = o->nfnames - dd_visible(o);
+  int max = dd_count(o) - dd_visible(o);
   if (o->dd_scroll > max) o->dd_scroll = max;
   if (o->dd_scroll < 0) o->dd_scroll = 0;
 }
@@ -719,33 +816,35 @@ static int dd_hit(Opt* o, int x, int y)
   int idx;
   if (!inr(&o->dd_r, x, y)) return -1;
   idx = o->dd_scroll + (y - o->dd_r.t - 4) / DD_ROW;
-  if (y < o->dd_r.t + 4 || idx >= o->nfnames ||
+  if (y < o->dd_r.t + 4 || idx >= dd_count(o) ||
     idx >= o->dd_scroll + dd_visible(o)) return -1;
   return idx;
 }
 
-static void open_dropdown(Opt* o, int role)
+static void open_dropdown(Opt* o, int kind, int anchor_id, int role)
 {
   PlRect b = mkr(0, 0, 0, 0);
   int i, vis, h, cur = 0;
   for (i = 0; i < o->nit; ++i)
-    if (o->it[i].id == ID_FVAL0 + role) b = o->it[i].r;
-  load_fonts(o);
-  if (o->nfnames <= 0) return;
+    if (o->it[i].id == anchor_id) b = o->it[i].r;
+  o->dd_kind = kind;
+  o->dd_role = role;
+  if (kind == DD_LANG) load_languages(o); else load_fonts(o);
+  if (dd_count(o) <= 0) return;
   vis = dd_visible(o);
   h = vis * DD_ROW + 8;
   o->dd_r = mkr(b.l, b.b + 2, b.r, b.b + 2 + h);
-  if (o->dd_r.b > o->H - 4)                       
+  if (o->dd_r.b > o->H - 4)
     o->dd_r = mkr(b.l, b.t - 2 - h, b.r, b.t - 2);
-  for (i = 1; i < o->nfnames; ++i)
-    if (!strcmp(o->fnames[i], o->fonts[role].family)) { cur = i; break; }
-  o->dd_role = role;
+  for (i = 0; i < dd_count(o); ++i)
+    if (dd_is_current(o, i)) { cur = i; break; }
   o->dd_scroll = cur > 2 ? cur - 2 : 0;
   dd_clamp(o);
   o->dd_hov = -1;
   o->hov = -1;
   o->dd_open = 1;
 }
+
 
 static void pick_font(Opt* o, int idx)
 {
@@ -755,28 +854,35 @@ static void pick_font(Opt* o, int idx)
   o->fontsdirty = 1;
 }
 
+static void dd_pick(Opt* o, int idx)
+{
+  if (o->dd_kind == DD_LANG) {
+    snprintf(o->lang_cur, sizeof(o->lang_cur), "%s", o->lcodes[idx]);
+    o->langdirty = 1;
+  }
+  else pick_font(o, idx);
+}
+
 static void paint_dropdown(Opt* o, PlCanvas* c)
 {
   PlRect r = o->dd_r;
   int vis = dd_visible(o), i;
-  const char* cur = o->fonts[o->dd_role].family;
-  int sb = o->nfnames > vis;
+  int sb = dd_count(o) > vis;
 
   pl_round_rect(c, r, CLR_PANEL_BODY, CLR_PANEL_BORDER, 8);
   for (i = 0; i < vis; ++i) {
     int idx = o->dd_scroll + i;
     PlRect ir = mkr(r.l + 4, r.t + 4 + i * DD_ROW,
       r.r - (sb ? 12 : 4), r.t + 4 + (i + 1) * DD_ROW);
-    int sel = (idx == 0) ? (cur[0] == 0) : !strcmp(o->fnames[idx], cur);
-    if (idx == o->dd_hov)
+    int sel = dd_is_current(o, idx);    if (idx == o->dd_hov)
       pl_round_rect(c, ir, CLR_SIDEBAR_SEL, CLR_SIDEBAR_SEL, 6);
     txt(c, o->font, sel ? CLR_ACCENT : CLR_TEXT_PRIMARY,
-      mkr(ir.l + 10, ir.t, ir.r - 6, ir.b), 0, o->fnames[idx]);
+      mkr(ir.l + 10, ir.t, ir.r - 6, ir.b), 0, dd_label(o, idx));
   }
   if (sb) {
     int track = vis * DD_ROW;
-    int th = imax(18, track * vis / o->nfnames);
-    int ty = r.t + 4 + (track - th) * o->dd_scroll / (o->nfnames - vis);
+    int th = imax(18, track * vis / dd_count(o));
+    int ty = r.t + 4 + (track - th) * o->dd_scroll / (dd_count(o) - vis);
     pl_round_rect(c, mkr(r.r - 9, ty, r.r - 5, ty + th),
       CLR_BTN_GHOST_BD, CLR_BTN_GHOST_BD, 2);
   }
@@ -803,13 +909,13 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
     else if (i == o->navhov)
       pl_round_rect(c, nr, CLR_BTN_GHOST_HOVER, CLR_BTN_GHOST_HOVER, 6);
     txt(c, o->font, pg == o->page ? CLR_TEXT_PRIMARY : CLR_TEXT_SECONDARY,
-      mkr(nr.l + 14, nr.t, nr.r - 8, nr.b), 0, s_title[pg]);
+      mkr(nr.l + 14, nr.t, nr.r - 8, nr.b), 0, translate(s_title[pg]));
   }
 
   card(c, o->r_card, HEAD);
   hd = mkr(o->r_card.l + 20, o->r_card.t, o->r_card.r - 20, o->r_card.t + HEAD);
-  txt(c, o->fontb, CLR_TEXT_PRIMARY, mkr(hd.l, hd.t, hd.l + 170, hd.b), 0, s_title[o->page]);
-  txt(c, o->font, CLR_TEXT_SECONDARY, mkr(hd.l + 180, hd.t, hd.r, hd.b), 2, s_sub[o->page]);
+  txt(c, o->fontb, CLR_TEXT_PRIMARY, mkr(hd.l, hd.t, hd.l + 170, hd.b), 0, translate(s_title[o->page]));
+  txt(c, o->font, CLR_TEXT_SECONDARY, mkr(hd.l + 180, hd.t, hd.r, hd.b), 2, translate(s_sub[o->page]));
 
   for (i = 0; i < o->nit; ++i) paint_item(o, c, i);
 
@@ -830,7 +936,7 @@ static int hit_item(Opt* o, int x, int y)
   for (i = 0; i < o->nit; ++i) {
     Item* it = &o->it[i];
     if ((it->kind == IK_CHECK || it->kind == IK_BTN || it->kind == IK_ACCENT ||
-      it->kind == IK_PATH || it->kind == IK_FVAL) &&
+      it->kind == IK_PATH || it->kind == IK_FVAL || it->kind == IK_LVAL) &&
       inr(&it->r, x, y)) return i;
   }
   return -1;
@@ -877,7 +983,7 @@ static void activate(Opt* o, int id)
     if (!o->host.check_update ||
       !o->host.check_update(o->host.user, o->updmsg, sizeof(o->updmsg))) {
       if (!o->updmsg[0])
-        snprintf(o->updmsg, sizeof(o->updmsg), "Could not check for updates.");
+        snprintf(o->updmsg, sizeof(o->updmsg), translate("Could not check for updates."));
     }
     break;
   case ID_CTX_TOGGLE:
@@ -889,25 +995,28 @@ static void activate(Opt* o, int id)
       id == ID_OPEN_GITHUB ? "https://github.com/horsicq" :
       "https://github.com/horsicq/CDiE/releases";
     if (!o->host.open_url || !o->host.open_url(o->host.user, url))
-      snprintf(o->aboutmsg, sizeof(o->aboutmsg), "Could not open the browser.");
+      snprintf(o->aboutmsg, sizeof(o->aboutmsg), translate("Could not open the browser."));
     else
       o->aboutmsg[0] = 0;
     break;
   }
   case ID_COPY_BOX: {
     char src[4096], dst[6144];
-    snprintf(src, sizeof(src), "Detect It Easy - cdie\n%s\n%s\n%s\n%s\n\n%s",
+    snprintf(src, sizeof(src), translate("Detect It Easy - cdie\n%s\n%s\n%s\n%s\n\n%s"),
       o->verline, o->buildline, ABOUT_COPYRIGHT_OLD, o->copyline, ABOUT_BOX);
     to_crlf(src, dst, sizeof(dst));
     if (o->host.copy_text && o->host.copy_text(o->host.user, dst))
-      snprintf(o->aboutmsg, sizeof(o->aboutmsg), "Copied to the clipboard.");
+      snprintf(o->aboutmsg, sizeof(o->aboutmsg), translate("Copied to the clipboard."));
     else
-      snprintf(o->aboutmsg, sizeof(o->aboutmsg), "Could not copy to the clipboard.");
+      snprintf(o->aboutmsg, sizeof(o->aboutmsg), translate("Could not copy to the clipboard."));
     break;
   }
   default:
-    if (id >= ID_FVAL0 && id <= ID_FVAL3) {
-      open_dropdown(o, id - ID_FVAL0);
+    if (id == ID_LANGVAL) {
+      open_dropdown(o, DD_LANG, ID_LANGVAL, 0);
+    }
+    else if (id >= ID_FVAL0 && id <= ID_FVAL3) {
+      open_dropdown(o, DD_FONT, id, id - ID_FVAL0);
     }
     else if (id >= ID_FDEF0 && id <= ID_FDEF3) {
       memset(&o->fonts[id - ID_FDEF0], 0, sizeof(o->fonts[0]));
@@ -946,7 +1055,7 @@ static void on_mouse_down(void* u, int x, int y)
   int n, h;
   if (o->dd_open) {                      
     int idx = dd_hit(o, x, y);
-    if (idx >= 0) pick_font(o, idx);
+    if (idx >= 0) dd_pick(o, idx);
     o->dd_open = 0;
     redraw(o);
     return;
@@ -1056,6 +1165,12 @@ static void on_destroy(void* u)
     for (i = 0; i < o->nfnames; ++i) free(o->fnames[i]);
     free(o->fnames);
   }
+  if (o->lcodes || o->lnames) {
+    int i;
+    for (i = 0; i < o->nlang; ++i) { free(o->lcodes[i]); free(o->lnames[i]); }
+    free(o->lcodes);
+    free(o->lnames);
+  }
   s_opt = NULL;
   free(o);
 }
@@ -1098,11 +1213,11 @@ int options_show(xxwidgets_app* app, xxwidgets_widget* owner,
   o->dbfocus = -1;
   {
     const char* ver = o->host.get_version ? o->host.get_version(o->host.user) : NULL;
-    snprintf(o->verline, sizeof(o->verline), "Current version: %s",
-      ver && ver[0] ? ver : "unknown");
+    snprintf(o->verline, sizeof(o->verline), translate("Current version: %s"),
+      ver && ver[0] ? ver : translate("unknown"));
   }
-  snprintf(o->buildline, sizeof(o->buildline), "Build date: %s", __DATE__);
-  snprintf(o->copyline, sizeof(o->copyline), "Copyright (C) 2012-%s Hors", __DATE__ + 7);
+  snprintf(o->buildline, sizeof(o->buildline), translate("Build date: %s"), __DATE__);
+  snprintf(o->copyline, sizeof(o->copyline), translate("Copyright (C) 2012-%s Hors"), __DATE__ + 7);
   o->have_fonts = o->host.get_fonts &&
     o->host.get_fonts(o->host.user, o->fonts) ? 1 : 0;
   o->have_ctx = o->host.context_get &&
@@ -1129,7 +1244,14 @@ int options_show(xxwidgets_app* app, xxwidgets_widget* owner,
     if (i == PG_UPDATE && !o->host.updates_available)
       continue;
 
+    if (i == PG_LANG && !o->host.list_languages)
+      continue;
+
     o->navpg[o->nnav++] = i;
+  }
+  {
+    const char* lc = o->host.get_language ? o->host.get_language(o->host.user) : NULL;
+    snprintf(o->lang_cur, sizeof(o->lang_cur), "%s", lc ? lc : "");
   }
   o->page = PG_SCAN;
   for (i = 0; i < o->nnav; ++i)
@@ -1139,7 +1261,7 @@ int options_show(xxwidgets_app* app, xxwidgets_widget* owner,
   o->fontb = pl_font_create(10, 1);
   if (!o->font || !o->fontb) { on_destroy(o); return OPTIONS_RESULT_NONE; }
 
-  win = pl_window_create(ow, "Options", 760, 540, 640, 500, on_win_size, on_win_close, o);
+  win = pl_window_create(ow, translate("Options"), 760, 540, 640, 500, on_win_size, on_win_close, o);
   if (!win) { on_destroy(o); return OPTIONS_RESULT_NONE; }
   o->win = win;
   o->w = pl_widget_create(pl_window_client(win), &s_ops, o, 0, 0, 760, 520);
