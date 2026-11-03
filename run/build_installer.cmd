@@ -144,7 +144,40 @@ if defined CDIS_LIB (
     echo Using cdisasm lib   : %CDIS_LIB%
     set CDIS_ARG="%CDIS_LIB%"
 ) else (
-    echo WARNING: no *cdisasm*.lib found under %DEP% - link may fail with cdisasm_x86_* unresolved.
+     echo WARNING: no *cdisasm*.lib found under %DEP% - link may fail with cdisasm_x86_* unresolved.
+)
+
+set "CDIS_INC_ARG="
+set "CDIS_HDR="
+if not defined CDIS_INC (
+    for /r "%ROOT%" %%f in (cdisasm.h) do (
+        if exist "%%f" if not defined CDIS_HDR (
+            echo %%f| findstr /i /c:"\.git\" >nul || set "CDIS_HDR=%%f"
+        )
+    )
+)
+if not defined CDIS_INC if defined CDIS_HDR (
+    for %%d in ("!CDIS_HDR!") do set "CDIS_HDR_DIR=%%~dpd"
+    set "CDIS_HDR_DIR=!CDIS_HDR_DIR:~0,-1!"
+    for %%p in ("!CDIS_HDR_DIR!") do (
+        set "CDIS_HDR_NAME=%%~nxp"
+        set "CDIS_HDR_UP=%%~dpp"
+    )
+    if /i "!CDIS_HDR_NAME!"=="cdisasm" (
+        set "CDIS_INC=!CDIS_HDR_UP:~0,-1!"
+    ) else (
+        echo cdisasm.h is in "!CDIS_HDR_DIR!", not a "cdisasm" folder - creating a shim.
+        if not exist "%OUT%\shim\cdisasm" mkdir "%OUT%\shim\cdisasm"
+        > "%OUT%\shim\cdisasm\cdisasm.h" echo #include "!CDIS_HDR!"
+        set "CDIS_INC=%OUT%\shim"
+        set CDIS_INC_ARG=-I"!CDIS_HDR_DIR!"
+    )
+)
+if defined CDIS_INC (
+    echo Using cdisasm inc   : !CDIS_INC!
+    set CDIS_INC_ARG=-I"!CDIS_INC!" !CDIS_INC_ARG!
+) else (
+    echo WARNING: cdisasm.h not found under %ROOT% - compile will fail.
 )
 
 if not exist "%OUT%" mkdir "%OUT%"
@@ -188,7 +221,7 @@ if "%STORE_BUILD%"=="1" (
 
 if not exist "%OUT%\obj_gui" mkdir "%OUT%\obj_gui"
 cl /nologo /O1 /GL /Gy /Gw /GS- /W3 /MT /utf-8 /DNDEBUG /DXXWIDGETS_STATIC /DXXFC_STATIC !EXTRA_DEFINES! ^
-   -I"%SRC%" -I"%GUI%" -I"%RES%" -I"%XXW_INC%" -I"%XXF_INC%" ^
+   -I"%SRC%" -I"%GUI%" -I"%RES%" -I"%XXW_INC%" -I"%XXF_INC%" !CDIS_INC_ARG! ^
    !GUI_SOURCES! "%OUT%\cdie_gui.res" /Fe:"%OUT%\cdie_gui.exe" /Fo:"%OUT%\obj_gui\\" ^
       /link /SUBSYSTEM:WINDOWS /MANIFEST:NO /OPT:REF /OPT:ICF /LTCG /DEBUG:NONE /MAP:"%OUT%\cdie_gui.map" ^
    "%XXW_LIB%" "%XXF_LIB%" !CDIS_ARG! ^

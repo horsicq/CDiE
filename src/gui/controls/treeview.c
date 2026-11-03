@@ -20,6 +20,7 @@
  */
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 #include "treeview.h"
 #include "theme/theme.h"
 #include "core/i18n.h"
