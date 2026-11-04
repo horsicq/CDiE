@@ -40,6 +40,9 @@ extern "C" {
   void hexview_set_info_callback(HexViewer* hv, HexStatusFn fn, void* user);
   int  hexview_copy(HexViewer* hv, int mode);
 
+  void hexview_key(HexViewer* hv, int key, uint32_t ch, int mods);
+  void hexview_tick(HexViewer* hv);
+
 #ifdef __cplusplus
 }
 #endif

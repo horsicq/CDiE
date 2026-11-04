@@ -11,6 +11,7 @@ typedef struct {
   char custom_db[1024];
   char db_version[32];
 	char language[32];
+  char vt_key[128];
 
   int  has_prefs;
   int  deep, heuristic, verbose, aggressive, hide_unknown, format, monitor_downloads;

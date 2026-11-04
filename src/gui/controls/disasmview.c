@@ -9,7 +9,7 @@
 
 #define ROW_H      20
 #define HEAD_H     30
-#define HEAD_TOP   6
+#define HEAD_TOP   8
 #define HEAD_GAP   4
 #define PAD        16
 #define SB_W       6
@@ -215,9 +215,12 @@ static void paint_scroll(DisasmView* dv, PlCanvas* c)
 static void on_paint(void* u, PlCanvas* c, int w, int h)
 {
   DisasmView* dv = (DisasmView*)u;
+  PlRect frame;
   dv->W = w; dv->H = h;
   layout(dv);
   pl_fill(c, 0, 0, w, h, CLR_BG);
+  frame = mkr(0, 0, w - 1, h - 1);
+  pl_round_rect(c, frame, CLR_PANEL_BODY, CLR_PANEL_BORDER, 12);
   paint_header(dv, c);
   paint_rows(dv, c);
   paint_scroll(dv, c);

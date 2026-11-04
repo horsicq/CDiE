@@ -24,13 +24,16 @@
 #include "theme/logo_data.h"
 #include "core/i18n.h"
 
-#define LOGO_DRAW 24 
+#define LOGO_DRAW 24
+#define SB_GROUPS 3
+#define GRP_H     28
 
 struct Sidebar {
 	PlWidget* w;
 	SidebarCb cb;
 	void* user;
 	int       selected, hovered, width, height;
+	int       open[SB_GROUPS];
 	PlFont* fontNav, * fontTitle, * fontBold;
 };
 
@@ -38,39 +41,92 @@ static const char* s_labels[NAV_COUNT] = {
 		"Overview", "Sections", "Signatures", "Strings", "Hex viewer",
 		"Disassembly", "Entropy", "VirusTotal", "YARA rules", "Options"
 };
-static const int s_sep_after[NAV_COUNT] = { 0, 0, 0, 0, 0, 0, 1, 0, 1, 0 };
+typedef struct { int group; int nav; } SbRow;     
 
-static int nav_item_y(int i, int client_h)
+static const char* s_group_names[SB_GROUPS] = { "ANALYSIS", "DATA", "CODE" };
+
+static const SbRow s_rows[] = {
+	{ 0, -1 },{ 0, NAV_OVERVIEW },{ 0, NAV_SECTIONS },{ 0, NAV_SIGNATURES },{ 0, NAV_VIRUSTOTAL },
+	{ 1, -1 },{ 1, NAV_STRINGS },{ 1, NAV_HEX },{ 1, NAV_ENTROPY },
+	{ 2, -1 },{ 2, NAV_DISASM },{ 2, NAV_COUNT - 2 }          
+};
+#define SB_ROWS ((int)(sizeof s_rows / sizeof s_rows[0]))
+
+static int row_visible(const Sidebar* d, int r)
 {
-	int y, j;
-	if (i == NAV_OPTIONS)
-		return client_h - BOTTOMBAR_H - NAV_H - 8;
-	y = LOGO_H + SEARCH_MY + SEARCH_H + SEARCH_MY + 4;
-	for (j = 0; j < i; ++j) {
-		y += NAV_H;
-		if (s_sep_after[j]) y += 14;
-	}
+	return s_rows[r].nav < 0 || d->open[s_rows[r].group];
+}
+
+static int row_h(int r) { return s_rows[r].nav < 0 ? GRP_H : NAV_H; }
+
+static int row_y(const Sidebar* d, int r)
+{
+	int y = LOGO_H + SEARCH_MY + SEARCH_H + SEARCH_MY + 4, j;
+	for (j = 0; j < r; ++j)
+		if (row_visible(d, j)) y += row_h(j);
 	return y;
+}
+
+static int nav_item_y(const Sidebar* d, int i)
+{
+	int r;
+	if (i == NAV_OPTIONS) return d->height - BOTTOMBAR_H - NAV_H - 8;
+	for (r = 0; r < SB_ROWS; ++r)
+		if (s_rows[r].nav == i) return row_visible(d, r) ? row_y(d, r) : -1;
+	return -1;
 }
 
 static int sidebar_hittest(Sidebar* d, int my)
 {
-	int i;
-	for (i = 0; i < NAV_COUNT; ++i) {
-		int y = nav_item_y(i, d->height);
-		if (my >= y && my < y + NAV_H) return i;
+	int r, y;
+	for (r = 0; r < SB_ROWS; ++r) {
+		if (!row_visible(d, r)) continue;
+		y = row_y(d, r);
+		if (my >= y && my < y + row_h(r))
+			return s_rows[r].nav >= 0 ? s_rows[r].nav : -(s_rows[r].group + 2);
 	}
+	y = nav_item_y(d, NAV_OPTIONS);
+	if (my >= y && my < y + NAV_H) return NAV_OPTIONS;
+	return -1;
+}
+
+static int group_y(const Sidebar* d, int g)
+{
+	int r;
+	for (r = 0; r < SB_ROWS; ++r)
+		if (s_rows[r].nav < 0 && s_rows[r].group == g) return row_y(d, r);
 	return -1;
 }
 
 static void invalidate_item(Sidebar* d, int i)
 {
 	PlRect r;
-	if (i < 0) return;
+	int y, hh;
+	if (i == -1) return;
+	if (i < -1) { y = group_y(d, -i - 2); hh = GRP_H; }
+	else { y = nav_item_y(d, i);   hh = NAV_H; }
+	if (y < 0) return;                    
 	r.l = 0; r.r = d->width;
-	r.t = nav_item_y(i, d->height);
-	r.b = r.t + NAV_H;
+	r.t = y; r.b = y + hh;
 	pl_invalidate(d->w, &r);
+}
+
+static void draw_group(Sidebar* d, PlCanvas* c, int g, int y, int w)
+{
+	PlRect r = { 22, y, w - 34, y + GRP_H };
+	int cx = w - 20, cy = y + GRP_H / 2;
+	if (d->hovered == -(g + 2))
+		pl_fill(c, 0, y, w, y + GRP_H, CLR_SIDEBAR_HOVER);
+	pl_text(c, d->fontBold, r, translate(s_group_names[g]),
+		CLR_TEXT_SECONDARY, PL_TEXT_ELLIPSIS);
+	if (d->open[g]) {
+		pl_line(c, cx - 4, cy - 2, cx, cy + 2, CLR_TEXT_SECONDARY);
+		pl_line(c, cx, cy + 2, cx + 5, cy - 3, CLR_TEXT_SECONDARY);
+	}
+	else {
+		pl_line(c, cx - 2, cy - 4, cx + 2, cy, CLR_TEXT_SECONDARY);
+		pl_line(c, cx + 2, cy, cx - 3, cy + 5, CLR_TEXT_SECONDARY);
+	}
 }
 
 static void draw_search(Sidebar* d, PlCanvas* c, int width)
@@ -89,10 +145,10 @@ static void draw_search(Sidebar* d, PlCanvas* c, int width)
 
 static void draw_item(Sidebar* d, PlCanvas* c, int i, int w, int h)
 {
-	int y = nav_item_y(i, h);
+	int y = nav_item_y(d, i);
 	int sel = (d->selected == i), hov = (d->hovered == i);
 	PlColor bg = sel ? CLR_SIDEBAR_SEL : (hov ? CLR_SIDEBAR_HOVER : CLR_SIDEBAR_BG);
-	PlRect r = { 22, y, w - 8, y + NAV_H };
+	PlRect r = { 30, y, w - 8, y + NAV_H };
 
 	pl_fill(c, 0, y, w, y + NAV_H, bg);
 	if (sel) pl_fill(c, 0, y, 3, y + NAV_H, CLR_ACCENT);
@@ -137,16 +193,14 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 
 	draw_search(d, c, w);
 
-	for (i = 0; i < NAV_COUNT - 1; ++i) {
-		draw_item(d, c, i, w, h);
-		if (s_sep_after[i]) {
-			int sy = nav_item_y(i, h) + NAV_H + 6;
-			pl_line(c, SEARCH_MX, sy, w - SEARCH_MX, sy, CLR_SEPARATOR);
-		}
+	for (i = 0; i < SB_ROWS; ++i) {
+		if (!row_visible(d, i)) continue;
+		if (s_rows[i].nav < 0) draw_group(d, c, s_rows[i].group, row_y(d, i), w);
+		else draw_item(d, c, s_rows[i].nav, w, h);
 	}
 
-	{   /* Options, pinned to the bottom */
-		int yi = nav_item_y(NAV_OPTIONS, h);
+	{
+		int yi = nav_item_y(d, NAV_OPTIONS);
 		pl_line(c, SEARCH_MX, yi - 8, w - SEARCH_MX, yi - 8, CLR_SEPARATOR);
 		draw_item(d, c, NAV_OPTIONS, w, h);
 	}
@@ -167,8 +221,9 @@ static void on_mouse_move(void* u, int x, int y)
 	int hit = sidebar_hittest(d, y);
 	(void)x;
 	if (d->hovered != hit) {
-		invalidate_item(d, d->hovered);
+		int old = d->hovered;
 		d->hovered = hit;
+		invalidate_item(d, old);
 		invalidate_item(d, hit);
 	}
 }
@@ -187,7 +242,20 @@ static void on_mouse_down(void* u, int x, int y)
 	Sidebar* d = (Sidebar*)u;
 	int hit = sidebar_hittest(d, y);
 	(void)x;
-	if (hit < 0) return;
+	if (y >= LOGO_H + SEARCH_MY && y < LOGO_H + SEARCH_MY + SEARCH_H) {
+		if (d->cb) d->cb(d->user, 1000);  /* 1000 = open the command palette */
+		return;
+	}
+	if (hit == -1) return;
+	if (hit < -1) {                       /* group header: fold / unfold on click */
+		int g = -hit - 2;
+		PlRect r;
+		d->open[g] = !d->open[g];
+		r.l = 0; r.r = d->width;
+		r.t = group_y(d, g); r.b = d->height;
+		pl_invalidate(d->w, &r);
+		return;
+	}
 	if (d->selected != hit) {
 		invalidate_item(d, d->selected);
 		d->selected = hit;
@@ -216,6 +284,7 @@ Sidebar* sidebar_create(void* parent_native, int x, int y, int w, int h,
 	if (!s) return NULL;
 	s->cb = cb; s->user = user;
 	s->selected = NAV_OVERVIEW; s->hovered = -1;
+	s->open[0] = 1;                       /* only ANALYSIS starts open */
 	s->width = w; s->height = h;
 	s->fontNav = pl_font_create(9, 0);
 	s->fontTitle = pl_font_create(10, 1);

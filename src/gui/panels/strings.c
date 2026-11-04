@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <stdint.h>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -53,7 +54,7 @@ enum { F_FILTER, F_LIST };
 typedef struct { char s[256]; int len, caret; } Edit;
 typedef struct { uint64_t off; size_t toff; int type; } Str;
 
-typedef struct Dlg {
+struct StringsView {
   PlWidget* w;
   PlWindow* win;
   PlFont* font, * fontb;
@@ -68,8 +69,13 @@ typedef struct Dlg {
   uint64_t scanned;
 
   int* vis; int nvis;
-  int top, sel;          
-} Dlg;
+  int top, sel;
+  int dirty;
+  int caret_on;
+  unsigned long blink_t;
+};
+
+typedef struct StringsView Dlg;
 
 static PlRect mkr(int l, int t, int r, int b) { PlRect x; x.l = l; x.t = t; x.r = r; x.b = b; return x; }
 static int inr(const PlRect* r, int x, int y) { return x >= r->l && x < r->r && y >= r->t && y < r->b; }
@@ -394,7 +400,7 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
       pl_text(c, d->font, tr, translate("Filter strings"), CLR_TEXT_CODE, PL_TEXT_ELLIPSIS);
     else
       pl_text(c, d->font, tr, d->filter.s, CLR_TEXT_PRIMARY, PL_TEXT_ELLIPSIS);
-    if (d->focus == F_FILTER) {
+    if (d->focus == F_FILTER && d->caret_on) {
       char tmp[260];
       int x;
       memcpy(tmp, d->filter.s, (size_t)d->filter.caret); tmp[d->filter.caret] = 0;
@@ -419,10 +425,7 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
   else
     snprintf(t, sizeof(t), translate("%s  \xC2\xB7  %llu bytes scanned  \xC2\xB7  min length %d"),
       name, (unsigned long long)d->scanned, MINLEN);
-  pl_text(c, d->font, mkr(14, d->r_bar.t, d->r_close.l - 12, d->r_bar.b), t, CLR_TEXT_SECONDARY, PL_TEXT_ELLIPSIS);
-
-  pl_round_rect(c, d->r_close, d->hov_close ? CLR_BTN_GHOST_HOVER : CLR_BTN_GHOST, CLR_BTN_GHOST_BD, 8);
-  pl_text(c, d->font, d->r_close, translate("Close"), CLR_TEXT_PRIMARY, PL_TEXT_CENTER);
+  pl_text(c, d->font, mkr(14, d->r_bar.t, d->r_bar.r - 14, d->r_bar.b), t, CLR_TEXT_SECONDARY, PL_TEXT_ELLIPSIS);
 }
 
 static void layout(Dlg* d)
@@ -434,7 +437,7 @@ static void layout(Dlg* d)
   d->r_card = mkr(m, d->r_filter.b + 12, W - m, bot);
   d->r_list = mkr(d->r_card.l + 1, d->r_card.t + HEAD + 4, d->r_card.r - 1, d->r_card.b - 6);
   d->r_bar = mkr(0, H - BAR_H, W, H);
-  d->r_close = mkr(W - 12 - 80, H - BAR_H + 11, W - 12, H - BAR_H + 11 + bh);
+  d->r_close = mkr(0, 0, 0, 0);   /* no close button when embedded */
 }
 
 static void on_resize(void* u, int w, int h)
@@ -490,11 +493,31 @@ static void on_wheel(void* u, int x, int y, int delta, int mods)
   }
 }
 
+static unsigned long blink_now(void)
+{
+#ifdef _WIN32
+  return (unsigned long)GetTickCount();
+#else
+  return (unsigned long)(clock() * 1000 / CLOCKS_PER_SEC);
+#endif
+}
+
+static unsigned long blink_period(void)
+{
+#ifdef _WIN32
+  UINT t = GetCaretBlinkTime();
+  return (t == 0 || t == INFINITE) ? 530 : (unsigned long)t;
+#else
+  return 530;
+#endif
+}
+
 static void on_key(void* u, int key, uint32_t ch, int mods)
 {
   Dlg* d = (Dlg*)u;
   int pos = d->sel >= 0 ? pos_of_entry(d, d->sel) : -1;
   int rows = list_rows(d);
+  d->caret_on = 1; d->blink_t = blink_now();
 
   if (key == PL_KEY_ESC) { pl_window_close(d->win); return; }
   if (key == PL_KEY_CHAR && (mods & PL_MOD_CTRL) && (ch == 'f' || ch == 'F')) {
@@ -528,45 +551,72 @@ static const PlWidgetOps s_ops = {
   on_key, on_wheel
 };
 
-static void on_win_size(void* u, int w, int h)
+static void load_now(Dlg* d)
 {
-  Dlg* d = (Dlg*)u;
-  d->W = w; d->H = h;
-  pl_widget_set_rect(d->w, 0, 0, w, h);
-}
-static void on_win_close(void* u)
-{
-  Dlg* d = (Dlg*)u;
-  pl_window_close(d->win);
+  free(d->str);  d->str = NULL;  d->n = d->cap = 0;
+  free(d->pool); d->pool = NULL; d->plen = d->pcap = 0;
+  d->truncated = 0;
+  d->scanned = 0;
+  if (d->path[0]) load_and_extract(d, d->path);
+  rebuild_vis(d);
+  d->dirty = 0;
 }
 
-void strings_show(xxwidgets_app* app, xxwidgets_widget* owner, const char* path)
+StringsView* stringsview_create(void* parent, int x, int y, int w, int h)
 {
-  void* ow = xxwidgets_widget_native_handle(owner);
-  Dlg* d;
-  PlWindow* win;
-  (void)app;
-
-  d = (Dlg*)calloc(1, sizeof(*d));
-  if (!d) return;
-  d->W = 1000; d->H = 700; d->sel = -1; d->focus = F_FILTER;
-  strncpy(d->path, path ? path : "", sizeof(d->path) - 1);
+  Dlg* d = (Dlg*)calloc(1, sizeof(*d));
+  if (!d) return NULL;
+  d->W = w; d->H = h; d->sel = -1; d->focus = F_FILTER;
+  d->caret_on = 1;
   d->font = pl_font_create(9, 0);
   d->fontb = pl_font_create(9, 1);
-  if (!d->font || !d->fontb) { on_destroy(d); return; }
-
-  load_and_extract(d, d->path);
-  rebuild_vis(d);
-
-  win = pl_window_create(ow, translate("Strings"), 1000, 700, 700, 450, on_win_size, on_win_close, d);
-  if (!win) { on_destroy(d); return; }
-  d->win = win;
-  d->w = pl_widget_create(pl_window_client(win), &s_ops, d, 0, 0, 1000, 700);
-  if (!d->w) { pl_window_destroy(win); on_destroy(d); return; }
-
+  if (!d->font || !d->fontb) { on_destroy(d); return NULL; }
+  d->w = pl_widget_create(parent, &s_ops, d, x, y, w, h);
+  if (!d->w) { on_destroy(d); return NULL; }
   layout(d);
-  pl_window_run_modal(win);
+  return d;
+}
 
-  pl_widget_destroy(d->w);               
-  pl_window_destroy(win);
+void stringsview_set_rect(StringsView* d, int x, int y, int w, int h)
+{
+  if (!d) return;
+  pl_widget_set_rect(d->w, x, y, w, h);
+  d->W = w; d->H = h;
+  layout(d);
+  clamp_top(d);
+  pl_invalidate(d->w, NULL);
+}
+
+void stringsview_set_file(StringsView* d, const char* path)
+{
+  if (!d) return;
+  strncpy(d->path, path ? path : "", sizeof(d->path) - 1);
+  d->path[sizeof(d->path) - 1] = 0;
+  d->dirty = 1;
+  if (d->W > 0) { load_now(d); redraw(d); }   /* visible: load now, else wait */
+}
+
+void stringsview_activate(StringsView* d)
+{
+  if (!d) return;
+  if (d->dirty) load_now(d);
+  redraw(d);
+}
+
+void stringsview_key(StringsView* d, int key, uint32_t ch, int mods)
+{
+  if (!d) return;
+  on_key(d, key, ch, mods);
+}
+
+void stringsview_tick(StringsView* d)
+{
+  unsigned long now;
+  if (!d || d->W <= 0 || d->focus != F_FILTER) return;
+  now = blink_now();
+  if (now - d->blink_t >= blink_period()) {
+    d->blink_t = now;
+    d->caret_on = !d->caret_on;
+    redraw(d);
+  }
 }

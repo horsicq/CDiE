@@ -31,6 +31,7 @@ if(WIN32)
         ${CMAKE_CURRENT_LIST_DIR}/panels/header.c
         ${CMAKE_CURRENT_LIST_DIR}/panels/infobar.c
         ${CMAKE_CURRENT_LIST_DIR}/panels/options.c
+        ${CMAKE_CURRENT_LIST_DIR}/panels/entropy.c
         ${CMAKE_CURRENT_LIST_DIR}/panels/signatures.c
         ${CMAKE_CURRENT_LIST_DIR}/panels/strings.c)
 else()
@@ -45,8 +46,11 @@ target_sources(cdie_gui PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/controls/bottombar.c
     ${CMAKE_CURRENT_LIST_DIR}/controls/treeview.c
     ${CMAKE_CURRENT_LIST_DIR}/controls/hexviewer.c
-    ${CMAKE_CURRENT_LIST_DIR}/controls/disasmview.c     
-    ${CMAKE_CURRENT_LIST_DIR}/core/disasm_backend.c)     
+    ${CMAKE_CURRENT_LIST_DIR}/controls/disasmview.c  
+    ${CMAKE_CURRENT_LIST_DIR}/controls/palette.c
+    ${CMAKE_CURRENT_LIST_DIR}/core/disasm_backend.c  
+    ${CMAKE_CURRENT_LIST_DIR}/core/virustotal.c
+    ${CMAKE_CURRENT_LIST_DIR}/panels/sectionsview.c)
 
 target_include_directories(cdie_gui PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/..

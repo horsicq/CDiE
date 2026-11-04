@@ -3,6 +3,11 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdarg.h>
+#include <time.h>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
 
 #include "platform/platform.h"
 #include "theme/theme.h"
@@ -68,6 +73,8 @@ struct HexViewer {
   void* st_user;
   HexStatusFn on_info;
   void* info_user;
+  int caret_on;
+  unsigned long blink_t;
 };
 
 static PlRect mkr(int l, int t, int r, int b) { PlRect x; x.l = l; x.t = t; x.r = r; x.b = b; return x; }
@@ -79,6 +86,25 @@ static void redraw(HexViewer* hv)
 {
   PlRect r = mkr(0, 0, hv->W, hv->H);
   pl_invalidate(hv->w, &r);
+}
+
+static unsigned long blink_now(void)
+{
+#ifdef _WIN32
+  return (unsigned long)GetTickCount();
+#else
+  return (unsigned long)(clock() * 1000 / CLOCKS_PER_SEC);
+#endif
+}
+
+static unsigned long blink_period(void)
+{
+#ifdef _WIN32
+  UINT t = GetCaretBlinkTime();
+  return (t == 0 || t == INFINITE) ? 530 : (unsigned long)t;
+#else
+  return 530;
+#endif
 }
 
 static void status(HexViewer* hv, const char* fmt, ...)
@@ -491,7 +517,7 @@ static void draw_edit(HexViewer* hv, PlCanvas* c, PlRect r, const char* s,
     focused ? CLR_ACCENT : (hover ? CLR_BTN_GHOST_BD : CLR_PANEL_BORDER), 6);
   if (s[0]) pl_text(c, hv->mono, tr, s, CLR_TEXT_PRIMARY, PL_TEXT_ELLIPSIS);
   else pl_text(c, hv->ui, tr, hint, CLR_TEXT_SECONDARY, PL_TEXT_LEFT);
-  if (focused) {
+  if (focused && hv->caret_on) {
     int cx = tr.l + pl_text_width(hv->mono, s);
     if (cx > tr.r) cx = tr.r;
     pl_line(c, cx, r.t + 7, cx, r.b - 7, CLR_TEXT_PRIMARY);
@@ -532,7 +558,7 @@ static void paint_toolbar(HexViewer* hv, PlCanvas* c)
   label(hv, c, hv->x_lbl_enc, "Encoding");
   draw_drop(hv, c, hv->r_enc, s_enc[hv->enc], hv->hov == H_ENC);
   draw_btn(hv, c, hv->r_copy, "Copy", hv->hov == H_COPY);
-  pl_line(c, 0, TB_H, hv->W, TB_H, CLR_SEPARATOR);
+  pl_line(c, 1, TB_H, hv->W - 1, TB_H, CLR_SEPARATOR);
 }
 
 static void paint_header(HexViewer* hv, PlCanvas* c)
@@ -682,7 +708,7 @@ static void paint_inspector(HexViewer* hv, PlCanvas* c)
   char v[64];
   const char* seen[8];
 
-  pl_line(c, hv->r_insp.l, hv->r_insp.t, hv->r_insp.l, hv->r_insp.b, CLR_SEPARATOR);
+  pl_line(c, hv->r_insp.l, hv->r_insp.t, hv->r_insp.l, hv->r_insp.b - 1, CLR_SEPARATOR);
   if (has) {
     sel_range(hv, &lo, &hi);
     m = (size_t)u64min(4, hv->size - lo);
@@ -744,9 +770,12 @@ static void paint_inspector(HexViewer* hv, PlCanvas* c)
 static void on_paint(void* u, PlCanvas* c, int w, int h)
 {
   HexViewer* hv = (HexViewer*)u;
+  PlRect frame;
   hv->W = w; hv->H = h;
   layout(hv);
   pl_fill(c, 0, 0, w, h, CLR_BG);
+  frame = mkr(0, 0, w - 1, h - 1);
+  pl_round_rect(c, frame, CLR_PANEL_BODY, CLR_PANEL_BORDER, 12);
   paint_toolbar(hv, c);
   paint_header(hv, c);
   paint_rows(hv, c);
@@ -782,6 +811,7 @@ static void on_mouse_down(void* u, int x, int y)
   uint64_t off;
   PlRect sb;
 
+  hv->caret_on = 1; hv->blink_t = blink_now();
   if (h == H_GOTO) { hv->focus = F_GOTO; redraw(hv); return; }
   if (h == H_FIND) { hv->focus = F_FIND; redraw(hv); return; }
   hv->focus = F_VIEW;
@@ -852,6 +882,7 @@ static void on_key(void* u, int key, uint32_t ch, int mods)
   int ext = (mods & PL_MOD_SHIFT) != 0, ctrl = (mods & PL_MOD_CTRL) != 0;
   uint64_t at, cols = hv->cols, page = (uint64_t)hv->vis_rows;
 
+  hv->caret_on = 1; hv->blink_t = blink_now();
   if (ch == 6) { hv->focus = F_FIND; redraw(hv); return; }   /* Ctrl+F */
   if (ch == 7) { hv->focus = F_GOTO; redraw(hv); return; }   /* Ctrl+G */
   if (hv->focus != F_VIEW) { edit_key(hv, key, ch, mods); return; }
@@ -915,8 +946,6 @@ static const PlWidgetOps s_ops = {
   on_key, on_wheel
 };
 
-/* ---- public API ---- */
-
 HexViewer* hexview_create(void* parent_native, PlFont* mono_font, int x, int y, int w, int h)
 {
   HexViewer* hv = (HexViewer*)calloc(1, sizeof(*hv));
@@ -924,6 +953,7 @@ HexViewer* hexview_create(void* parent_native, PlFont* mono_font, int x, int y, 
   hv->cols = 16;
   hv->W = w; hv->H = h;
   hv->hov = H_NONE;
+  hv->caret_on = 1;
   snprintf(hv->goto_txt, sizeof(hv->goto_txt), "0x00000000");
 
   hv->ui = pl_font_create(9, 0);
@@ -1140,4 +1170,23 @@ int hexview_copy(HexViewer* hv, int mode)
   ok = hv->on_copy(hv->cb_user, text);
   free(text);
   return ok;
+}
+
+void hexview_key(HexViewer* hv, int key, uint32_t ch, int mods)
+{
+  if (!hv) return;
+  on_key(hv, key, ch, mods);
+}
+
+void hexview_tick(HexViewer* hv)
+{
+  unsigned long now;
+  if (!hv || hv->W <= 0 || hv->H <= 0) return;
+  if (hv->focus != F_GOTO && hv->focus != F_FIND) return;
+  now = blink_now();
+  if (now - hv->blink_t >= blink_period()) {
+    hv->blink_t = now;
+    hv->caret_on = !hv->caret_on;
+    redraw(hv);
+  }
 }

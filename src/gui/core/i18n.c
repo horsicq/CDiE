@@ -1,3 +1,4 @@
+// i18n.c
 #define _CRT_SECURE_NO_WARNINGS
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,6 +25,9 @@
 typedef struct { char* key; char* val; } Pair;
 static Pair* s_pairs; static int s_n;
 
+/* ---------- platform helpers ---------- */
+
+// Writes the directory containing the executable (UTF-8, no trailing separator).
 static int exe_dir(char* out, size_t cap) {
   char* slash;
 #ifdef _WIN32
@@ -56,6 +60,8 @@ static FILE* open_utf8(const char* path) {
 #endif
 }
 
+/* ---------- parsing ---------- */
+
 static int hexv(char c) {
   if (c >= '0' && c <= '9') return c - '0';
   if (c >= 'a' && c <= 'f') return c - 'a' + 10;
@@ -63,7 +69,7 @@ static int hexv(char c) {
   return -1;
 }
 
-static void unescape(char* s) {           
+static void unescape(char* s) {           // \n  \\  \xHH
   char* d = s;
   for (; *s; ++s) {
     if (s[0] == '\\' && s[1] == 'n') { *d++ = '\n'; ++s; }
@@ -131,6 +137,9 @@ const char* translate(const char* english) {
   return p && p->val[0] ? p->val : english;
 }
 
+/* ---------- language listing ---------- */
+
+// Reads "@name=" from the file (if present) and reports the language.
 static void report_lang(const char* dir, const char* code,
   void (*add)(const char*, const char*, void*), void* ud) {
   char path[PATH_CAP + 64], name[128], line[512];
