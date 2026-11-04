@@ -417,7 +417,7 @@
       die_library's own samples build against it unchanged. The result string
       is ScanItemModel::toString() (the cdie formatters); flags are mapped as
       XScanEngine::setScanFlags; "$data" resolves to the executable directory.
-      Toggle with -DCDIE_BUILD_LIBRARY (default ON). See docs/LIBRARY.md.
+      Toggle with -DCDIE_BUILD_LIBRARY (default ON). See Private_docs/LIBRARY.md.
     * cdie_scan_file refactored to share its body with a new cdie_scan_memory
       (backs DIE_ScanMemory); the console output is unchanged (348/348).
     * Windows GUI (src/gui/, Windows-only): a native pure-WinAPI front end

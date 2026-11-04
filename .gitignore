@@ -34,6 +34,7 @@ __pycache__/
 
 # internal notes, not part of the shipped package
 private_docs/
+Private_docs/
 private_tests/
 
 # Developer tests stay local and are not published to GitHub.
