@@ -33,6 +33,15 @@
 #include "controls/treeview.h"
 #include "panels/signatures.h"
 #include "panels/strings.h"
+#include "panels/options.h"
+#include "panels/entropy.h"
+#include "panels/sectionsview.h"
+#include "controls/hexviewer.h"
+#include "controls/disasmview.h"
+#include "core/virustotal.h"
+#include "core/config.h"
+#include "core/i18n.h"
+#include "platform/platform.h"
 #include "xxwidgets/xxwidgets.h"
 #include "core/tray.h"
 #include "core/dlwatch.h"
@@ -45,6 +54,18 @@ static Header* g_header;
 static Infobar* g_infobar;
 static Bottombar* g_bottombar;
 static ResultsTree* g_tree;
+static StringsView* g_strv;
+static HexViewer* g_hex;
+static DisasmView* g_dasm;
+static EntropyView* g_entropy;
+static VtView* g_vt;
+static SecView* g_sec;
+static SigView* g_sig;
+static FILE* g_hexFile;
+static uint64_t g_hexSize;
+
+static int g_page = NAV_OVERVIEW;
+static void layout(void);
 
 void* cdie_gtk_main_window(void);
 void* cdie_gtk_main_window(void) { return g_win; }
@@ -66,6 +87,59 @@ static void apply_flags_to_backend(void)
   gui_backend_set_flags(g_bFlagDeep, g_bFlagHeur, g_bFlagVerbose,
     g_bFlagAggr, g_bFlagHideUnknown, g_bFlagFormat);
   gui_backend_set_databases(g_bDbExtra, g_bDbCustom);
+}
+
+static int hex_read(void* u, uint64_t off, void* buf, size_t len)
+{
+  (void)u;
+  if (!g_hexFile) return 0;
+  if (fseeko(g_hexFile, (off_t)off, SEEK_SET) != 0) return 0;
+  return fread(buf, 1, len, g_hexFile) == len;
+}
+
+static void hex_close(void)
+{
+  if (g_hexFile) fclose(g_hexFile);
+  g_hexFile = NULL;
+  g_hexSize = 0;
+}
+
+static void load_views(const char* path)
+{
+  GStatBuf st;
+  hex_close();
+  g_hexFile = g_fopen(path, "rb");
+  if (g_hexFile && g_stat(path, &st) == 0) g_hexSize = (uint64_t)st.st_size;
+  else hex_close();
+
+  if (g_hex) hexview_set_source(g_hex, g_hexSize, hex_read, NULL, 0);
+  if (g_dasm) {
+    if (g_hexFile) disasmview_open(g_dasm, hex_read, NULL, g_hexSize);
+    else disasmview_close(g_dasm);
+  }
+  if (g_entropy) {
+    if (g_hexFile) entropyview_open(g_entropy, path, hex_read, NULL, g_hexSize);
+    else entropyview_close(g_entropy);
+  }
+  if (g_vt) vtview_set_file(g_vt, path);
+  if (g_sec) secview_set_file(g_sec, path);
+  if (g_strv) stringsview_set_file(g_strv, path);
+}
+
+static int opt_copy_text(void* u, const char* text)
+{
+  GtkClipboard* cb = gtk_clipboard_get(GDK_SELECTION_CLIPBOARD);
+  (void)u;
+  if (!cb || !text) return 0;
+  gtk_clipboard_set_text(cb, text, -1);
+  return 1;
+}
+
+static void goto_entropy(void* u)
+{
+  (void)u;
+  g_page = NAV_ENTROPY;
+  layout();
 }
 
 static void clear_scan(void)
@@ -202,6 +276,7 @@ static void do_scan(const char* path)
     if (g_header) header_set_time(g_header, (unsigned)t0);
     g_free(g_lastPath);
     g_lastPath = g_strdup(path);
+    load_views(path);
   }
   else {
     set_status(report && report[0] ? report : "Cannot open the file.");
@@ -314,6 +389,7 @@ static void do_database_paths(void)
   if (saved) {
     char msg[160];
     clear_scan();
+    if (g_sig) sigview_reload(g_sig);
     g_snprintf(msg, sizeof(msg), "Database reloaded: %d signatures. Choose a file and press Scan.",
       gui_backend_signature_count());
     set_status(msg);
@@ -395,19 +471,6 @@ static gboolean on_window_state(GtkWidget* w, GdkEventWindowState* e, gpointer u
 
 static gboolean idle_browse(gpointer u) { (void)u; do_browse(); return G_SOURCE_REMOVE; }
 static gboolean idle_options(gpointer u) { (void)u; do_options(); return G_SOURCE_REMOVE; }
-static gboolean idle_signatures(gpointer u)
-{
-  (void)u;
-  signatures_show(NULL, NULL);
-  return G_SOURCE_REMOVE;
-}
-static gboolean idle_strings(gpointer u)
-{
-  (void)u;
-  if (g_lastPath) strings_show(NULL, NULL, g_lastPath);
-  else set_status("Scan a file first to view its strings.");
-  return G_SOURCE_REMOVE;
-}
 
 static void on_browse(void* user) { (void)user; g_idle_add(idle_browse, NULL); }
 
@@ -415,11 +478,82 @@ static void on_nav(void* user, int nav_id)
 {
   (void)user;
   switch (nav_id) {
-  case NAV_OPTIONS:    g_idle_add(idle_options, NULL); break;
-  case NAV_SIGNATURES: g_idle_add(idle_signatures, NULL); break;
-  case NAV_STRINGS:    g_idle_add(idle_strings, NULL); break;
+  case NAV_OPTIONS:
+    g_idle_add(idle_options, NULL);
+    break;
+  case NAV_SIGNATURES:
+    g_page = nav_id; layout();
+    if (g_sig) sigview_activate(g_sig);
+    break;
+  case NAV_STRINGS:
+    g_page = nav_id; layout();
+    if (g_strv) stringsview_activate(g_strv);
+    break;
+  case NAV_VIRUSTOTAL:
+    g_page = nav_id; layout();
+    if (g_vt) vtview_refresh(g_vt);
+    break;
+  case NAV_OVERVIEW:
+  case NAV_SECTIONS:
+  case NAV_HEX:
+  case NAV_DISASM:
+  case NAV_ENTROPY:
+    g_page = nav_id; layout();
+    break;
   default: break;
   }
+}
+
+static int route_key(GdkEventKey* e, guint ctrl, guint shift)
+{
+  int mods = 0, key = 0;
+  uint32_t ch = 0;
+  guint lk = gdk_keyval_to_lower(e->keyval);
+
+  if (g_page != NAV_STRINGS && g_page != NAV_SIGNATURES && g_page != NAV_HEX) return 0;
+  if (ctrl)  mods |= PL_MOD_CTRL;
+  if (shift) mods |= PL_MOD_SHIFT;
+
+  switch (e->keyval) {
+  case GDK_KEY_Escape:    key = PL_KEY_ESC;   break;
+  case GDK_KEY_BackSpace: key = PL_KEY_BACK;  break;
+  case GDK_KEY_Delete:    key = PL_KEY_DEL;   break;
+  case GDK_KEY_Left:      key = PL_KEY_LEFT;  break;
+  case GDK_KEY_Right:     key = PL_KEY_RIGHT; break;
+  case GDK_KEY_Home:      key = PL_KEY_HOME;  break;
+  case GDK_KEY_End:       key = PL_KEY_END;   break;
+  case GDK_KEY_Up:        key = PL_KEY_UP;    break;
+  case GDK_KEY_Down:      key = PL_KEY_DOWN;  break;
+  case GDK_KEY_Page_Up:   key = PL_KEY_PGUP;  break;
+  case GDK_KEY_Page_Down: key = PL_KEY_PGDN;  break;
+  case GDK_KEY_Return:
+  case GDK_KEY_KP_Enter:  key = PL_KEY_ENTER; break;
+  case GDK_KEY_Tab:       key = PL_KEY_TAB;   break;
+  case GDK_KEY_F3:        key = PL_KEY_F3;    break;
+  default:
+    if (ctrl) {
+      if (g_page == NAV_HEX) {          /* hex viewer wants control codes */
+        if (lk == 'a') ch = 1;
+        else if (lk == 'c') ch = 3;
+        else if (lk == 'f') ch = 6;
+        else if (lk == 'g') ch = 7;
+      }
+      else if (lk == 'f' || lk == 's') ch = lk;
+      if (ch) key = PL_KEY_CHAR;
+    }
+    else {
+      guint32 uc = gdk_keyval_to_unicode(e->keyval);
+      if (uc >= 32 && uc != 127) { key = PL_KEY_CHAR; ch = uc; }
+    }
+    break;
+  }
+  if (!key) return 0;
+
+  if (g_page == NAV_STRINGS && g_strv) stringsview_key(g_strv, key, ch, mods);
+  else if (g_page == NAV_SIGNATURES && g_sig) sigview_key(g_sig, key, ch, mods);
+  else if (g_page == NAV_HEX && g_hex) hexview_key(g_hex, key, (key == PL_KEY_CHAR ? ch : 0), mods);
+  else return 0;
+  return 1;
 }
 
 static gboolean on_key_press(GtkWidget* w, GdkEventKey* e, gpointer u)
@@ -435,7 +569,7 @@ static gboolean on_key_press(GtkWidget* w, GdkEventKey* e, gpointer u)
   if (ctrl && !shift && (e->keyval == GDK_KEY_o || e->keyval == GDK_KEY_O)) { do_browse(); return TRUE; }
   if (ctrl && !shift && (e->keyval == GDK_KEY_r || e->keyval == GDK_KEY_R)) { do_report(); return TRUE; }
   if (ctrl && shift && (e->keyval == GDK_KEY_d || e->keyval == GDK_KEY_D)) { do_database_paths(); return TRUE; }
-  return FALSE;
+  return route_key(e, ctrl, shift) ? TRUE : FALSE;
 }
 
 static void on_drag_received(GtkWidget* w, GdkDragContext* ctx, gint x, gint y,
@@ -451,34 +585,91 @@ static void on_drag_received(GtkWidget* w, GdkDragContext* ctx, gint x, gint y,
   gtk_drag_finish(ctx, TRUE, FALSE, time);
 }
 
+static void layout_impl(void);
 static void layout(void)
 {
-  int W, H, cx, cy, cw, tx, ty, tw, th;
+  static int busy;
+  if (busy) return;
+  busy = 1;
+  layout_impl();
+  busy = 0;
+}
+
+static void place_view(int page, int x, int y, int w, int h)
+{
+  switch (page) {
+  case NAV_HEX:        if (g_hex)     hexview_set_rect(g_hex, x, y, w, h); break;
+  case NAV_DISASM:     if (g_dasm)    disasmview_set_rect(g_dasm, x, y, w, h); break;
+  case NAV_ENTROPY:    if (g_entropy) entropyview_set_rect(g_entropy, x, y, w, h); break;
+  case NAV_VIRUSTOTAL: if (g_vt)      vtview_set_rect(g_vt, x, y, w, h); break;
+  case NAV_SECTIONS:   if (g_sec)     secview_set_rect(g_sec, x, y, w, h); break;
+  case NAV_SIGNATURES: if (g_sig)     sigview_set_rect(g_sig, x, y, w, h); break;
+  case NAV_STRINGS:    if (g_strv)    stringsview_set_rect(g_strv, x, y, w, h); break;
+  default:             pl_widget_set_rect(resultstree_widget(g_tree), x, y, w, h); break;
+  }
+}
+
+static void layout_impl(void)
+{
+  static const int pages[] = { NAV_OVERVIEW, NAV_HEX, NAV_DISASM, NAV_ENTROPY,
+    NAV_VIRUSTOTAL, NAV_SECTIONS, NAV_SIGNATURES, NAV_STRINGS };
+  static int s_W = -1, s_H = -1, s_page = -1;
+  int W, H, cx, cy, cw, tx, ty, tw, th, i, cur;
+
   if (!g_sw || !g_fixed || !g_sidebar || !g_header || !g_infobar ||
     !g_bottombar || !g_tree) return;
   W = gtk_widget_get_allocated_width(g_sw);
   H = gtk_widget_get_allocated_height(g_sw);
   if (W <= SIDEBAR_W || H <= 0) return;
-  cx = SIDEBAR_W; cw = W - cx; cy = 0;
 
-  pl_widget_set_rect(sidebar_widget(g_sidebar), 0, 0, SIDEBAR_W, H);
-  pl_widget_set_rect(header_widget(g_header), cx, cy, cw, HEADER_H);
-  cy += HEADER_H;
-  pl_widget_set_rect(infobar_widget(g_infobar), cx, cy, cw, INFOBAR_H);
-  cy += INFOBAR_H;
-  pl_widget_set_rect(bottombar_widget(g_bottombar), cx, H - BOTTOMBAR_H, cw, BOTTOMBAR_H);
+  /* which "slot" is visible: anything that isn't a dedicated view uses the tree */
+  cur = g_page;
+  if (cur != NAV_HEX && cur != NAV_DISASM && cur != NAV_ENTROPY &&
+    cur != NAV_VIRUSTOTAL && cur != NAV_SECTIONS &&
+    cur != NAV_SIGNATURES && cur != NAV_STRINGS)
+    cur = NAV_OVERVIEW;
 
+  if (W == s_W && H == s_H && cur == s_page) return;   /* nothing changed */
+
+  cx = SIDEBAR_W; cw = W - cx; cy = HEADER_H + INFOBAR_H;
   tx = cx + CONTENT_PAD; tw = cw - 2 * CONTENT_PAD;
   ty = cy + 4;           th = H - cy - BOTTOMBAR_H - 8;
   if (tw < 40) tw = 40;
   if (th < 40) th = 40;
-  pl_widget_set_rect(resultstree_widget(g_tree), tx, ty, tw, th);
-}
 
+  if (W != s_W || H != s_H) {
+    /* window was resized: reposition chrome and every view */
+    pl_widget_set_rect(sidebar_widget(g_sidebar), 0, 0, SIDEBAR_W, H);
+    pl_widget_set_rect(header_widget(g_header), cx, 0, cw, HEADER_H);
+    pl_widget_set_rect(infobar_widget(g_infobar), cx, HEADER_H, cw, INFOBAR_H);
+    pl_widget_set_rect(bottombar_widget(g_bottombar), cx, H - BOTTOMBAR_H, cw, BOTTOMBAR_H);
+    for (i = 0; i < 8; ++i)
+      place_view(pages[i], tx, ty, pages[i] == cur ? tw : 0, pages[i] == cur ? th : 0);
+  }
+  else {
+    /* page switch only: hide the old view, show the new one */
+    if (s_page != -1) place_view(s_page, tx, ty, 0, 0);
+    place_view(cur, tx, ty, tw, th);
+  }
+
+  s_W = W; s_H = H; s_page = cur;
+}
 static void on_size_allocate(GtkWidget* w, GdkRectangle* a, gpointer user)
 {
   (void)w; (void)a; (void)user;
   layout();
+}
+
+static gboolean blink_tick(gpointer u)
+{
+  (void)u;
+  if (g_vt) vtview_tick(g_vt);
+  if (g_strv) stringsview_tick(g_strv);
+  if (g_sig) sigview_tick(g_sig);
+  if (g_hex) hexview_tick(g_hex);
+  if (g_sidebar && sidebar_get_selected(g_sidebar) != g_page)
+    sidebar_set_selected(g_sidebar, g_page);
+  return G_SOURCE_CONTINUE;
 }
 
 int gui_run(void)
@@ -523,6 +714,23 @@ int gui_run(void)
   g_infobar = infobar_create(g_fixed, SIDEBAR_W, HEADER_H, 800, INFOBAR_H);
   g_bottombar = bottombar_create(g_fixed, SIDEBAR_W, 644, 800, BOTTOMBAR_H, NULL, NULL);
   g_tree = resultstree_create(g_fixed, SIDEBAR_W, 0, 100, 100);
+  g_hex = hexview_create(g_fixed, NULL, SIDEBAR_W, 0, 0, 0);
+  if (g_hex) hexview_set_callbacks(g_hex, NULL, opt_copy_text, NULL);
+  g_dasm = disasmview_create(g_fixed, NULL, SIDEBAR_W, 0, 0, 0);
+  if (g_dasm) disasmview_set_status_callback(g_dasm, mon_set_status, NULL);
+  g_entropy = entropyview_create(g_fixed, SIDEBAR_W, 0, 0, 0);
+  if (g_entropy) entropyview_set_callbacks(g_entropy, opt_copy_text, NULL);
+  g_vt = vtview_create(g_fixed, SIDEBAR_W, 0, 0, 0);
+  if (g_vt) vtview_set_callbacks(g_vt, opt_copy_text, NULL);
+  g_sec = secview_create(g_fixed, SIDEBAR_W, 0, 0, 0);
+  if (g_sec) secview_set_callbacks(g_sec, goto_entropy, NULL);
+  g_sig = sigview_create(g_fixed, SIDEBAR_W, 0, 0, 0);
+  g_strv = stringsview_create(g_fixed, SIDEBAR_W, 0, 0, 0);
+  {
+    CdieConfig lc;
+    if (config_load(&lc)) vt_set_api_key(lc.vt_key);
+    if (config_load(&lc) && lc.language[0]) i18n_load(lc.language);
+  }
   if (!g_sidebar || !g_header || !g_infobar || !g_bottombar || !g_tree) {
     g_printerr("cdie: failed to create the chrome controls\n");
     return 1;
@@ -557,8 +765,11 @@ int gui_run(void)
   tray_set_callbacks(dlwatch_balloon_click, NULL, dlwatch_menu_toggle, NULL);
 
   gtk_widget_show_all(win);
+  //g_timeout_add(100, blink_tick, NULL);
   gtk_main();
 
+  if (g_vt) vtview_cancel(g_vt);
+  hex_close();
   dlwatch_shutdown();
   tray_remove();
   gui_backend_shutdown();

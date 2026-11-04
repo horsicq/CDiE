@@ -47,18 +47,25 @@
 #include "core/config.h"
 #include "resource.h"
 #include "theme/theme.h"
-#include "controls/sidebar.h"
 #include "panels/header.h"
 #include "panels/infobar.h"
 #include "panels/options.h"
+#include "panels/entropy.h"
+#include "panels/sectionsview.h"
+#include "panels/signatures.h"
+#include "panels/strings.h"
+#include "controls/sidebar.h"
 #include "controls/tabbar.h"
 #include "controls/bottombar.h"
 #include "controls/treeview.h"
 #include "controls/hexviewer.h"
+#include "controls/palette.h"
+#include "controls/disasmview.h"
 #include "core/tray.h"
 #include "core/dlwatch.h"
-#include "controls/disasmview.h"
 #include "core/i18n.h"
+#include "core/virustotal.h"
+
 
  /* Store / VSIX builds get updates from Microsoft */
 #ifdef CDIE_STORE_BUILD
@@ -74,7 +81,7 @@ enum gui_action {
 	ACTION_OPTIONS, ACTION_ABOUT,
 	ACTION_DATABASE_PATHS,
 	ACTION_SIGNATURES, ACTION_STRINGS,
-	ACTION_MONITOR
+	ACTION_MONITOR, ACTION_VIRUSTOTAL, ACTION_PALETTE
 };
 
 static xxwidgets_app* g_app;
@@ -89,10 +96,17 @@ static Bottombar* g_bottombar;
 static ResultsTree* g_tree;
 static HexViewer* g_hex;
 static DisasmView* g_dasm;
+static EntropyView* g_entropy;
 static Tabbar* g_tabbar;
+static VtView* g_vt;
+static SecView* g_sec;
+static Palette* g_pal;
+static SigView* g_sig;
+static StringsView* g_str;
 
 static int g_page = NAV_OVERVIEW;
 static HANDLE g_hexFile = INVALID_HANDLE_VALUE;
+static HHOOK g_palHook;
 
 static int  g_running, g_pending;
 static int  g_startMonitor;
@@ -215,6 +229,17 @@ static void dasm_load(void)
 		return;
 	}
 	disasmview_open(g_dasm, hex_read, NULL, (uint64_t)sz.QuadPart);
+}
+
+static void ent_load(const char* utf8_path)
+{
+	LARGE_INTEGER sz;
+	if (!g_entropy) return;
+	if (g_hexFile == INVALID_HANDLE_VALUE || !GetFileSizeEx(g_hexFile, &sz)) {
+		entropyview_close(g_entropy);
+		return;
+	}
+	entropyview_open(g_entropy, utf8_path, hex_read, NULL, (uint64_t)sz.QuadPart);
 }
 
 static void hex_open(const char* utf8_path)
@@ -464,6 +489,10 @@ static void do_scan(void)
 		g_lastPath = copy_utf8(path);
 		hex_open(path);
 		dasm_load();
+		ent_load(path);
+		if (g_vt) vtview_set_file(g_vt, path);
+		if (g_sec) secview_set_file(g_sec, path);
+		if (g_str) stringsview_set_file(g_str, path);
 	}
 	else {
 		set_status("Cannot open the file.");
@@ -572,6 +601,7 @@ static void opt_db_changed(void* u)
 	WCHAR text[160];
 	(void)u;
 	clear_scan();
+	if (g_sig) sigview_reload(g_sig);
 	wsprintfW(text, L"Database reloaded: %d signatures. Choose a file and press Scan.",
 		gui_backend_signature_count());
 	set_status_wide(text);
@@ -845,6 +875,49 @@ static void do_about(void)
 	do_options_window(OPTIONS_PAGE_ABOUT);
 }
 
+static void do_virustotal(void)
+{
+	char hash[65];
+	char text[256];
+	VtResult res;
+
+	if (!g_lastPath) {
+		set_status("Scan a file first to check it on VirusTotal.");
+		return;
+	}
+	set_status("Computing SHA-256...");
+	UpdateWindow(native(g_window));
+	if (!vt_sha256_file(g_lastPath, hash)) {
+		set_status("Cannot read the file to hash it.");
+		return;
+	}
+
+	if (vt_api_available()) {
+		set_status("Querying VirusTotal...");
+		UpdateWindow(native(g_window));
+		if (vt_lookup(hash, &res)) {
+			if (res.found)
+				snprintf(text, sizeof(text),
+					"VirusTotal: %d malicious, %d suspicious, %d harmless, %d undetected. SHA-256 %s",
+					res.malicious, res.suspicious, res.harmless, res.undetected, hash);
+			else
+				snprintf(text, sizeof(text),
+					"VirusTotal: file not known yet. SHA-256 %s", hash);
+			set_status(text);
+		}
+		else {
+			set_status("VirusTotal lookup failed. Opening the report page instead.");
+		}
+	}
+	else {
+		snprintf(text, sizeof(text), "Opening VirusTotal report. SHA-256 %s", hash);
+		set_status(text);
+	}
+
+	if (!vt_open_report(hash))
+		set_status("Could not open the browser.");
+}
+
 static void layout(void)
 {
 	RECT bounds, window_bounds;
@@ -853,6 +926,7 @@ static void layout(void)
 
 	GetClientRect(native(g_window), &bounds);
 	W = bounds.right; H = bounds.bottom;
+	if (g_pal && palette_is_open(g_pal)) palette_close(g_pal);
 
 	if (g_sidebar)
 		pl_widget_set_rect(sidebar_widget(g_sidebar), 0, 0, SIDEBAR_W, H);
@@ -876,7 +950,9 @@ static void layout(void)
 	{
 		int tx = cx + CONTENT_PAD, tw = cw - 2 * CONTENT_PAD;
 		int ty = cy + 4, th = H - cy - BOTTOMBAR_H - 8;
-		int on_tree = (g_page != NAV_HEX && g_page != NAV_DISASM);
+		int on_tree = (g_page != NAV_HEX && g_page != NAV_DISASM && g_page != NAV_ENTROPY
+			&& g_page != NAV_VIRUSTOTAL && g_page != NAV_SECTIONS
+			&& g_page != NAV_SIGNATURES && g_page != NAV_STRINGS);
 		if (tw < 40) tw = 40;
 		if (th < 40) th = 40;
 		if (g_tree)
@@ -888,6 +964,21 @@ static void layout(void)
 		if (g_dasm)
 			disasmview_set_rect(g_dasm, tx, ty,
 				g_page == NAV_DISASM ? tw : 0, g_page == NAV_DISASM ? th : 0);
+		if (g_entropy)
+			entropyview_set_rect(g_entropy, tx, ty,
+				g_page == NAV_ENTROPY ? tw : 0, g_page == NAV_ENTROPY ? th : 0);
+		if (g_vt)
+			vtview_set_rect(g_vt, tx, ty,
+				g_page == NAV_VIRUSTOTAL ? tw : 0, g_page == NAV_VIRUSTOTAL ? th : 0);
+		if (g_sec)
+			secview_set_rect(g_sec, tx, ty,
+				g_page == NAV_SECTIONS ? tw : 0, g_page == NAV_SECTIONS ? th : 0);
+		if (g_sig)
+			sigview_set_rect(g_sig, tx, ty,
+				g_page == NAV_SIGNATURES ? tw : 0, g_page == NAV_SIGNATURES ? th : 0);
+		if (g_str)
+			stringsview_set_rect(g_str, tx, ty,
+				g_page == NAV_STRINGS ? tw : 0, g_page == NAV_STRINGS ? th : 0);
 	}
 
 	GetWindowRect(native(g_window), &window_bounds);
@@ -914,16 +1005,32 @@ static void on_nav(void* user, int nav_id)
 		break;
 
 	case NAV_SIGNATURES:
-		g_pending = ACTION_SIGNATURES;
+		g_page = nav_id;
+		layout();
+		if (g_sig) sigview_activate(g_sig);
 		break;
 
 	case NAV_STRINGS:
-		g_pending = ACTION_STRINGS;
+		g_page = nav_id;
+		layout();
+		if (g_str) stringsview_activate(g_str);
+		break;
+
+	case 1000:                         
+		g_pending = ACTION_PALETTE;
+		break;
+
+	case NAV_VIRUSTOTAL:
+		g_page = nav_id;
+		layout();
+		if (g_vt) vtview_refresh(g_vt);
 		break;
 
 	case NAV_OVERVIEW:
+	case NAV_SECTIONS:
 	case NAV_HEX:
 	case NAV_DISASM:
+	case NAV_ENTROPY:
 		g_page = nav_id;
 		layout();
 		break;
@@ -1020,6 +1127,210 @@ static void on_event(xxwidgets_app* app, const xxwidgets_event* event,
 	}
 }
 
+static void goto_entropy(void* user)
+{
+	(void)user;
+	g_page = NAV_ENTROPY;
+	layout();          
+}
+
+static void on_palette(void* user, int id)
+{
+	(void)user;
+	if (id >= 100) g_pending = id - 100;
+	else on_nav(NULL, id);
+}
+
+static void fill_palette(void)
+{
+	palette_add(g_pal, "Overview", "view", NAV_OVERVIEW);
+	palette_add(g_pal, "Sections", "view", NAV_SECTIONS);
+	palette_add(g_pal, "Signatures", "view", NAV_SIGNATURES);
+	palette_add(g_pal, "VirusTotal", "view", NAV_VIRUSTOTAL);
+	palette_add(g_pal, "Strings", "view", NAV_STRINGS);
+	palette_add(g_pal, "Hex viewer", "view", NAV_HEX);
+	palette_add(g_pal, "Entropy", "view", NAV_ENTROPY);
+	palette_add(g_pal, "Disassembly", "view", NAV_DISASM);
+	palette_add(g_pal, "Open file...", "action", 100 + ACTION_BROWSE);
+	palette_add(g_pal, "Scan again", "action", 100 + ACTION_SCAN);
+	palette_add(g_pal, "Options", "action", 100 + ACTION_OPTIONS);
+	palette_add(g_pal, "Database paths", "action", 100 + ACTION_DATABASE_PATHS);
+	palette_add(g_pal, "Monitor downloads", "action", 100 + ACTION_MONITOR);
+	palette_add(g_pal, "Check on VirusTotal (browser)", "action", 100 + ACTION_VIRUSTOTAL);
+	palette_add(g_pal, "About", "action", 100 + ACTION_ABOUT);
+}
+
+static HWND g_palWnd;
+
+static void pal_round(void)
+{
+	if (g_palWnd) SetWindowRgn(g_palWnd, NULL, TRUE);   /* no clipping: smooth corners */
+}
+
+static void do_palette(void)
+{
+	RECT b;
+	HWND parent = native(g_window), c;
+	int top = HEADER_H + INFOBAR_H;
+	int x, y, w, h, found = 0;
+	if (!g_pal) return;
+	if (palette_is_open(g_pal)) { palette_close(g_pal); return; }
+	GetClientRect(parent, &b);
+	palette_open(g_pal, SIDEBAR_W, top, b.right - SIDEBAR_W,
+		b.bottom - top - BOTTOMBAR_H);
+
+	if (palette_get_rect(g_pal, &x, &y, &w, &h)) {
+		for (c = GetWindow(parent, GW_CHILD); c; c = GetWindow(c, GW_HWNDNEXT)) {
+			RECT r; POINT pt;
+			GetWindowRect(c, &r);
+			pt.x = r.left; pt.y = r.top;
+			ScreenToClient(parent, &pt);
+			if (pt.x == x && pt.y == y &&
+				r.right - r.left == w && r.bottom - r.top == h) {
+				BringWindowToTop(c);
+				SetFocus(c);
+				g_palWnd = c;
+				pal_round();
+				found = 1;
+				break;
+			}
+		}
+	}
+	set_status(found ? "Palette: shown" : "Palette: window not found");
+}
+
+static LRESULT CALLBACK pal_hook(int code, WPARAM wp, LPARAM lp)
+{
+	if (code >= 0 && wp == PM_REMOVE && g_pal && palette_is_open(g_pal)) {
+		MSG* m = (MSG*)lp;
+		int mods = 0, key = 0;
+		if (GetKeyState(VK_CONTROL) & 0x8000) mods |= PL_MOD_CTRL;
+		if (GetKeyState(VK_SHIFT) & 0x8000) mods |= PL_MOD_SHIFT;
+
+		if (m->message == WM_LBUTTONDOWN || m->message == WM_RBUTTONDOWN ||
+			m->message == WM_NCLBUTTONDOWN) {
+			RECT pr;
+			if (g_palWnd && GetWindowRect(g_palWnd, &pr) && !PtInRect(&pr, m->pt))
+				palette_close(g_pal);
+		}
+
+		if (m->message == WM_KEYDOWN) {
+			switch (m->wParam) {
+			case VK_ESCAPE: key = PL_KEY_ESC;   break;
+			case VK_RETURN: key = PL_KEY_ENTER; break;
+			case VK_UP:     key = PL_KEY_UP;    break;
+			case VK_DOWN:   key = PL_KEY_DOWN;  break;
+			case VK_BACK:   key = PL_KEY_BACK;  break;
+			default: break;
+			}
+			if (key) {
+				palette_key(g_pal, key, 0, mods);
+				pal_round();
+				m->message = WM_NULL;         
+			}
+		}
+		else if (m->message == WM_CHAR && m->wParam >= 32 && m->wParam != 127
+			&& !(mods & PL_MOD_CTRL)) {
+			palette_key(g_pal, PL_KEY_CHAR, (uint32_t)m->wParam, mods);
+			pal_round();
+			m->message = WM_NULL;
+		}
+	}
+
+	if (code >= 0 && wp == PM_REMOVE
+		&& ((g_str && g_page == NAV_STRINGS) || (g_sig && g_page == NAV_SIGNATURES))
+		&& !(g_pal && palette_is_open(g_pal))
+		&& GetActiveWindow() == native(g_window)) {
+		MSG* m = (MSG*)lp;
+		int mods = 0, key = 0;
+		uint32_t ch = 0;
+		if (GetKeyState(VK_CONTROL) & 0x8000) mods |= PL_MOD_CTRL;
+		if (GetKeyState(VK_SHIFT) & 0x8000) mods |= PL_MOD_SHIFT;
+
+		if (m->message == WM_KEYDOWN) {
+			switch (m->wParam) {
+			case VK_BACK:   key = PL_KEY_BACK;  break;
+			case VK_DELETE: key = PL_KEY_DEL;   break;
+			case VK_LEFT:   key = PL_KEY_LEFT;  break;
+			case VK_RIGHT:  key = PL_KEY_RIGHT; break;
+			case VK_HOME:   key = PL_KEY_HOME;  break;
+			case VK_END:    key = PL_KEY_END;   break;
+			case VK_UP:     key = PL_KEY_UP;    break;
+			case VK_DOWN:   key = PL_KEY_DOWN;  break;
+			case VK_PRIOR:  key = PL_KEY_PGUP;  break;
+			case VK_NEXT:   key = PL_KEY_PGDN;  break;
+			case VK_RETURN: key = PL_KEY_ENTER; break;
+			case VK_TAB:    key = PL_KEY_TAB;   break;
+			case VK_F3:     key = PL_KEY_F3;    break;
+			case 'F':
+				if (mods & PL_MOD_CTRL) { key = PL_KEY_CHAR; ch = 'f'; }
+				break;
+			case 'S':
+				if (mods & PL_MOD_CTRL) { key = PL_KEY_CHAR; ch = 's'; }
+				break;
+			default: break;
+			}
+			if (key) {
+				if (g_page == NAV_STRINGS) stringsview_key(g_str, key, ch, mods);
+				else sigview_key(g_sig, key, ch, mods);
+				m->message = WM_NULL;
+			}
+		}
+		else if (m->message == WM_CHAR && m->wParam >= 32 && m->wParam != 127
+			&& !(mods & PL_MOD_CTRL)) {
+			if (g_page == NAV_STRINGS)
+				stringsview_key(g_str, PL_KEY_CHAR, (uint32_t)m->wParam, mods);
+			else
+				sigview_key(g_sig, PL_KEY_CHAR, (uint32_t)m->wParam, mods);
+			m->message = WM_NULL;
+		}
+	}
+
+	if (code >= 0 && wp == PM_REMOVE && g_hex && g_page == NAV_HEX
+		&& !(g_pal && palette_is_open(g_pal))
+		&& GetActiveWindow() == native(g_window)) {
+		MSG* m = (MSG*)lp;
+		int mods = 0, key = 0;
+		if (GetKeyState(VK_CONTROL) & 0x8000) mods |= PL_MOD_CTRL;
+		if (GetKeyState(VK_SHIFT) & 0x8000) mods |= PL_MOD_SHIFT;
+
+		if (m->message == WM_KEYDOWN) {
+			switch (m->wParam) {
+			case VK_ESCAPE: key = PL_KEY_ESC;   break;
+			case VK_BACK:   key = PL_KEY_BACK;  break;
+			case VK_LEFT:   key = PL_KEY_LEFT;  break;
+			case VK_RIGHT:  key = PL_KEY_RIGHT; break;
+			case VK_HOME:   key = PL_KEY_HOME;  break;
+			case VK_END:    key = PL_KEY_END;   break;
+			case VK_UP:     key = PL_KEY_UP;    break;
+			case VK_DOWN:   key = PL_KEY_DOWN;  break;
+			case VK_PRIOR:  key = PL_KEY_PGUP;  break;
+			case VK_NEXT:   key = PL_KEY_PGDN;  break;
+			case VK_RETURN: key = PL_KEY_ENTER; break;
+			case VK_TAB:    key = PL_KEY_TAB;   break;
+			case VK_F3:     key = PL_KEY_F3;    break;
+			default: break;
+			}
+			if (key) {
+				hexview_key(g_hex, key, 0, mods);
+				m->message = WM_NULL;
+			}
+		}
+		else if (m->message == WM_CHAR) {
+			if ((mods & PL_MOD_CTRL) &&
+				(m->wParam == 1 || m->wParam == 3 || m->wParam == 6 || m->wParam == 7)) {
+				hexview_key(g_hex, PL_KEY_CHAR, (uint32_t)m->wParam, mods);
+				m->message = WM_NULL;
+			}
+			else if (m->wParam >= 32 && m->wParam != 127 && !(mods & PL_MOD_CTRL)) {
+				hexview_key(g_hex, PL_KEY_CHAR, (uint32_t)m->wParam, mods);
+				m->message = WM_NULL;
+			}
+		}
+	}
+	return CallNextHookEx(g_palHook, code, wp, lp);
+}
+
 static int create_controls(void)
 {
 	xxwidgets_shortcut shortcuts[] = {
@@ -1027,7 +1338,8 @@ static int create_controls(void)
 		{ "Ctrl+O",       ACTION_BROWSE },
 		{ "F1",           ACTION_ABOUT },
 		{ "Ctrl+Shift+D", ACTION_DATABASE_PATHS },
-		{ "Ctrl+M",       ACTION_MONITOR }
+		{ "Ctrl+M",       ACTION_MONITOR },
+		{ "Ctrl+K",       ACTION_PALETTE }
 	};
 
 	if (!SetWindowSubclass(native(g_window), window_subclass, 1, 0))
@@ -1051,7 +1363,22 @@ static int create_controls(void)
 	g_dasm = disasmview_create(native(g_window), NULL, SIDEBAR_W, 0, 0, 0);
 	if (g_dasm) disasmview_set_status_callback(g_dasm, mon_set_status, NULL);
 
-	if (!g_sidebar || !g_header_wnd || !g_infobar_wnd || !g_bottombar || !g_tree || !g_hex || !g_dasm) {
+	g_entropy = entropyview_create(native(g_window), SIDEBAR_W, 0, 0, 0);
+	if (g_entropy) entropyview_set_callbacks(g_entropy, opt_copy_text, NULL);
+
+	g_vt = vtview_create(native(g_window), SIDEBAR_W, 0, 0, 0);
+	if (g_vt) vtview_set_callbacks(g_vt, opt_copy_text, NULL);
+
+	g_sec = secview_create(native(g_window), SIDEBAR_W, 0, 0, 0);
+	if (g_sec) secview_set_callbacks(g_sec, goto_entropy, NULL);
+
+	g_sig = sigview_create(native(g_window), SIDEBAR_W, 0, 0, 0);
+	g_str = stringsview_create(native(g_window), SIDEBAR_W, 0, 0, 0);
+
+	g_pal = palette_create(native(g_window), on_palette, NULL);
+	if (g_pal) fill_palette();
+	g_palHook = SetWindowsHookExW(WH_GETMESSAGE, pal_hook, NULL, GetCurrentThreadId());
+	if (!g_sidebar || !g_header_wnd || !g_infobar_wnd || !g_bottombar || !g_tree || !g_hex || !g_dasm || !g_entropy || !g_vt || !g_sec) {
 		WCHAR msg[200];
 		wsprintfW(msg,
 			L"Chrome creation failed (1 = ok):\nsidebar=%d header=%d infobar=%d "
@@ -1205,6 +1532,7 @@ int gui_run(void)
 
 	{
 		CdieConfig lc;
+		if (config_load(&lc)) vt_set_api_key(lc.vt_key);
 		if (config_load(&lc) && lc.language[0]) {
 			snprintf(g_lang, sizeof(g_lang), "%s", lc.language);
 			i18n_load(g_lang);
@@ -1297,18 +1625,22 @@ int gui_run(void)
 		case ACTION_ABOUT:          do_about();          break;
 		case ACTION_MONITOR:        dlwatch_set_enabled(!dlwatch_enabled()); break;
 		case ACTION_DATABASE_PATHS: do_options_window(OPTIONS_PAGE_DATABASES); break;
+		case ACTION_VIRUSTOTAL:     do_virustotal();     break;
+		case ACTION_PALETTE:        do_palette();        break;
 		case ACTION_SIGNATURES:     signatures_show(g_app, g_window); break;
-		case ACTION_STRINGS:
-			if (g_lastPath) strings_show(g_app, g_window, g_lastPath);
-			else set_status("Scan a file first to view its strings.");
-			break;
 		default: break;
 		}
+		if (g_vt) vtview_tick(g_vt);
+		if (g_str) stringsview_tick(g_str);
+		if (g_sig) sigview_tick(g_sig);
+		if (g_hex) hexview_tick(g_hex);
 		if (g_sidebar && sidebar_get_selected(g_sidebar) != g_page)
 			sidebar_set_selected(g_sidebar, g_page);
 	}
 
 finish:
+	if (g_palHook) { UnhookWindowsHookEx(g_palHook); g_palHook = NULL; }
+	if (g_vt) vtview_cancel(g_vt);
 	hex_close();
 	dlwatch_shutdown();
 	tray_remove();

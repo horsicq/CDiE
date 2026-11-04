@@ -27,11 +27,16 @@
 extern "C" {
 #endif
 
-	/* Modal signatures window. Call from the main loop, not from a callback. */
-	void signatures_show(xxwidgets_app* app, xxwidgets_widget* owner);
+void signatures_show(xxwidgets_app* app, xxwidgets_widget* owner);
+int signatures_handle_event(const xxwidgets_event* event);
 
-	/* Call first in your on_event. Returns 1 if the event was consumed. */
-	int signatures_handle_event(const xxwidgets_event* event);
+typedef struct Sig SigView;
+SigView* sigview_create(void* parent_native, int x, int y, int w, int h);
+void     sigview_set_rect(SigView* s, int x, int y, int w, int h);
+void     sigview_activate(SigView* s);
+void     sigview_reload(SigView* s);
+void		 sigview_key(SigView* s, int key, uint32_t ch, int mods);
+void		 sigview_tick(SigView* s);
 
 #ifdef __cplusplus
 }

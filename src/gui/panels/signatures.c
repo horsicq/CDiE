@@ -1,6 +1,3 @@
-#define _CRT_SECURE_NO_WARNINGS
-#include <stdio.h>
-#include <stdlib.h>
 /* Copyright (c) 2026 hors<horsicq@gmail.com>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -21,6 +18,10 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
+#define _CRT_SECURE_NO_WARNINGS
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
 #include <string.h>
 #include <stdint.h>
 #ifdef _WIN32
@@ -116,6 +117,9 @@ typedef struct Sig {
   Updater upd;
   PlRect r_banner;
   int auto_done;
+  int embedded, inited;
+  int caret_on;
+  unsigned long blink_t;
 } Sig;
 
 static Sig* s_sig;
@@ -132,6 +136,27 @@ static void redraw(Sig* s)
 {
   PlRect r = mkr(0, 0, s->W, s->H);
   pl_invalidate(s->w, &r);
+}
+
+static unsigned long blink_now(void)
+{
+#ifdef _WIN32
+  return (unsigned long)GetTickCount();
+#else
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (unsigned long)(ts.tv_sec * 1000UL + ts.tv_nsec / 1000000UL);
+#endif
+}
+
+static unsigned long blink_period(void)
+{
+#ifdef _WIN32
+  UINT t = GetCaretBlinkTime();
+  return (t == 0 || t == INFINITE) ? 530 : (unsigned long)t;
+#else
+  return 530;
+#endif
 }
 
 static void txt(PlCanvas* c, PlFont* f, PlColor col, PlRect r, int al, const char* t)
@@ -909,7 +934,7 @@ static void paint_edit(Sig* s, PlCanvas* c, Edit* e, PlRect tr, int focused, con
     txt(c, s->font, SG_DIM, tr, 0, translate(cue));
   }
   else txt(c, s->font, SG_TEXT, tr, 0, e->s);
-  if (focused) {
+  if (focused && s->caret_on) {
     char tmp[260];
     int x;
     memcpy(tmp, e->s, (size_t)e->caret); tmp[e->caret] = 0;
@@ -1002,7 +1027,7 @@ static void paint_editor(Sig* s, PlCanvas* c)
       j = k;
     }
 
-    if (s->focus == F_ED && line == cl) {
+    if (s->focus == F_ED && line == cl && s->caret_on) {
       int vc = vcol_of(s, line, s->caret);
       int x = textx + vx(s, line, vc) - ox;
       if (vc >= s->hs && x < right) pl_line(c, x, y + 2, x, y + LH - 2, SG_TEXT);
@@ -1104,6 +1129,46 @@ static void paint_banner(Sig* s, PlCanvas* c)
   }
 }
 
+static void layout(Sig* s)
+{
+  const int m = 12, lw = 300, bh = 34, gap = 12;
+  const int nextW = 70, findW = 70, boxW = 260;
+  const int barH = s->embedded ? 0 : 56;
+  int W = s->W, H = s->H, bot = H - barH - m, rx, rw, y, top, gy, gh, by, ty;
+
+  s->r_banner = mkr(m, m, W - m, m + BANNER_H);
+  s->b[B_UPD].r = mkr(W - m - 16 - 110, m + 9, W - m - 16, m + 9 + bh);
+  ty = m + BANNER_H + gap;
+
+  s->r_left = mkr(m, ty, m + lw, bot);
+  s->r_filter = mkr(m + 12, ty + 12, m + lw - 12, ty + 12 + bh);
+  s->r_tree = mkr(m + 8, s->r_filter.b + 8, m + lw - 8, bot - 8);
+
+  rx = m + lw + gap;
+  rw = W - rx - m;
+  if (rw < 300) rw = 300;
+  y = ty;
+  s->b[B_SAVE].r = mkr(rx, y, rx + 80, y + bh);
+  s->b[B_RO].r = mkr(rx + 92, y, rx + 202, y + bh);
+  s->b[B_NEXT].r = mkr(rx + rw - nextW, y, rx + rw, y + bh);
+  s->b[B_FIND].r = mkr(rx + rw - nextW - 8 - findW, y, rx + rw - nextW - 8, y + bh);
+  s->r_findbox = mkr(rx + rw - nextW - 8 - findW - 8 - boxW, y,
+    rx + rw - nextW - 8 - findW - 8, y + bh);
+
+  top = ty + bh + gap;
+  s->r_edcard = mkr(rx, top, rx + rw, bot);
+
+  gy = s->r_edcard.t + HEAD_ED + 8;
+  gh = s->r_edcard.b - 8 - gy;
+  s->r_gut = mkr(rx + 1, gy, rx + 53, gy + gh);
+  s->r_ed = mkr(rx + 53, gy, rx + rw - 10, gy + gh);
+
+  s->r_bar = mkr(0, H - barH, W, H);
+  by = H - barH;
+  s->b[B_CLOSE].r = mkr(W - 12 - 80, by + 11, W - 12, by + 11 + bh);
+  if (s->embedded) s->b[B_CLOSE].r = mkr(0, 0, 0, 0);     /* no Close button on a page */
+}
+
 static void on_paint(void* u, PlCanvas* c, int w, int h) {
   Sig* s = (Sig*)u;
   char t[96];
@@ -1112,6 +1177,7 @@ static void on_paint(void* u, PlCanvas* c, int w, int h) {
   int i;
 
   s->W = w; s->H = h;
+  layout(s);
   upd_poll(s);
   upd_sync_btn(s);
   pl_fill(c, 0, 0, w, h, SG_BG);
@@ -1172,50 +1238,13 @@ static void on_paint(void* u, PlCanvas* c, int w, int h) {
   }
 }
 
-static void layout(Sig* s)
-{
-  const int m = 12, lw = 300, barH = 56, bh = 34, gap = 12;
-  const int nextW = 70, findW = 70, boxW = 260;
-  int W = s->W, H = s->H, bot = H - barH - m, rx, rw, y, top, gy, gh, by, ty;
-
-  s->r_banner = mkr(m, m, W - m, m + BANNER_H);
-  s->b[B_UPD].r = mkr(W - m - 16 - 110, m + 9, W - m - 16, m + 9 + bh);
-  ty = m + BANNER_H + gap;
-
-  s->r_left = mkr(m, ty, m + lw, bot);
-  s->r_filter = mkr(m + 12, ty + 12, m + lw - 12, ty + 12 + bh);
-  s->r_tree = mkr(m + 8, s->r_filter.b + 8, m + lw - 8, bot - 8);
-
-  rx = m + lw + gap;
-  rw = W - rx - m;
-  if (rw < 300) rw = 300;
-  y = ty;
-  s->b[B_SAVE].r = mkr(rx, y, rx + 80, y + bh);
-  s->b[B_RO].r = mkr(rx + 92, y, rx + 202, y + bh);
-  s->b[B_NEXT].r = mkr(rx + rw - nextW, y, rx + rw, y + bh);
-  s->b[B_FIND].r = mkr(rx + rw - nextW - 8 - findW, y, rx + rw - nextW - 8, y + bh);
-  s->r_findbox = mkr(rx + rw - nextW - 8 - findW - 8 - boxW, y,
-    rx + rw - nextW - 8 - findW - 8, y + bh);
-
-  top = ty + bh + gap;
-  s->r_edcard = mkr(rx, top, rx + rw, bot);
-
-  gy = s->r_edcard.t + HEAD_ED + 8;
-  gh = s->r_edcard.b - 8 - gy;
-  s->r_gut = mkr(rx + 1, gy, rx + 53, gy + gh);
-  s->r_ed = mkr(rx + 53, gy, rx + rw - 10, gy + gh);
-
-  s->r_bar = mkr(0, H - barH, W, H);
-  by = H - barH;
-  s->b[B_CLOSE].r = mkr(W - 12 - 80, by + 11, W - 12, by + 11 + bh);
-}
 
 static void on_resize(void* u, int w, int h)
 {
   Sig* s = (Sig*)u;
   s->W = w; s->H = h;
   layout(s);
-  ensure_visible(s);
+  if (w > 0 && h > 0) ensure_visible(s);
 }
 
 static int hit_btn(Sig* s, int x, int y)
@@ -1278,7 +1307,8 @@ static void on_mouse_down(void* u, int x, int y)
   Sig* s = (Sig*)u;
   int h;
 
-  if (s->popup) { s->popup = 0; redraw(s); return; } 
+  s->caret_on = 1; s->blink_t = blink_now();
+  if (s->popup) { s->popup = 0; redraw(s); return; }
 
   h = hit_btn(s, x, y);
   if (h >= 0) {
@@ -1397,9 +1427,11 @@ static void on_key(void* u, int key, uint32_t ch, int mods)
 {
   Sig* s = (Sig*)u;
 
+  s->caret_on = 1; s->blink_t = blink_now();
   if (key == PL_KEY_ESC) {
     if (s->popup) s->popup = 0;
-    else { s->done = 1; pl_window_close(s->win); return; }
+    else if (s->win) { s->done = 1; pl_window_close(s->win); return; }
+    else return;
     redraw(s); return;
   }
   if (key == PL_KEY_F3) { do_find(s, 0); return; }
@@ -1454,6 +1486,7 @@ static void on_win_size(void* u, int w, int h)
   s->W = w; s->H = h;
   pl_widget_set_rect(s->w, 0, 0, w, h);
 }
+
 static void on_win_close(void* u)
 {
   Sig* s = (Sig*)u;
@@ -1522,4 +1555,82 @@ void signatures_show(xxwidgets_app* app, xxwidgets_widget* owner)
 
   pl_widget_destroy(s->w);               
   pl_window_destroy(win);
+}
+
+SigView* sigview_create(void* parent_native, int x, int y, int w, int h)
+{
+  Sig* s = (Sig*)calloc(1, sizeof(*s));
+  int i, ci;
+  if (!s) return NULL;
+
+  s->embedded = 1;
+  s->caret_on = 1;
+  s->W = w; s->H = h; s->hov = -1; s->tsel = -1; s->focus = F_TREE;
+  s->font = pl_font_create(9, 0);
+  s->fontb = pl_font_create(10, 1);
+  if (!s->font || !s->fontb) { on_destroy(s); return NULL; }
+
+  for (ci = 32; ci < 127; ++ci) { char t[2]; t[0] = (char)ci; t[1] = 0; s->aw[ci] = pl_text_width(s->font, t); }
+  s->sp = imax(1, s->aw[' ']);
+  for (ci = 0; ci < 32; ++ci) s->aw[ci] = s->sp;
+  s->aw[127] = s->sp;
+
+  init_btn(s, B_SAVE, K_NORMAL, translate("Save"), 0, 0);
+  init_btn(s, B_RO, K_SWITCH, translate("Readonly"), 1, 1);
+  init_btn(s, B_FIND, K_NORMAL, translate("Find"), 0, 1);
+  init_btn(s, B_NEXT, K_NORMAL, translate("Next"), 0, 1);
+  init_btn(s, B_CLEAR, K_LINK, translate("Clear result"), 0, 1);
+  for (i = 0; i < NCHIPS; ++i) init_btn(s, B_CH0 + i, K_CHIP, s_chip_text[i], i < 4, 1);
+  init_btn(s, B_DROP, K_DROP, translate("detect"), 0, 1);
+  init_btn(s, B_RUN, K_ACCENT, translate("Run"), 0, 1);
+  init_btn(s, B_CLOSE, K_NORMAL, translate("Close"), 0, 1);
+  init_btn(s, B_UPD, K_NORMAL, translate("Checking"), 0, 0);
+
+  s->w = pl_widget_create(parent_native, &s_ops, s, x, y, w, h);
+  if (!s->w) { on_destroy(s); return NULL; }
+  s_sig = s;
+  updater_init(&s->upd, upd_notify, s);
+  layout(s);
+  return s;
+}
+
+void sigview_set_rect(SigView* s, int x, int y, int w, int h)
+{
+  if (!s) return;
+  pl_widget_set_rect(s->w, x, y, w, h);
+  s->W = w; s->H = h;
+  layout(s);
+  if (w > 0 && h > 0) ensure_visible(s);
+}
+
+void sigview_activate(SigView* s)
+{
+  if (!s || s->inited) return;
+  s->inited = 1;
+  rebuild_tree(s);
+  updater_check(&s->upd);
+}
+
+void sigview_reload(SigView* s)
+{
+  if (s && s->inited) rebuild_tree(s);
+}
+
+void sigview_key(SigView* s, int key, uint32_t ch, int mods)
+{
+  if (!s) return;
+  on_key(s, key, ch, mods);
+}
+
+void sigview_tick(SigView* s)
+{
+  unsigned long now;
+  if (!s || s->W <= 0 || s->H <= 0) return;
+  if (s->focus != F_FILTER && s->focus != F_FIND && s->focus != F_ED) return;
+  now = blink_now();
+  if (now - s->blink_t >= blink_period()) {
+    s->blink_t = now;
+    s->caret_on = !s->caret_on;
+    redraw(s);
+  }
 }

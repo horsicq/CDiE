@@ -29,12 +29,17 @@
 #include "core/config.h"
 #include "core/i18n.h"
 #include "theme/theme.h"
+#include "core/virustotal.h"
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #ifndef _WIN32
 #define _strdup strdup
 #endif
 
 #define HEAD    44
+#undef NAV_H
 #define NAV_H   38
 #define ROW_H   34
 #define MAXIT   40
@@ -44,7 +49,7 @@
 #define DD_MAXVIS 8
 
 
-enum { PG_SCAN, PG_DB, PG_OPT, PG_FONTS, PG_LANG, PG_CTX, PG_UPDATE, PG_ABOUT, PG_COUNT };
+enum { PG_SCAN, PG_DB, PG_OPT, PG_FONTS, PG_LANG, PG_VT, PG_CTX, PG_UPDATE, PG_ABOUT, PG_COUNT };
 
 enum {
   IK_HEAD, IK_TEXT, IK_NOTE, IK_CHECK, IK_BTN, IK_ACCENT, IK_VALUE, IK_PATH, IK_FVAL, IK_LVAL,
@@ -59,8 +64,8 @@ enum {
   ID_DBX, ID_DBC,
   ID_SSE2, ID_AVX2,
   ID_BUF_DEC, ID_BUF_INC, ID_FBUF_DEC, ID_FBUF_INC, ID_BUF_VAL, ID_FBUF_VAL,
-  ID_PATH_MAIN, ID_PATH_EXTRA, ID_PATH_CUSTOM,
-  ID_BROWSE_MAIN, ID_BROWSE_EXTRA, ID_BROWSE_CUSTOM,
+  ID_PATH_MAIN, ID_PATH_EXTRA, ID_PATH_CUSTOM, ID_PATH_VT,
+  ID_BROWSE_MAIN, ID_BROWSE_EXTRA, ID_BROWSE_CUSTOM, ID_PASTE_VT,
   ID_FCHOOSE0, ID_FCHOOSE1, ID_FCHOOSE2, ID_FCHOOSE3,
   ID_FDEF0, ID_FDEF1, ID_FDEF2, ID_FDEF3,
   ID_FVAL0, ID_FVAL1, ID_FVAL2, ID_FVAL3,
@@ -87,7 +92,7 @@ typedef struct Opt {
   Item it[MAXIT];
   int nit;
   char msg[160];
-  char dbpath[3][1024];
+  char dbpath[4][1024];   /* [3] = VirusTotal API key */
   int  dbfocus;
   int  dbdirty;
   OptionsFont fonts[OPTIONS_FONT_ROLES];
@@ -114,13 +119,14 @@ typedef struct Opt {
 static Opt* s_opt;
 
 static const char* s_title[PG_COUNT] =
-{ "Scan", "Databases", "Optimization", "Fonts", "Language", "Context menu", "Update", "About" };
+{ "Scan", "Databases", "Optimization", "Fonts", "Language", "VirusTotal", "Context menu", "Update", "About" };
 static const char* s_sub[PG_COUNT] = {
   "How files are scanned and how results are shown",
   "Signature databases used by the scan engine",
   "Buffer sizes and CPU acceleration",
   "Interface fonts",
   "Interface language",
+  "API key for file reputation lookups",
   "Explorer integration",
   "Check for updates",
   "Version, license, and project info"
@@ -163,7 +169,6 @@ static void txt(PlCanvas* c, PlFont* f, PlColor col, PlRect r, int al, const cha
   pl_text(c, f, r, t, col, al == 2 ? PL_TEXT_LEFT : PL_TEXT_ELLIPSIS);
 }
 
-#define ABOUT_COPYRIGHT_OLD "Copyright (C) 2006-2008 Hellsp@wn"
 #define ABOUT_INFO \
   "Bugreports: horsicq@gmail.com\n" \
   "Website: http://ntinfo.biz\n" \
@@ -313,6 +318,7 @@ static void add(Opt* o, int kind, int id, const char* text, int enabled,
   int l, int t, int r, int b);
 static void add_stepper(Opt* o, const char* label, int dec, int inc, int val,
   int x, int w, int y);
+static void paste_append(char* s, size_t cap);
 
 static int* chk_ptr(Opt* o, int id)
 {
@@ -413,6 +419,15 @@ static void build_items(Opt* o)
     add(o, IK_NOTE, 0, translate("Language files are loaded from the \"lang\" folder."), 1, x, y, x + w, y + 22);
     break;
 
+  case PG_VT:
+    add(o, IK_HEAD, 0, "API KEY", 1, x, y, x + w, y + 20); y += 32;
+    add(o, IK_TEXT, 0, "API key", 1, x, y, x + 110, y + 30);
+    add(o, IK_PATH, ID_PATH_VT, "", 1, x + 120, y, x + w - 90, y + 30);
+    add(o, IK_BTN, ID_PASTE_VT, "Paste", 1, x + w - 82, y, x + w, y + 30); y += 46;
+    add(o, IK_NOTE, 0, "Free key: virustotal.com > profile > API key. Click the box and type or press Ctrl+V.", 1, x, y, x + w, y + 22); y += 26;
+    add(o, IK_NOTE, 0, "Only the SHA-256 hash is sent, never the file.", 1, x, y, x + w, y + 22);
+    break;
+
   case PG_CTX:
     add(o, IK_TEXT, 0, translate("Add or remove the \"Scan with cdie\" entry in the Explorer file menu."),
       1, x, y, x + w, y + 24); y += 44;
@@ -437,7 +452,6 @@ static void build_items(Opt* o)
     add(o, IK_HEAD, 0, translate("DETECT IT EASY - CDIE"), 1, x, y, x + w, y + 20); y += 26;
     add(o, IK_TEXT, 0, o->verline, 1, x, y, x + w, y + 22); y += 22;
     add(o, IK_NOTE, 0, o->buildline, 1, x, y, x + w, y + 22); y += 22;
-    add(o, IK_NOTE, 0, ABOUT_COPYRIGHT_OLD, 1, x, y, x + w, y + 22); y += 22;
     add(o, IK_NOTE, 0, o->copyline, 1, x, y, x + w, y + 22); y += 30;
     add(o, IK_BTN, ID_OPEN_SITE, translate("Website"), 1, x, y, x + 84, y + 32);
     add(o, IK_BTN, ID_OPEN_GITHUB, translate("GitHub"), 1, x + 92, y, x + 176, y + 32);
@@ -458,7 +472,6 @@ static void build_items(Opt* o)
   add(o, IK_BTN, ID_CANCEL, translate("Cancel"), 1, o->W - 12 - 3 * 80 - 16, by, o->W - 12 - 2 * 80 - 16, by + 34);
 }
 
-
 static int apply_all(Opt* o)
 {
   int ok = 1;
@@ -471,6 +484,7 @@ static int apply_all(Opt* o)
     snprintf(cfg.main_db, sizeof(cfg.main_db), "%s", o->dbpath[0]);
     snprintf(cfg.extra_db, sizeof(cfg.extra_db), "%s", o->dbpath[1]);
     snprintf(cfg.custom_db, sizeof(cfg.custom_db), "%s", o->dbpath[2]);
+    snprintf(cfg.vt_key, sizeof(cfg.vt_key), "%s", o->dbpath[3]);
     cfg.has_prefs = 1;
     snprintf(cfg.language, sizeof(cfg.language), "%s", o->lang_cur);
     cfg.deep = o->scan.deep;           cfg.heuristic = o->scan.heuristic;
@@ -497,6 +511,7 @@ static int apply_all(Opt* o)
     }
   }
 
+  vt_set_api_key(o->dbpath[3]);
   if (o->host.set_scan && !o->host.set_scan(o->host.user, &o->scan)) {
     snprintf(o->msg, sizeof(o->msg), translate("Saved, but could not apply the scan options."));
     ok = 0;
@@ -593,6 +608,7 @@ static void set_page(Opt* o, int page)
   o->about_scroll = 0;
   o->dd_open = 0;
   o->hov = -1;
+  o->dbfocus = -1;
   build_items(o);
   redraw(o);
 }
@@ -968,7 +984,7 @@ static void activate(Opt* o, int id)
   case ID_BUF_INC:  o->opt.buffer_size = size_step(o->opt.buffer_size, 1); break;
   case ID_FBUF_DEC: o->opt.file_buffer_size = size_step(o->opt.file_buffer_size, -1); break;
   case ID_FBUF_INC: o->opt.file_buffer_size = size_step(o->opt.file_buffer_size, 1); break;
-  case ID_PATH_MAIN: case ID_PATH_EXTRA: case ID_PATH_CUSTOM:
+  case ID_PATH_MAIN: case ID_PATH_EXTRA: case ID_PATH_CUSTOM: case ID_PATH_VT:
     o->dbfocus = id - ID_PATH_MAIN; break;
   case ID_BROWSE_MAIN: case ID_BROWSE_EXTRA: case ID_BROWSE_CUSTOM: {
     int n = id - ID_BROWSE_MAIN;
@@ -979,7 +995,11 @@ static void activate(Opt* o, int id)
     }
     break;
   }
- 
+  case ID_PASTE_VT:
+    o->dbpath[3][0] = 0;                       /* replace, not append */
+    paste_append(o->dbpath[3], sizeof(o->dbpath[3]));
+    break;
+
   case ID_OK:       if (apply_all(o)) finish(o, OPTIONS_RESULT_NONE); break;
   case ID_APPLY:    apply_all(o); break;
   case ID_CANCEL:   finish(o, OPTIONS_RESULT_NONE); break;
@@ -1008,7 +1028,7 @@ static void activate(Opt* o, int id)
   case ID_COPY_BOX: {
     char src[4096], dst[6144];
     snprintf(src, sizeof(src), translate("Detect It Easy - cdie\n%s\n%s\n%s\n%s\n\n%s"),
-      o->verline, o->buildline, ABOUT_COPYRIGHT_OLD, o->copyline, ABOUT_BOX);
+      o->verline, o->buildline, o->copyline, ABOUT_BOX);
     to_crlf(src, dst, sizeof(dst));
     if (o->host.copy_text && o->host.copy_text(o->host.user, dst))
       snprintf(o->aboutmsg, sizeof(o->aboutmsg), translate("Copied to the clipboard."));
@@ -1108,6 +1128,39 @@ static void on_wheel(void* u, int x, int y, int delta, int mods)
   }
 }
 
+static int ctrl_down(void)
+{
+#ifdef _WIN32
+  return (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+#else
+  return 0;
+#endif
+}
+
+static void paste_append(char* s, size_t cap)
+{
+#ifdef _WIN32
+  if (!OpenClipboard(NULL)) return;
+  {
+    HANDLE h = GetClipboardData(CF_UNICODETEXT);
+    const WCHAR* w = h ? (const WCHAR*)GlobalLock(h) : NULL;
+    if (w) {
+      char u8[512];
+      int len = WideCharToMultiByte(CP_UTF8, 0, w, -1, u8, sizeof(u8), NULL, NULL);
+      GlobalUnlock(h);
+      if (len > 0) {
+        size_t m = strlen(u8), n = strlen(s);
+        while (m && (u8[m - 1] == '\r' || u8[m - 1] == '\n' || u8[m - 1] == ' ')) u8[--m] = 0;
+        if (n + m + 1 < cap) memcpy(s + n, u8, m + 1);
+      }
+    }
+  }
+  CloseClipboard();
+#else
+  (void)s; (void)cap;
+#endif
+}
+
 static void on_key(void* u, int key, uint32_t ch, int mods)
 {
   Opt* o = (Opt*)u;
@@ -1125,21 +1178,27 @@ static void on_key(void* u, int key, uint32_t ch, int mods)
   }
   if (key == PL_KEY_ESC) { finish(o, OPTIONS_RESULT_NONE); return; }
 
-  if (o->page == PG_DB && o->dbfocus >= 0) {
+  if ((o->page == PG_DB || o->page == PG_VT) && o->dbfocus >= 0) {
     char* s = o->dbpath[o->dbfocus];
     size_t n = strlen(s);
     if (key == PL_KEY_ENTER) { o->dbfocus = -1; redraw(o); return; }
-    if (ch == 8) { 
+    if (ch == 22 || ((ch == 'v' || ch == 'V' || key == 'V') && ctrl_down())) {   /* Ctrl+V */
+      paste_append(s, sizeof(o->dbpath[0]));
+      if (o->dbfocus < 3) o->dbdirty = 1;
+      redraw(o); return;
+    }
+    if (ch == 8) {
       while (n > 0 && ((unsigned char)s[n - 1] & 0xC0) == 0x80) --n;
       if (n > 0) s[n - 1] = 0;
-      o->dbdirty = 1; redraw(o); return;
+      if (o->dbfocus < 3) o->dbdirty = 1;
+      redraw(o); return;
     }
-    if (ch >= 32 && ch != 127 && n + 4 < sizeof(o->dbpath[0])) {
+    if (ch >= 32 && ch != 127 && n + 4 < (o->dbfocus == 3 ? 120 : sizeof(o->dbpath[0]))) {
       if (ch < 0x80) { s[n++] = (char)ch; }
       else if (ch < 0x800) { s[n++] = (char)(0xC0 | (ch >> 6)); s[n++] = (char)(0x80 | (ch & 63)); }
       else if (ch < 0x10000) { s[n++] = (char)(0xE0 | (ch >> 12)); s[n++] = (char)(0x80 | ((ch >> 6) & 63)); s[n++] = (char)(0x80 | (ch & 63)); }
       else { s[n++] = (char)(0xF0 | (ch >> 18)); s[n++] = (char)(0x80 | ((ch >> 12) & 63)); s[n++] = (char)(0x80 | ((ch >> 6) & 63)); s[n++] = (char)(0x80 | (ch & 63)); }
-      s[n] = 0; o->dbdirty = 1; redraw(o); return;
+      s[n] = 0; if (o->dbfocus < 3) o->dbdirty = 1; redraw(o); return;
     }
     return;
   }
@@ -1217,12 +1276,16 @@ int options_show(xxwidgets_app* app, xxwidgets_widget* owner,
   o->W = 760; o->H = 540; o->hov = -1; o->navhov = -1;
   o->dbfocus = -1;
   {
+    CdieConfig kc;
+    if (config_load(&kc)) snprintf(o->dbpath[3], sizeof(o->dbpath[3]), "%s", kc.vt_key);
+  }
+  {
     const char* ver = o->host.get_version ? o->host.get_version(o->host.user) : NULL;
     snprintf(o->verline, sizeof(o->verline), translate("Current version: %s"),
       ver && ver[0] ? ver : translate("unknown"));
   }
   snprintf(o->buildline, sizeof(o->buildline), translate("Build date: %s"), __DATE__);
-  snprintf(o->copyline, sizeof(o->copyline), translate("Copyright (C) 2012-%s Hors"), __DATE__ + 7);
+  snprintf(o->copyline, sizeof(o->copyline), translate("Copyright (C) hors (2026) (core), devX-cipher(2026) (GUI)"), __DATE__ + 7);
   o->have_fonts = o->host.get_fonts &&
     o->host.get_fonts(o->host.user, o->fonts) ? 1 : 0;
   o->have_ctx = o->host.context_get &&

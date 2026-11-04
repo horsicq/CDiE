@@ -1,3 +1,23 @@
+/* Copyright (c) 2026 hors<horsicq@gmail.com>
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
 #define _CRT_SECURE_NO_WARNINGS
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,6 +44,9 @@
 typedef struct { char* key; char* val; } Pair;
 static Pair* s_pairs; static int s_n;
 
+/* ---------- platform helpers ---------- */
+
+// Writes the directory containing the executable (UTF-8, no trailing separator).
 static int exe_dir(char* out, size_t cap) {
   char* slash;
 #ifdef _WIN32
@@ -56,6 +79,8 @@ static FILE* open_utf8(const char* path) {
 #endif
 }
 
+/* ---------- parsing ---------- */
+
 static int hexv(char c) {
   if (c >= '0' && c <= '9') return c - '0';
   if (c >= 'a' && c <= 'f') return c - 'a' + 10;
@@ -63,7 +88,7 @@ static int hexv(char c) {
   return -1;
 }
 
-static void unescape(char* s) {           
+static void unescape(char* s) {           // \n  \\  \xHH
   char* d = s;
   for (; *s; ++s) {
     if (s[0] == '\\' && s[1] == 'n') { *d++ = '\n'; ++s; }
@@ -131,6 +156,9 @@ const char* translate(const char* english) {
   return p && p->val[0] ? p->val : english;
 }
 
+/* ---------- language listing ---------- */
+
+// Reads "@name=" from the file (if present) and reports the language.
 static void report_lang(const char* dir, const char* code,
   void (*add)(const char*, const char*, void*), void* ud) {
   char path[PATH_CAP + 64], name[128], line[512];

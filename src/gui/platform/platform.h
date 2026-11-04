@@ -36,7 +36,7 @@ typedef uint32_t PlColor;                       /* 0xRRGGBB */
   typedef struct PlWidget PlWidget;               /* opaque */
   typedef struct PlWindow PlWindow;               /* opaque */
 
-  enum { PL_TEXT_LEFT = 0, PL_TEXT_CENTER = 1, PL_TEXT_ELLIPSIS = 2 };
+  enum { PL_TEXT_LEFT = 0, PL_TEXT_CENTER = 1, PL_TEXT_ELLIPSIS = 2, PL_TEXT_RIGHT = 4 };
 
   enum { PL_MOD_CTRL = 1, PL_MOD_SHIFT = 2 };
 
