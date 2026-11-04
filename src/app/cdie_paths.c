@@ -43,6 +43,13 @@
 #include <unistd.h>
 #endif
 
+/* The C frontend stores its per-user database under NTInfo/cdie.  Programs
+ * embedding the same updater core (Qt DIE) override only this leaf at build
+ * time; the path selection and its root/portable safety rules stay shared. */
+#ifndef CDIE_USER_DATA_APPLICATION
+#define CDIE_USER_DATA_APPLICATION "cdie"
+#endif
+
 /* xx_fs_path_join allocates with xx_mem; every string cdie hands out is an
  * xx_rt block (see cdie_app.h, "ONE ALLOCATOR"). */
 static char *cdie_paths_join(const char *pLeft, const char *pRight)
@@ -140,9 +147,9 @@ char *cdie_user_data_dir(void)
         if (!pBase) return NULL;
         pResult = cdie_paths_join(pBase,
 #if defined(__APPLE__)
-                                  "Library/Application Support/NTInfo/cdie"
+                                  "Library/Application Support/NTInfo/" CDIE_USER_DATA_APPLICATION
 #else
-                                  ".local/share/NTInfo/cdie"
+                                  ".local/share/NTInfo/" CDIE_USER_DATA_APPLICATION
 #endif
         );
         xx_rt_free(pBase);
@@ -158,11 +165,11 @@ char *cdie_user_data_dir(void)
 #if defined(_WIN32)
     pBase = cdie_paths_getenv("LOCALAPPDATA");
     if (!pBase) return NULL;
-    pResult = cdie_paths_join(pBase, "NTInfo\\cdie");
+    pResult = cdie_paths_join(pBase, "NTInfo\\" CDIE_USER_DATA_APPLICATION);
 #elif defined(__APPLE__)
     pBase = cdie_paths_getenv("HOME");
     if (!pBase) return NULL;
-    pResult = cdie_paths_join(pBase, "Library/Application Support/NTInfo/cdie");
+    pResult = cdie_paths_join(pBase, "Library/Application Support/NTInfo/" CDIE_USER_DATA_APPLICATION);
 #else
     pBase = cdie_paths_getenv("XDG_DATA_HOME");
     /* The XDG specification ignores a relative XDG_DATA_HOME. */
@@ -171,11 +178,11 @@ char *cdie_user_data_dir(void)
         pBase = NULL;
     }
     if (pBase) {
-        pResult = cdie_paths_join(pBase, "NTInfo/cdie");
+        pResult = cdie_paths_join(pBase, "NTInfo/" CDIE_USER_DATA_APPLICATION);
     } else {
         pBase = cdie_paths_getenv("HOME");
         if (!pBase) return NULL;
-        pResult = cdie_paths_join(pBase, ".local/share/NTInfo/cdie");
+        pResult = cdie_paths_join(pBase, ".local/share/NTInfo/" CDIE_USER_DATA_APPLICATION);
     }
 #endif
     xx_rt_free(pBase);

@@ -25,6 +25,10 @@
 #define _POSIX_C_SOURCE 200809L
 #endif
 
+#if !defined(_WIN32) && !defined(_XOPEN_SOURCE)
+#define _XOPEN_SOURCE 700
+#endif
+
 #if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
 #define _DARWIN_C_SOURCE
 #endif
@@ -173,6 +177,54 @@ static char *upd_expand_path(const char *pValue)
     }
     return upd_dup(pValue);
 }
+
+#if defined(_WIN32)
+/* A UTF-8 filesystem path for Win32 APIs, including the extended prefix so
+ * the lock participates in the same long-path transaction as xxfclib's I/O
+ * and filesystem operations. */
+static WCHAR *upd_windows_api_path(const char *pPath)
+{
+    WCHAR *pText = (WCHAR *)xx_rt_utf8_to_utf16(pPath);
+    WCHAR *pFull;
+    WCHAR *pResult;
+    DWORD nNeeded;
+    DWORD nLength;
+    size_t nSkip;
+    size_t nPrefix;
+    size_t i;
+
+    if (!pText) return NULL;
+    if (pText[0] == L'\\' && pText[1] == L'\\' && pText[2] == L'?' && pText[3] == L'\\') return pText;
+    nNeeded = GetFullPathNameW(pText, 0, NULL, NULL);
+    if (!nNeeded) {
+        xx_rt_free(pText);
+        return NULL;
+    }
+    pFull = (WCHAR *)xx_rt_malloc(((size_t)nNeeded + 1U) * sizeof(WCHAR));
+    if (!pFull) {
+        xx_rt_free(pText);
+        return NULL;
+    }
+    nLength = GetFullPathNameW(pText, nNeeded + 1U, pFull, NULL);
+    xx_rt_free(pText);
+    if (!nLength || nLength > nNeeded) {
+        xx_rt_free(pFull);
+        return NULL;
+    }
+    nSkip = pFull[0] == L'\\' && pFull[1] == L'\\' ? 2U : 0U;
+    nPrefix = nSkip ? 8U : 4U;
+    pResult = (WCHAR *)xx_rt_malloc((nPrefix + (size_t)nLength - nSkip + 1U) * sizeof(WCHAR));
+    if (pResult) {
+        static const WCHAR sLocal[] = L"\\\\?\\";
+        static const WCHAR sUnc[] = L"\\\\?\\UNC\\";
+        const WCHAR *pHead = nSkip ? sUnc : sLocal;
+        for (i = 0; i < nPrefix; ++i) pResult[i] = pHead[i];
+        for (i = nSkip; i <= (size_t)nLength; ++i) pResult[nPrefix + i - nSkip] = pFull[i];
+    }
+    xx_rt_free(pFull);
+    return pResult;
+}
+#endif
 
 /* The path in a form two spellings of one folder share: absolute, '/'
  * separators, "." and ".." resolved where the system can, no trailing
@@ -771,12 +823,14 @@ static cdie_update_status upd_query_source(const cdie_update_config *pConfig, cd
         } else if (status == XX_GITHUB_ERROR_CANCELLED) {
             result = upd_github_failure(pInfo, pGh, status, "Cannot read the release");
         } else if ((release_url.asset && status != XX_GITHUB_ERROR_NETWORK) ||
-                   (!release_url.latest && (status == XX_GITHUB_ERROR_RATE_LIMIT || status == XX_GITHUB_ERROR_API ||
-                                            status == XX_GITHUB_ERROR_AUTH || status == XX_GITHUB_ERROR_RESPONSE))) {
+                   (!release_url.latest && (status == XX_GITHUB_ERROR_RATE_LIMIT || status == XX_GITHUB_ERROR_AUTH))) {
             /* The API is unavailable (most often the 60 requests an hour an
-             * anonymous address gets), but the download addresses of a tagged
-             * release do not need it. A download address given directly is
-             * used as is even where no API answers it at all (a mirror). */
+             * anonymous address gets, or an authentication policy), but the
+             * download addresses of a tagged release do not need it. Invalid
+             * JSON and HTTP 5xx answers are not equivalent: silently deriving
+             * a download after either would hide a broken or hostile metadata
+             * service. A download address given directly is still used as is
+             * even where no API answers it at all (a mirror). */
             char *pArchiveUrl = xx_github_release_download_url(&release_url, release_url.tag, pArchive);
             char *pChecksumUrl = pChecksumName ? xx_github_release_download_url(&release_url, release_url.tag, pChecksumName) : NULL;
 
@@ -1067,7 +1121,7 @@ static cdie_update_status upd_lock_acquire(const char *pDir, upd_lock *pLock)
 {
     char *pPath = upd_join(pDir, UPD_LOCK_NAME);
 #if defined(_WIN32)
-    void *pWide = pPath ? xx_rt_utf8_to_utf16(pPath) : NULL;
+    void *pWide = pPath ? upd_windows_api_path(pPath) : NULL;
     DWORD nError;
 
     pLock->handle = INVALID_HANDLE_VALUE;
@@ -1085,7 +1139,7 @@ static cdie_update_status upd_lock_acquire(const char *pDir, upd_lock *pLock)
      * system drive does that for ordinary users. */
     if (nError == ERROR_ACCESS_DENIED) {
         char *pAgain = upd_join(pDir, UPD_LOCK_NAME);
-        void *pAgainWide = pAgain ? xx_rt_utf8_to_utf16(pAgain) : NULL;
+        void *pAgainWide = pAgain ? upd_windows_api_path(pAgain) : NULL;
         int bExists = pAgainWide && GetFileAttributesW((LPCWSTR)pAgainWide) != INVALID_FILE_ATTRIBUTES;
         xx_rt_free(pAgainWide);
         xx_rt_free(pAgain);
