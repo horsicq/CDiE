@@ -46,14 +46,15 @@ extern "C" {
 #include "controls/bottombar.h"
 #include "controls/treeview.h"
 #include "controls/hexviewer.h"
+#include "controls/disasmview.h"
+#include "panels/signatures.h"
+#include "panels/strings.h"
+#include "panels/entropy.h"
+#include "panels/sectionsview.h"
+#include "core/virustotal.h"
 #include "core/tray.h"
 #include "core/dlwatch.h"
 }
-
-#ifndef CDIE_MAC_HAS_DIALOGS
-#define signatures_show(app, win) set_status("Signature viewer is not available on macOS yet.")
-#define strings_show(app, win, path) set_status("Strings viewer is not available on macOS yet.")
-#endif
 
 /* Mac builds are not Store/VSIX builds; there is no Explorer context menu */
 #define CDIE_SHOW_UPDATES 1
@@ -77,8 +78,15 @@ static Infobar* g_infobar_wnd;
 static Bottombar* g_bottombar;
 static ResultsTree* g_tree;
 static HexViewer* g_hex;
+static DisasmView* g_dasm;
+static EntropyView* g_entropy;
+static VtView* g_vt;
+static SecView* g_sec;
+static SigView* g_sig;
+static StringsView* g_strv;
 static int g_page = NAV_OVERVIEW;
 static int g_hexFd = -1;
+static uint64_t g_hexSize;
 
 static int  g_running, g_pending;
 static int  g_startMonitor;
@@ -194,6 +202,7 @@ static void hex_close(void)
 {
     if (g_hexFd >= 0) close(g_hexFd);
     g_hexFd = -1;
+    g_hexSize = 0;
 }
 
 static void hex_open(const char* utf8_path)
@@ -203,7 +212,31 @@ static void hex_open(const char* utf8_path)
     g_hexFd = open(utf8_path, O_RDONLY);
     if (g_hexFd < 0) return;
     if (fstat(g_hexFd, &st) != 0) { hex_close(); return; }
-    if (g_hex) hexview_set_source(g_hex, (uint64_t)st.st_size, hex_read, NULL, 0);
+    g_hexSize = (uint64_t)st.st_size;
+    if (g_hex) hexview_set_source(g_hex, g_hexSize, hex_read, NULL, 0);
+}
+
+static void load_views(const char* path)
+{
+    hex_open(path);
+    if (g_dasm) {
+        if (g_hexFd >= 0) disasmview_open(g_dasm, hex_read, NULL, g_hexSize);
+        else disasmview_close(g_dasm);
+    }
+    if (g_entropy) {
+        if (g_hexFd >= 0) entropyview_open(g_entropy, path, hex_read, NULL, g_hexSize);
+        else entropyview_close(g_entropy);
+    }
+    if (g_vt)   vtview_set_file(g_vt, path);
+    if (g_sec)  secview_set_file(g_sec, path);
+    if (g_strv) stringsview_set_file(g_strv, path);
+}
+
+static void goto_entropy(void* u)
+{
+    (void)u;
+    g_page = NAV_ENTROPY;
+    layout();
 }
 
 typedef struct {
@@ -376,7 +409,7 @@ static void do_scan(void)
         update_chrome_after_scan(path, type);
         free(g_lastPath);
         g_lastPath = copy_utf8(path);
-        hex_open(path);
+        load_views(path);
     }
     else {
         set_status("Cannot open the file.");
@@ -477,6 +510,7 @@ static void opt_db_changed(void* u)
 {
     (void)u;
     clear_scan();
+    if (g_sig) sigview_reload(g_sig);
     set_status_fmt("Database reloaded: %d signatures. Choose a file and press Scan.",
         gui_backend_signature_count());
 }
@@ -686,11 +720,18 @@ static void layout(void)
         int ty = cy + 4, th = H - cy - BOTTOMBAR_H - 8;
         if (tw < 40) tw = 40;
         if (th < 40) th = 40;
+        int on_tree = (g_page != NAV_HEX && g_page != NAV_DISASM && g_page != NAV_ENTROPY &&
+            g_page != NAV_VIRUSTOTAL && g_page != NAV_SECTIONS &&
+            g_page != NAV_SIGNATURES && g_page != NAV_STRINGS);
         if (g_tree)
-            pl_widget_set_rect(resultstree_widget(g_tree), tx, ty,
-                g_page == NAV_HEX ? 0 : tw, g_page == NAV_HEX ? 0 : th);
-        if (g_hex)
-            hexview_set_rect(g_hex, g_page == NAV_HEX ? tx : -20000, ty, tw, th);
+            pl_widget_set_rect(resultstree_widget(g_tree), on_tree ? tx : -20000, ty, tw, th);
+        if (g_hex)     hexview_set_rect(g_hex, g_page == NAV_HEX ? tx : -20000, ty, tw, th);
+        if (g_dasm)    disasmview_set_rect(g_dasm, g_page == NAV_DISASM ? tx : -20000, ty, tw, th);
+        if (g_entropy) entropyview_set_rect(g_entropy, g_page == NAV_ENTROPY ? tx : -20000, ty, tw, th);
+        if (g_vt)      vtview_set_rect(g_vt, g_page == NAV_VIRUSTOTAL ? tx : -20000, ty, tw, th);
+        if (g_sec)     secview_set_rect(g_sec, g_page == NAV_SECTIONS ? tx : -20000, ty, tw, th);
+        if (g_sig)     sigview_set_rect(g_sig, g_page == NAV_SIGNATURES ? tx : -20000, ty, tw, th);
+        if (g_strv)    stringsview_set_rect(g_strv, g_page == NAV_STRINGS ? tx : -20000, ty, tw, th);
     }
 
     g_minWindowWidth = SIDEBAR_W + 520;
@@ -710,13 +751,27 @@ static void on_nav(void* user, int nav_id)
 {
     (void)user;
     switch (nav_id) {
-    case NAV_OPTIONS:    g_pending = ACTION_OPTIONS;    break;
-    case NAV_SIGNATURES: g_pending = ACTION_SIGNATURES; break;
-    case NAV_STRINGS:    g_pending = ACTION_STRINGS;    break;
+    case NAV_OPTIONS:
+        g_pending = ACTION_OPTIONS;
+        break;
+    case NAV_SIGNATURES:
+        g_page = nav_id; layout();
+        if (g_sig) sigview_activate(g_sig);
+        break;
+    case NAV_STRINGS:
+        g_page = nav_id; layout();
+        if (g_strv) stringsview_activate(g_strv);
+        break;
+    case NAV_VIRUSTOTAL:
+        g_page = nav_id; layout();
+        if (g_vt) vtview_refresh(g_vt);
+        break;
     case NAV_OVERVIEW:
+    case NAV_SECTIONS:
     case NAV_HEX:
-        g_page = nav_id;
-        layout();
+    case NAV_DISASM:
+    case NAV_ENTROPY:
+        g_page = nav_id; layout();
         break;
     default: break;
     }
@@ -838,7 +893,21 @@ static int create_controls(void)
     g_bottombar = bottombar_create(parent, SIDEBAR_W, 500, 800, BOTTOMBAR_H, NULL, NULL);
     g_tree = resultstree_create(parent, SIDEBAR_W, 0, 100, 100);
     g_hex = hexview_create(parent, NULL, SIDEBAR_W, 0, 0, 0);
-    if (g_hex) hexview_set_callbacks(g_hex, NULL, opt_copy_text, NULL);
+        if (g_hex) hexview_set_callbacks(g_hex, NULL, opt_copy_text, NULL);
+    g_dasm = disasmview_create(parent, NULL, SIDEBAR_W, 0, 0, 0);
+    if (g_dasm) disasmview_set_status_callback(g_dasm, mon_set_status, NULL);
+    g_entropy = entropyview_create(parent, SIDEBAR_W, 0, 0, 0);
+    if (g_entropy) entropyview_set_callbacks(g_entropy, opt_copy_text, NULL);
+    g_vt = vtview_create(parent, SIDEBAR_W, 0, 0, 0);
+    if (g_vt) vtview_set_callbacks(g_vt, opt_copy_text, NULL);
+    g_sec = secview_create(parent, SIDEBAR_W, 0, 0, 0);
+    if (g_sec) secview_set_callbacks(g_sec, goto_entropy, NULL);
+    g_sig = sigview_create(parent, SIDEBAR_W, 0, 0, 0);
+    g_strv = stringsview_create(parent, SIDEBAR_W, 0, 0, 0);
+    {
+        CdieConfig lc;
+        if (config_load(&lc)) vt_set_api_key(lc.vt_key);
+    }
 
     if (!g_sidebar || !g_header_wnd || !g_infobar_wnd || !g_bottombar || !g_tree || !g_hex) {
         @autoreleasepool {
@@ -1107,11 +1176,6 @@ extern "C" int gui_run(void)
                 case ACTION_ABOUT:          do_about();          break;
                 case ACTION_MONITOR:        dlwatch_set_enabled(!dlwatch_enabled()); break;
                 case ACTION_DATABASE_PATHS: do_options_window(OPTIONS_PAGE_DATABASES); break;
-                case ACTION_SIGNATURES:     signatures_show(g_app, g_window); break;
-                case ACTION_STRINGS:
-                    if (g_lastPath) strings_show(g_app, g_window, g_lastPath);
-                    else set_status("Scan a file first to view its strings.");
-                    break;
                 default: break;
                 }
                 if (g_sidebar && sidebar_get_selected(g_sidebar) != g_page)
@@ -1120,6 +1184,7 @@ extern "C" int gui_run(void)
         }
 
 finish:
+        if (g_vt) vtview_cancel(g_vt);
         hex_close();
         dlwatch_shutdown();
         tray_remove();
