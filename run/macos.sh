@@ -4,7 +4,7 @@
 #
 # Every .c / .mm under src except the console entry points is compiled in,
 # including src/gui, minus the Win32 / GTK / Linux-only files listed below.
-# Dependencies (dep/xxwidgets, dep/xxfclib) are built with CMake into
+# Dependencies (dep/xxwidgets, dep/xxfclib, dep/cdisasm) are built with CMake into
 # dep/<name>/build_macos if no prebuilt .a is found there.
 #
 # Usage:  run/build_macos_gui.sh
@@ -39,8 +39,10 @@ esac
 
 XXW_INC="$DEP/xxwidgets/include"
 XXF_INC="$DEP/xxfclib/include"
+CDIS_INC="$DEP/cdisasm/include"
 [ -f "$XXW_INC/xxwidgets/xxwidgets.h" ] || { echo "ERROR: missing $XXW_INC/xxwidgets/xxwidgets.h"; exit 1; }
 [ -f "$XXF_INC/xxfclib/die_engine/die_engine.h" ] || { echo "ERROR: missing die_engine.h under $XXF_INC"; exit 1; }
+[ -f "$CDIS_INC/cdisasm/cdisasm.h" ] || { echo "ERROR: missing cdisasm.h under $CDIS_INC"; exit 1; }
 
 # --- find_lib <search root> <pattern> : first match, searching build_macos only
 find_lib() { find "$1/build_macos" -type f -name "$2" 2>/dev/null | head -n 1; }
@@ -63,9 +65,10 @@ build_dep() {
 }
 
 if [ -n "$REBUILD_DEPS" ]; then
-    XXW_LIB=; XXF_LIB=
+    XXW_LIB=; XXF_LIB=; CDIS_LIB=
     build_dep "$DEP/xxwidgets" xxwidgets
     build_dep "$DEP/xxfclib"
+    [ -f "$DEP/cdisasm/CMakeLists.txt" ] && build_dep "$DEP/cdisasm"
 fi
 
 if [ -z "$XXW_LIB" ]; then XXW_LIB=$(find_lib "$DEP/xxwidgets" 'libxxwidgets*.a'); fi
@@ -84,7 +87,14 @@ if [ -z "$XXF_LIB" ]; then
 fi
 [ -n "$XXF_LIB" ] || { echo "ERROR: still no *die_engine*.a under $DEP/xxfclib/build_macos"; exit 1; }
 
+# cdisasm may already have been built by xxfclib; only build it ourselves if not found
 if [ -z "$CDIS_LIB" ]; then CDIS_LIB=$(find "$DEP" -path '*/build_macos/*' -name '*cdisasm*.a' 2>/dev/null | head -n 1); fi
+if [ -z "$CDIS_LIB" ] && [ -f "$DEP/cdisasm/CMakeLists.txt" ]; then
+    echo "cdisasm lib not found - building it..."
+    build_dep "$DEP/cdisasm"
+    CDIS_LIB=$(find "$DEP/cdisasm/build_macos" -type f -name '*cdisasm*.a' 2>/dev/null | head -n 1)
+fi
+
 echo "Architecture        : $ARCH (min macOS $MIN_MACOS)"
 echo "Using xxwidgets lib : $XXW_LIB"
 echo "Using die_engine lib: $XXF_LIB"
@@ -92,31 +102,6 @@ if [ -n "$CDIS_LIB" ]; then echo "Using cdisasm lib   : $CDIS_LIB"
 else echo "WARNING: no *cdisasm*.a found - link may fail with cdisasm_x86_* unresolved."; fi
 
 mkdir -p "$OUT"
-
-# --- cdisasm headers: the source does #include <cdisasm/cdisasm.h>
-# Override with: CDIS_INC=/path/to/folder/that/contains/cdisasm
-CDIS_INC_FLAGS=()
-if [ -z "$CDIS_INC" ]; then
-    CDIS_HDR=$(find "$ROOT" -name .git -prune -o -type f -name cdisasm.h -print 2>/dev/null | head -n 1)
-    if [ -n "$CDIS_HDR" ]; then
-        CDIS_HDR_DIR=$(dirname "$CDIS_HDR")
-        if [ "$(basename "$CDIS_HDR_DIR")" = "cdisasm" ]; then
-            CDIS_INC=$(dirname "$CDIS_HDR_DIR")
-        else
-            echo "cdisasm.h is in $CDIS_HDR_DIR, not a 'cdisasm' folder - creating a shim."
-            mkdir -p "$OUT/shim/cdisasm"
-            printf '#include "%s"\n' "$CDIS_HDR" > "$OUT/shim/cdisasm/cdisasm.h"
-            CDIS_INC="$OUT/shim"
-            CDIS_INC_FLAGS+=(-I"$CDIS_HDR_DIR")
-        fi
-    fi
-fi
-if [ -n "$CDIS_INC" ]; then
-    echo "Using cdisasm inc   : $CDIS_INC"
-    CDIS_INC_FLAGS+=(-I"$CDIS_INC")
-else
-    echo "WARNING: cdisasm.h not found under $ROOT - compile will fail."
-fi
 
 # --- Sources: engine (minus entry points and gui dir) + gui (minus other platforms)
 SOURCES=()
@@ -142,8 +127,7 @@ done < <(find "$GUI" -type f \( -name '*.c' -o -name '*.mm' -o -name '*.m' \) | 
 echo "[1/2] compiling ${#SOURCES[@]} sources ($CC, $ARCH)..."
 CFLAGS=(-O2 -Wall -DNDEBUG -DXXWIDGETS_STATIC -DXXFC_STATIC
     -arch "$ARCH" -mmacosx-version-min="$MIN_MACOS" -fobjc-arc
-    -I"$SRC" -I"$GUI" -I"$XXW_INC" -I"$XXF_INC")
-CFLAGS+=(${CDIS_INC_FLAGS[@]+"${CDIS_INC_FLAGS[@]}"})
+    -I"$SRC" -I"$GUI" -I"$XXW_INC" -I"$XXF_INC" -I"$CDIS_INC")
 rm -rf "$OUT/obj"; mkdir -p "$OUT/obj"
 OBJECTS=()
 i=0
