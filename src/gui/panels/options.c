@@ -30,6 +30,7 @@
 #include "core/i18n.h"
 #include "theme/theme.h"
 #include "core/virustotal.h"
+#include "panels/versions.h"
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -49,8 +50,7 @@
 #define DD_MAXVIS 8
 
 
-enum { PG_SCAN, PG_DB, PG_OPT, PG_FONTS, PG_LANG, PG_VT, PG_CTX, PG_UPDATE, PG_ABOUT, PG_COUNT };
-
+enum { PG_SCAN, PG_DB, PG_OPT, PG_FONTS, PG_LANG, PG_VT, PG_CTX, PG_UPDATE, PG_VERSIONS, PG_ABOUT, PG_COUNT };
 enum {
   IK_HEAD, IK_TEXT, IK_NOTE, IK_CHECK, IK_BTN, IK_ACCENT, IK_VALUE, IK_PATH, IK_FVAL, IK_LVAL,
   IK_PARA, IK_SCROLL 
@@ -72,6 +72,7 @@ enum {
   ID_LANGVAL,
   ID_CTX_TOGGLE,
   ID_CHECK_UPDATE,
+  ID_OPEN_VERSIONS,
   ID_OPEN_SITE, ID_OPEN_GITHUB, ID_OPEN_RELEASES, ID_COPY_BOX,
   ID_OK, ID_CANCEL, ID_APPLY
 };
@@ -119,7 +120,7 @@ typedef struct Opt {
 static Opt* s_opt;
 
 static const char* s_title[PG_COUNT] =
-{ "Scan", "Databases", "Optimization", "Fonts", "Language", "VirusTotal", "Context menu", "Update", "About" };
+{ "Scan", "Databases", "Optimization", "Fonts", "Language", "VirusTotal", "Context menu", "Update", "Version history", "About" };
 static const char* s_sub[PG_COUNT] = {
   "How files are scanned and how results are shown",
   "Signature databases used by the scan engine",
@@ -129,6 +130,7 @@ static const char* s_sub[PG_COUNT] = {
   "API key for file reputation lookups",
   "Explorer integration",
   "Check for updates",
+  "Install an earlier version from the Microsoft Store",
   "Version, license, and project info"
 };
 
@@ -139,7 +141,7 @@ static int imax(int a, int b) { return a > b ? a : b; }
 static int nav_yoff(Opt* o, int i)
 {
   int pg = o->navpg[i];
-  if (pg == PG_UPDATE || pg == PG_ABOUT) {
+  if (pg == PG_UPDATE || pg == PG_VERSIONS || pg == PG_ABOUT) {
     int below = o->nnav - 1 - i;
     return (o->r_nav.b - o->r_nav.t) - 12 - (below + 1) * NAV_H;
   }
@@ -447,6 +449,14 @@ static void build_items(Opt* o)
     add(o, IK_NOTE, 0, o->updmsg, 1, x, y, x + w, y + 22);
     break;
 
+  case PG_VERSIONS:
+    add(o, IK_HEAD, 0, "INSTALLED VERSION", 1, x, y, x + w, y + 20); y += 28;
+    add(o, IK_TEXT, 0, o->verline, 1, x, y, x + w, y + 26); y += 44;
+    add(o, IK_BTN, ID_OPEN_VERSIONS, "Version history", 1, x, y, x + 170, y + 34); y += 50;
+    add(o, IK_NOTE, 0, "Updates are delivered automatically by the Microsoft Store.", 1, x, y, x + w, y + 22); y += 24;
+    add(o, IK_NOTE, 0, "If a new version causes problems, you can go back to an earlier one here.", 1, x, y, x + w, y + 22);
+    break;
+
   case PG_ABOUT: {
     int bh;
     add(o, IK_HEAD, 0, translate("DETECT IT EASY - CDIE"), 1, x, y, x + w, y + 20); y += 26;
@@ -474,7 +484,7 @@ static void build_items(Opt* o)
 
 static int apply_all(Opt* o)
 {
-  int ok = 1;
+  int ok = 1, nodb = 0;
   o->msg[0] = 0;
 
   {
@@ -522,12 +532,14 @@ static int apply_all(Opt* o)
     ok = 0;
   }
   if (o->dbdirty) {
-    if (!gui_backend_set_db_paths(o->dbpath[0], o->dbpath[1], o->dbpath[2])) {
-      snprintf(o->msg, sizeof(o->msg), translate("Cannot load the main signature database. Check its folder."));
-      return 0;
-    }
+    int loaded = gui_backend_set_db_paths(o->dbpath[0], o->dbpath[1], o->dbpath[2]);
     o->dbdirty = 0;
     if (o->host.db_changed) o->host.db_changed(o->host.user);
+    if (!loaded) {
+      snprintf(o->msg, sizeof(o->msg),
+        translate("Folder saved. No signatures found yet. Download them from the Signatures page."));
+      nodb = 1;
+    }
   }
   if (o->fontsdirty && o->host.set_fonts) {
     if (!o->host.set_fonts(o->host.user, o->fonts)) {
@@ -561,7 +573,7 @@ static int apply_all(Opt* o)
       update_ctxmsg(o);
     }
   }
-  if (ok) snprintf(o->msg, sizeof(o->msg), translate("Settings applied."));
+  if (ok && !nodb) snprintf(o->msg, sizeof(o->msg), translate("Settings applied."));
   return ok;
 }
 
@@ -590,7 +602,6 @@ static void add_stepper(Opt* o, const char* label, int dec, int inc, int val, in
   add(o, IK_BTN, inc, ">", 1, x + 220 + 198, y, x + 220 + 230, y + 30);
   (void)w;
 }
-
 
 static void layout(Opt* o)
 {
@@ -996,13 +1007,26 @@ static void activate(Opt* o, int id)
     break;
   }
   case ID_PASTE_VT:
-    o->dbpath[3][0] = 0;                       /* replace, not append */
+    o->dbpath[3][0] = 0;                      
     paste_append(o->dbpath[3], sizeof(o->dbpath[3]));
     break;
 
   case ID_OK:       if (apply_all(o)) finish(o, OPTIONS_RESULT_NONE); break;
   case ID_APPLY:    apply_all(o); break;
   case ID_CANCEL:   finish(o, OPTIONS_RESULT_NONE); break;
+  case ID_OPEN_VERSIONS:
+#ifdef _WIN32
+  {
+    HWND self = GetActiveWindow();                          
+    HWND mainw = self ? GetWindow(self, GW_OWNER) : NULL;  
+    if (versions_show((void*)self,
+      o->host.get_version ? o->host.get_version(o->host.user) : "") && mainw) {
+      finish(o, OPTIONS_RESULT_NONE);                      
+      PostMessageW(mainw, WM_CLOSE, 0, 0);                  
+    }
+  }
+#endif
+  break;
   case ID_CHECK_UPDATE:
     o->updmsg[0] = 0;
     if (!o->host.check_update ||
@@ -1292,10 +1316,20 @@ int options_show(xxwidgets_app* app, xxwidgets_widget* owner,
     o->host.context_get(o->host.user, &o->ctxenabled) ? 1 : 0;
   o->ctxactual = o->ctxenabled;
   update_ctxmsg(o);
-  if (!config_db_required()) {          
-    snprintf(o->dbpath[0], sizeof(o->dbpath[0]), "%s", gui_backend_main_db_path() ? gui_backend_main_db_path() : "");
-    snprintf(o->dbpath[1], sizeof(o->dbpath[1]), "%s", gui_backend_extra_db_path() ? gui_backend_extra_db_path() : "");
-    snprintf(o->dbpath[2], sizeof(o->dbpath[2]), "%s", gui_backend_custom_db_path() ? gui_backend_custom_db_path() : "");
+  {
+    CdieConfig dc;
+    const char* bm = gui_backend_main_db_path();
+    const char* be = gui_backend_extra_db_path();
+    const char* bc = gui_backend_custom_db_path();
+    int need = config_db_required();
+    config_load(&dc);   /* zeroes dc on failure, so the fields are safe to read */
+
+    snprintf(o->dbpath[0], sizeof(o->dbpath[0]), "%s",
+      dc.main_db[0] ? dc.main_db : (!need && bm ? bm : ""));
+    snprintf(o->dbpath[1], sizeof(o->dbpath[1]), "%s",
+      dc.extra_db[0] ? dc.extra_db : (!need && be ? be : ""));
+    snprintf(o->dbpath[2], sizeof(o->dbpath[2]), "%s",
+      dc.custom_db[0] ? dc.custom_db : (!need && bc ? bc : ""));
   }
 
   o->scan.deep = 1; o->scan.heuristic = 1; o->scan.verbose = 1;
@@ -1310,6 +1344,9 @@ int options_show(xxwidgets_app* app, xxwidgets_widget* owner,
       continue;
 
     if (i == PG_UPDATE && !o->host.updates_available)
+      continue;
+
+    if (i == PG_VERSIONS && o->host.updates_available)
       continue;
 
     if (i == PG_LANG && !o->host.list_languages)

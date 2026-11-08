@@ -1071,10 +1071,9 @@ static int init_backend_with_config(void) {
   int ok = gui_backend_init();
   int have_file = config_load(&cfg);
 
-  if (have_file && cfg.main_db[0]) {
-    if (gui_backend_set_db_paths(cfg.main_db, cfg.extra_db, cfg.custom_db))
-      ok = 1;
-    return ok;
+    if (have_file && cfg.main_db[0]) {
+    gui_backend_set_db_paths(cfg.main_db, cfg.extra_db, cfg.custom_db);
+    return 1;   
   }
 
   if (!config_is_portable())
@@ -1085,10 +1084,10 @@ static int init_backend_with_config(void) {
     const char *e = gui_backend_extra_db_path();
     const char *c = gui_backend_custom_db_path();
     memset(&cfg, 0, sizeof(cfg));
-    snprintf(cfg.main_db, sizeof(cfg.main_db), "%s", m ? m : "");
-    snprintf(cfg.extra_db, sizeof(cfg.extra_db), "%s", e ? e : "");
-    snprintf(cfg.custom_db, sizeof(cfg.custom_db), "%s", c ? c : "");
-    fill_prefs(&cfg);
+     if (m && m[0]) snprintf(cfg.main_db, sizeof(cfg.main_db), "%s", m);
+  if (e && e[0]) snprintf(cfg.extra_db, sizeof(cfg.extra_db), "%s", e);
+  if (c && c[0]) snprintf(cfg.custom_db, sizeof(cfg.custom_db), "%s", c);
+  if (g_prefsReady) fill_prefs(&cfg);
     config_save(&cfg);
   }
   return ok;
@@ -1231,9 +1230,12 @@ extern "C" int gui_run(void) {
     db_ok = init_backend_with_config();
     apply_saved_prefs();
     g_prefsReady = 1;
-    if (db_ok) {
+        if (db_ok && gui_backend_signature_count() == 0) {
+      set_status("No signatures yet. Open Signatures to download the database.");
+    }
+    else if (db_ok) {
       set_status_fmt("Ready. %d signatures loaded. Choose a file or drag one here, then press Scan.",
-                     gui_backend_signature_count());
+        gui_backend_signature_count());
     } else {
       set_status("Main signature database not found. "
                  "Select the database folder in the window that opens.");

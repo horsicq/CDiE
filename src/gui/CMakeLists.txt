@@ -35,7 +35,8 @@ if(WIN32)
         ${CMAKE_CURRENT_LIST_DIR}/panels/entropy.c
         ${CMAKE_CURRENT_LIST_DIR}/panels/signatures.c
         ${CMAKE_CURRENT_LIST_DIR}/panels/strings.c
-        ${CMAKE_CURRENT_LIST_DIR}/panels/ntview.c)
+        ${CMAKE_CURRENT_LIST_DIR}/panels/ntview.c
+        ${CMAKE_CURRENT_LIST_DIR}/panels/versions.c)
 else()
     target_sources(cdie_gui PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/main_gui_gtk.c)
@@ -87,30 +88,37 @@ endif()
 
 if(MSVC)
     foreach(_t die_engine cdisasm xxwidgets)
-    if(TARGET ${_t})
-        target_compile_options(${_t} PRIVATE
-            $<$<CONFIG:Release>:/O1>
-            $<$<CONFIG:Release>:/Oi>
-            $<$<CONFIG:Release>:/Gy>
-            $<$<CONFIG:Release>:/GF>)
-    endif()
-endforeach()
+        if(TARGET ${_t})
+            target_compile_options(${_t} PRIVATE
+                $<$<CONFIG:Release>:/O1>
+                $<$<CONFIG:Release>:/Oi>
+                $<$<CONFIG:Release>:/Gy>
+                $<$<CONFIG:Release>:/GF>
+                $<$<CONFIG:Release>:/Gw>
+                /bigobj)
+            set_property(TARGET ${_t} PROPERTY
+                MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+        endif()
+    endforeach()
+
+    target_compile_definitions(cdie_gui PRIVATE XXWIDGETS_STATIC XXFC_STATIC)
 
     target_link_options(cdie_gui PRIVATE /MANIFEST:NO)
-    target_compile_options(cdie_gui PRIVATE /utf-8
+    target_compile_options(cdie_gui PRIVATE /utf-8 /W3 /bigobj
         $<$<CONFIG:Release>:/O1>
-        $<$<CONFIG:Release>:/Gy>)
+        $<$<CONFIG:Release>:/Gy>
+        $<$<CONFIG:Release>:/Gw>
+        $<$<CONFIG:Release>:/GS->
+        $<$<CONFIG:Release>:/GL>)
     target_link_options(cdie_gui PRIVATE
         $<$<CONFIG:Release>:/OPT:REF>
-        $<$<CONFIG:Release>:/OPT:ICF>)
+        $<$<CONFIG:Release>:/OPT:ICF>
+        $<$<CONFIG:Release>:/LTCG>
+        $<$<CONFIG:Release>:/INCREMENTAL:NO>
+        $<$<CONFIG:Release>:/DEBUG:NONE>)
 
-    if(CDIE_NO_CRT AND NOT BUILD_SHARED_LIBS)
-        set_property(TARGET cdie_gui PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded")
-        if(TARGET xxwidgets)
-            set_property(TARGET xxwidgets PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded")
-        endif()
-        message(STATUS "cdie_gui: xxwidgets frontend with static C runtime")
-    endif()
+    set_property(TARGET cdie_gui PROPERTY
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
 # Add headers so they appear in Solution Explorer (they are not compiled).

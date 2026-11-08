@@ -43,11 +43,13 @@
 
 #define RELEASE_API "https://api.github.com/repos/horsicq/Detect-It-Easy/releases/tags/current-database"
 #define RELEASE_ZIP "https://github.com/horsicq/Detect-It-Easy/releases/download/current-database/db.zip"
+#define RELEASE_ZIP_FALLBACK "https://github.com/horsicq/Detect-It-Easy/archive/refs/heads/master.zip"
 
 enum { JOB_CHECK, JOB_INSTALL };
 
 typedef struct { char name[512]; int isdir; } Ent;
 typedef struct { Updater* u; int total, done; } CopyCtx;
+
 
 static void notify(Updater* u) { if (u->notify) u->notify(u->user); }
 static void set_pct(Updater* u, int p) { if (p != u->pct) { u->pct = p; notify(u); } }
@@ -186,6 +188,11 @@ static int http_get(Updater* u, const char* url, const char* dest, int track)
 
   ses = WinHttpOpen(L"cdie-updater/1.0", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, NULL, NULL, 0);
   if (!ses) goto end;
+  WinHttpSetTimeouts(ses, 10000, 10000, 15000, 30000);
+  {
+    DWORD protos = 0x00000800 /* TLS 1.2 */ | 0x00002000 /* TLS 1.3 if present */;
+    WinHttpSetOption(ses, WINHTTP_OPTION_SECURE_PROTOCOLS, &protos, sizeof(protos));
+  }
   con = WinHttpConnect(ses, host, uc.nPort, 0);
   if (!con) goto end;
   req = WinHttpOpenRequest(con, L"GET", full, NULL, NULL, NULL,
@@ -486,15 +493,49 @@ static int writable_dir(const char* dir)
   return 1;
 }
 
+static int base_is(const char* path, const char* name)
+{
+  const char* p = path + strlen(path);
+  while (p > path && !is_sep(p[-1])) --p;                                                                               
+  return ci_eq(p, name);
+}
+
+static void nest_if_empty(char* path, size_t cap, const char* leaf)
+{
+  size_t n; Ent* e; int cnt;
+  if (!path[0]) return;
+  n = strlen(path);
+  while (n > 1 && is_sep(path[n - 1])) path[--n] = 0;
+  if (base_is(path, leaf)) return;
+  cnt = list_dir(path, &e);
+  free(e);
+  if (cnt == 0) {
+    char t[1200];
+    join_path(t, sizeof(t), path, leaf);
+    snprintf(path, cap, "%s", t);
+  }
+}
+
 static int pick_targets(Updater* u)
 {
   char base[1100];
   if (!u->main_db[0]) return 0;
+  nest_if_empty(u->main_db, sizeof(u->main_db), "db");
+  if (u->extra_db[0]) nest_if_empty(u->extra_db, sizeof(u->extra_db), "db_extra");
+  if (u->custom_db[0]) {
+    nest_if_empty(u->custom_db, sizeof(u->custom_db), "db_custom");
+    mkdirs(u->custom_db);
+  }
   if (!config_user_dir(base, sizeof(base))) return writable_dir(u->main_db);
   if (!writable_dir(u->main_db)) join_path(u->main_db, sizeof(u->main_db), base, "db");
   if (u->extra_db[0] && !writable_dir(u->extra_db))
     join_path(u->extra_db, sizeof(u->extra_db), base, "db_extra");
   return writable_dir(u->main_db);
+}
+
+static int db_present(Updater* u)
+{
+  return u->main_db[0] && count_files(u->main_db, 1) > 0;
 }
 
 static void job_check(Updater* u)
@@ -503,7 +544,20 @@ static void job_check(Updater* u)
   read_version(u);
   if (!temp_dir(tmp, sizeof(tmp))) { fail(u, "No temporary folder available."); return; }
   snprintf(file, sizeof(file), "%scdie_release.json", tmp);
-  if (!http_get(u, RELEASE_API, file, 0)) { fail(u, "Could not reach GitHub. Check your connection."); return; }
+  {
+    int attempt, got_it = 0;
+    for (attempt = 0; attempt < 3 && !got_it && !u->cancel; ++attempt) {
+      if (attempt) {
+#ifdef _WIN32
+        Sleep(1500 * attempt);
+#else
+        usleep(1500000u * (unsigned)attempt);
+#endif
+      }
+      got_it = http_get(u, RELEASE_API, file, 0);
+    }
+    if (!got_it) { fail(u, "Could not reach GitHub (server busy or offline). Try again in a moment."); return; }
+  }
   json = read_all(file);
   del_file(file);
   if (!json) { fail(u, "Could not read the release information."); return; }
@@ -512,7 +566,8 @@ static void job_check(Updater* u)
     snprintf(u->url, sizeof(u->url), "%s", RELEASE_ZIP);
   free(json);
   if (!u->latest[0]) { fail(u, "Could not find the latest database version."); return; }
-  u->phase = !strcmp(u->installed, u->latest) ? UPD_UPTODATE : UPD_READY;
+  if (!db_present(u)) snprintf(u->installed, sizeof(u->installed), "none");
+  u->phase = (!strcmp(u->installed, u->latest) && db_present(u)) ? UPD_UPTODATE : UPD_READY;
 }
 
 static void job_install(Updater* u)
@@ -528,9 +583,23 @@ static void job_install(Updater* u)
   snprintf(work, sizeof(work), "%scdie_db_extract", tmp);
 
   set_label(u, "Downloading database");
-  if (!http_get(u, u->url[0] ? u->url : RELEASE_ZIP, zip, 1)) {
-    if (u->cancel) u->phase = UPD_READY; else fail(u, "Download failed. Check your connection.");
-    return;
+  {
+    int attempt, got_it = 0;
+    for (attempt = 0; attempt < 3 && !got_it && !u->cancel; ++attempt) {
+      if (attempt) {
+#ifdef _WIN32
+        Sleep(2000 * attempt);
+#else
+        usleep(2000000u * (unsigned)attempt);
+#endif
+      }
+      got_it = http_get(u, attempt == 1 ? RELEASE_ZIP_FALLBACK : (u->url[0] ? u->url : RELEASE_ZIP), zip, 1);
+    }
+    if (!got_it) {
+      if (u->cancel) u->phase = UPD_READY;
+      else fail(u, "Download failed. Check your connection.");
+      return;
+    }
   }
 
   set_label(u, "Extracting");
