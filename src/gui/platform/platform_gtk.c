@@ -382,6 +382,42 @@ void pl_image(PlCanvas* c, int x, int y, int w, int h,
   cairo_surface_destroy(s);
 }
 
+void pl_frame_corners(PlCanvas* c, int w, int h, int rr, PlColor bg, PlColor border)
+{
+  int W = w - 1, H = h - 1;
+  int i;
+  if (W < 2 * rr || H < 2 * rr) return;
+
+  /* outer 1px strip, then the straight border edges */
+  pl_fill(c, W, 0, w, h, bg);
+  pl_fill(c, 0, H, w, h, bg);
+  pl_fill(c, rr, 0, W - rr, 1, border);
+  pl_fill(c, rr, H - 1, W - rr, H, border);
+  pl_fill(c, 0, rr, 1, H - rr, border);
+  pl_fill(c, W - 1, rr, W, H - rr, border);
+
+  /* four corners: paint bg outside the arc, then the 1px border ring */
+  for (i = 0; i < 4; ++i) {
+    int cx = (i & 1) ? W - rr : 0;
+    int cy = (i & 2) ? H - rr : 0;
+    cairo_save(c->cr);
+    cairo_rectangle(c->cr, cx, cy, rr, rr);
+    cairo_clip(c->cr);
+
+    cairo_set_fill_rule(c->cr, CAIRO_FILL_RULE_EVEN_ODD);
+    cairo_rectangle(c->cr, cx, cy, rr, rr);
+    rr_path(c->cr, 0, 0, W, H, rr);
+    set_col(c->cr, bg);
+    cairo_fill(c->cr);
+
+    set_col(c->cr, border);
+    cairo_set_line_width(c->cr, 1.0);
+    rr_path(c->cr, 0.5, 0.5, W - 1, H - 1, rr - 0.5);
+    cairo_stroke(c->cr);
+    cairo_restore(c->cr);
+  }
+}
+
 void pl_text(PlCanvas *c, PlFont *f, PlRect r, const char *s, PlColor col, int flags)
 {
     PangoLayout *l = pango_cairo_create_layout(c->cr);
