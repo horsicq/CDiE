@@ -52,7 +52,7 @@ typedef uint32_t NtClr;
 #define CLR_NT_SB_HOT       NT_RGB(0x5B, 0x5F, 0x7B)
 #endif
 
-#define NT_MAX_ROWS 96
+#define NT_MAX_ROWS 320
 #define NT_GROUPS   4
 #define ROW_H       26
 #define HDR_H       32
@@ -76,12 +76,12 @@ typedef uint32_t NtClr;
 enum { M_NONE = 0, M_ENUM, M_TIME, M_FLAGS };
 
 typedef struct {
-	int  group, hdr, dim, kind, idx;  
-	uint64_t foff;                     
-	int  fsize;                       
+	int  group, hdr, dim, kind, idx;
+	uint64_t foff;
+	int  fsize;
 	char off[16];
 	char name[40];
-	char sz[4];
+	char sz[8];
 	char raw[28];
 	char hex[24];
 	char note[128];
@@ -94,9 +94,11 @@ struct NtView {
 	NtGotoFn  on_goto;
 	void* goto_user;
 	int       open[NT_GROUPS];
+	int       fmt;
+	const char* titles[NT_GROUPS];
 	NtRow     rows[NT_MAX_ROWS];
 	int       nrows;
-	char      info[NT_GROUPS][56];
+	char      info[NT_GROUPS][128];
 	char      status[96];
 	PlFont* font, * bold, * fnt_s, * fnt_sb;
 };
@@ -153,7 +155,7 @@ static const NtOpt s_opt[] = {
 	{ "SizeOfHeapReserve", 80, 88, 4, 8, 3 },
 	{ "SizeOfHeapCommit", 84, 96, 4, 8, 3 },
 	{ "LoaderFlags", 88, 104, 4, 4, 0 },
-	{ "NumberOfRvaAndSizes", 92, 108, 4, 4, 5 } 
+	{ "NumberOfRvaAndSizes", 92, 108, 4, 4, 5 }
 };
 
 static const char* s_dirs[16] = {
@@ -353,7 +355,7 @@ static NtRow* add_row(NtView* v, int group, int hdr)
 static void add_hdr(NtView* v, int g)
 {
 	NtRow* r = add_row(v, g, 1);
-	if (r) snprintf(r->name, sizeof r->name, "%s", s_titles[g]);
+	if (r) snprintf(r->name, sizeof r->name, "%s", v->titles[g] ? v->titles[g] : "");
 	v->gcount = 0;
 }
 
@@ -411,7 +413,7 @@ static void set_info(NtView* v, int g, const char* text)
 	snprintf(v->info[g], sizeof v->info[g], "%s", text);
 }
 
-static void build(NtView* v, NtRead rd, void* u, uint64_t size)
+static void build_pe(NtView* v, NtRead rd, void* u, uint64_t size)
 {
 	unsigned char dos[64], nt[512];
 	uint64_t pe, n;
@@ -574,11 +576,555 @@ static void build(NtView* v, NtRead rd, void* u, uint64_t size)
 			fmt_size(sbuf, sizeof sbuf, sz);
 			snprintf(note, sizeof note, "%s - %s (0x%X)", s_dir_desc[i], sbuf, (unsigned)sz);
 		}
-		add_val(v, 3, pe + 24 + dir + 8 * i, s_dirs[i], 8, nt + 24 + dir + 8 * i, h, note, 
+		add_val(v, 3, pe + 24 + dir + 8 * i, s_dirs[i], 8, nt + 24 + dir + 8 * i, h, note,
 			M_NONE, rva == 0 && sz == 0);
 	}
 	snprintf(t, sizeof t, "%d entries", group_count(v, 3));
 	set_info(v, 3, t);
+}
+
+static uint64_t rd_e(const unsigned char* p, int n, int be)
+{
+	uint64_t x = 0;
+	int i;
+	if (be) { for (i = 0; i < n; ++i) x = (x << 8) | p[i]; }
+	else { for (i = n - 1; i >= 0; --i) x = (x << 8) | p[i]; }
+	return x;
+}
+
+static void add_hex_e(NtView* v, int g, uint64_t off, const char* name,
+	const unsigned char* p, int bytes, int be, const char* note, int kind)
+{
+	char t[32];
+	uint64_t val = rd_e(p, bytes, be);
+	snprintf(t, sizeof t, "0x%0*llX", bytes * 2, (unsigned long long)val);
+	add_val(v, g, off, name, bytes, p, t, note, kind, val == 0);
+}
+
+static void rd_cstr(NtRead rd, void* u, uint64_t size, uint64_t off, char* out, size_t cap)
+{
+	size_t n = cap - 1;
+	out[0] = 0;
+	if (off >= size) return;
+	if (off + n > size) n = (size_t)(size - off);
+	if (!n || !rd(u, off, out, n)) { out[0] = 0; return; }
+	out[n] = 0;
+}
+
+static void set_titles(NtView* v, const char* a, const char* b, const char* c, const char* d)
+{
+	v->titles[0] = a; v->titles[1] = b; v->titles[2] = c; v->titles[3] = d;
+}
+
+static const char* elf_type_name(unsigned t)
+{
+	switch (t) {
+	case 0: return "None";
+	case 1: return "Relocatable (REL)";
+	case 2: return "Executable (EXEC)";
+	case 3: return "Shared object / PIE (DYN)";
+	case 4: return "Core dump (CORE)";
+	default: return "Unknown";
+	}
+}
+
+static const char* elf_machine_name(unsigned m)
+{
+	switch (m) {
+	case 0x02:  return "SPARC";
+	case 0x03:  return "x86";
+	case 0x08:  return "MIPS";
+	case 0x14:  return "PowerPC";
+	case 0x15:  return "PowerPC64";
+	case 0x16:  return "S390";
+	case 0x28:  return "ARM";
+	case 0x2B:  return "SPARC V9";
+	case 0x32:  return "IA-64";
+	case 0x3E:  return "x86-64";
+	case 0xB7:  return "AArch64";
+	case 0xF3:  return "RISC-V";
+	case 0x102: return "LoongArch";
+	default:    return "Unknown";
+	}
+}
+
+static const char* elf_osabi_name(unsigned a)
+{
+	switch (a) {
+	case 0:    return "UNIX System V";
+	case 2:    return "NetBSD";
+	case 3:    return "Linux (GNU)";
+	case 6:    return "Solaris";
+	case 9:    return "FreeBSD";
+	case 12:   return "OpenBSD";
+	case 0x61: return "ARM EABI";
+	case 0xFF: return "Standalone";
+	default:   return "Unknown";
+	}
+}
+
+static const char* elf_pt_name(unsigned t)
+{
+	switch (t) {
+	case 0: return "PT_NULL";
+	case 1: return "PT_LOAD";
+	case 2: return "PT_DYNAMIC";
+	case 3: return "PT_INTERP";
+	case 4: return "PT_NOTE";
+	case 5: return "PT_SHLIB";
+	case 6: return "PT_PHDR";
+	case 7: return "PT_TLS";
+	case 0x6474E550u: return "PT_GNU_EH_FRAME";
+	case 0x6474E551u: return "PT_GNU_STACK";
+	case 0x6474E552u: return "PT_GNU_RELRO";
+	case 0x6474E553u: return "PT_GNU_PROPERTY";
+	default: return "PT_OTHER";
+	}
+}
+
+static const char* elf_sht_name(unsigned t)
+{
+	switch (t) {
+	case 0: return "NULL";
+	case 1: return "PROGBITS";
+	case 2: return "SYMTAB";
+	case 3: return "STRTAB";
+	case 4: return "RELA";
+	case 5: return "HASH";
+	case 6: return "DYNAMIC";
+	case 7: return "NOTE";
+	case 8: return "NOBITS";
+	case 9: return "REL";
+	case 11: return "DYNSYM";
+	case 14: return "INIT_ARRAY";
+	case 15: return "FINI_ARRAY";
+	case 0x6FFFFFF6u: return "GNU_HASH";
+	case 0x6FFFFFFDu: return "GNU_VERDEF";
+	case 0x6FFFFFFEu: return "GNU_VERNEED";
+	case 0x6FFFFFFFu: return "GNU_VERSYM";
+	default: return "OTHER";
+	}
+}
+
+static void build_elf(NtView* v, NtRead rd, void* u, uint64_t size)
+{
+	unsigned char eh[64], ph[64], sh[64];
+	int is64, be, trunc = 0;
+	unsigned n, a, o_ph, o_sh, o_fl, o_h, i;
+	unsigned phent, phnum, shent, shnum, shstr;
+	uint64_t phoff, shoff, val, stroff = 0, strsz = 0;
+	char t[128], h[32], note[128], nm[40], fs[8], sb[32];
+
+	n = (unsigned)(size < 64 ? size : 64);
+	if (n < 52 || !rd(u, 0, eh, n)) { set_status(v, "Truncated ELF header."); return; }
+	if ((eh[4] != 1 && eh[4] != 2) || (eh[5] != 1 && eh[5] != 2)) {
+		set_status(v, "Invalid ELF identification bytes.");
+		return;
+	}
+	is64 = eh[4] == 2;
+	be = eh[5] == 2;
+	if (is64 && n < 64) { set_status(v, "Truncated ELF header."); return; }
+
+	a = is64 ? 8 : 4;
+	o_ph = is64 ? 32 : 28;
+	o_sh = is64 ? 40 : 32;
+	o_fl = is64 ? 48 : 36;
+	o_h = is64 ? 52 : 40;
+
+	set_titles(v, "ELF HEADER", "PROGRAM HEADERS", "SECTION HEADERS", NULL);
+
+	add_hdr(v, 0);
+	add_cols(v, 0);
+	add_val(v, 0, 0, "EI_MAGIC", 4, eh, "0x7F454C46", "ELF", M_ENUM, 0);
+	add_val(v, 0, 4, "EI_CLASS", 1, eh + 4, is64 ? "0x02" : "0x01",
+		is64 ? "64-bit" : "32-bit", M_ENUM, 0);
+	add_val(v, 0, 5, "EI_DATA", 1, eh + 5, be ? "0x02" : "0x01",
+		be ? "Big-endian" : "Little-endian", M_ENUM, 0);
+	snprintf(h, sizeof h, "0x%02X", eh[6]);
+	add_val(v, 0, 6, "EI_VERSION", 1, eh + 6, h, "", M_NONE, eh[6] == 0);
+	snprintf(h, sizeof h, "0x%02X", eh[7]);
+	add_val(v, 0, 7, "EI_OSABI", 1, eh + 7, h, elf_osabi_name(eh[7]), M_ENUM, 0);
+	snprintf(h, sizeof h, "0x%02X", eh[8]);
+	add_val(v, 0, 8, "EI_ABIVERSION", 1, eh + 8, h, "", M_NONE, eh[8] == 0);
+
+	val = rd_e(eh + 16, 2, be);
+	add_hex_e(v, 0, 16, "e_type", eh + 16, 2, be, elf_type_name((unsigned)val), M_ENUM);
+	val = rd_e(eh + 18, 2, be);
+	add_hex_e(v, 0, 18, "e_machine", eh + 18, 2, be, elf_machine_name((unsigned)val), M_ENUM);
+	add_hex_e(v, 0, 20, "e_version", eh + 20, 4, be, "", M_NONE);
+	add_hex_e(v, 0, 24, "e_entry", eh + 24, (int)a, be, "Entry point virtual address", M_NONE);
+	add_hex_e(v, 0, o_ph, "e_phoff", eh + o_ph, (int)a, be, "File offset of the program header table", M_NONE);
+	add_hex_e(v, 0, o_sh, "e_shoff", eh + o_sh, (int)a, be, "File offset of the section header table", M_NONE);
+	add_hex_e(v, 0, o_fl, "e_flags", eh + o_fl, 4, be, "", M_NONE);
+	add_hex_e(v, 0, o_h, "e_ehsize", eh + o_h, 2, be, "Size of this header", M_NONE);
+	add_hex_e(v, 0, o_h + 2, "e_phentsize", eh + o_h + 2, 2, be, "Size of one program header", M_NONE);
+	add_hex_e(v, 0, o_h + 4, "e_phnum", eh + o_h + 4, 2, be, "Number of program headers", M_NONE);
+	add_hex_e(v, 0, o_h + 6, "e_shentsize", eh + o_h + 6, 2, be, "Size of one section header", M_NONE);
+	add_hex_e(v, 0, o_h + 8, "e_shnum", eh + o_h + 8, 2, be, "Number of section headers", M_NONE);
+	add_hex_e(v, 0, o_h + 10, "e_shstrndx", eh + o_h + 10, 2, be, "Section that holds the section names", M_NONE);
+
+	snprintf(t, sizeof t, "%s, %s, %d fields", is64 ? "ELF64" : "ELF32",
+		be ? "big-endian" : "little-endian", group_count(v, 0));
+	set_info(v, 0, t);
+
+	phoff = rd_e(eh + o_ph, (int)a, be);
+	shoff = rd_e(eh + o_sh, (int)a, be);
+	phent = (unsigned)rd_e(eh + o_h + 2, 2, be);
+	phnum = (unsigned)rd_e(eh + o_h + 4, 2, be);
+	shent = (unsigned)rd_e(eh + o_h + 6, 2, be);
+	shnum = (unsigned)rd_e(eh + o_h + 8, 2, be);
+	shstr = (unsigned)rd_e(eh + o_h + 10, 2, be);
+
+	if (phoff && phnum && phent >= (is64 ? 56u : 32u)) {
+		unsigned need = is64 ? 56 : 32;
+		add_hdr(v, 1);
+		add_cols(v, 1);
+		for (i = 0; i < phnum; ++i) {
+			uint64_t po = phoff + (uint64_t)i * phent, off, vaddr, fsz;
+			unsigned type, fl;
+			if (i >= 64) { trunc = 1; break; }
+			if (po + need > size || !rd(u, po, ph, need)) break;
+			type = (unsigned)rd_e(ph, 4, be);
+			if (is64) {
+				fl = (unsigned)rd_e(ph + 4, 4, be);
+				off = rd_e(ph + 8, 8, be);
+				vaddr = rd_e(ph + 16, 8, be);
+				fsz = rd_e(ph + 32, 8, be);
+			}
+			else {
+				off = rd_e(ph + 4, 4, be);
+				vaddr = rd_e(ph + 8, 4, be);
+				fsz = rd_e(ph + 16, 4, be);
+				fl = (unsigned)rd_e(ph + 24, 4, be);
+			}
+			snprintf(fs, sizeof fs, "%c%c%c", (fl & 4) ? 'R' : '-',
+				(fl & 2) ? 'W' : '-', (fl & 1) ? 'X' : '-');
+			snprintf(nm, sizeof nm, "%s [%u]", elf_pt_name(type), i);
+			snprintf(h, sizeof h, "0x%08llX", (unsigned long long)vaddr);
+			snprintf(note, sizeof note, "%s  offset 0x%llX  filesz 0x%llX",
+				fs, (unsigned long long)off, (unsigned long long)fsz);
+			add_val(v, 1, po, nm, (int)phent, NULL, h, note, M_NONE, 0);
+		}
+		snprintf(t, sizeof t, "%d entries", group_count(v, 1));
+		set_info(v, 1, t);
+	}
+
+	if (shoff && shnum && shent >= (is64 ? 64u : 40u)) {
+		unsigned need = is64 ? 64 : 40;
+		uint64_t so0 = shoff + (uint64_t)shstr * shent;
+		if (shstr < shnum && so0 + need <= size && rd(u, so0, sh, need)) {
+			stroff = rd_e(sh + (is64 ? 24 : 16), (int)a, be);
+			strsz = rd_e(sh + (is64 ? 32 : 20), (int)a, be);
+		}
+		add_hdr(v, 2);
+		add_cols(v, 2);
+		for (i = 0; i < shnum; ++i) {
+			uint64_t so = shoff + (uint64_t)i * shent, fl, addr, off, sz;
+			unsigned type, nameoff;
+			if (i >= 200) { trunc = 1; break; }
+			if (so + need > size || !rd(u, so, sh, need)) break;
+			nameoff = (unsigned)rd_e(sh, 4, be);
+			type = (unsigned)rd_e(sh + 4, 4, be);
+			if (is64) {
+				fl = rd_e(sh + 8, 8, be);
+				addr = rd_e(sh + 16, 8, be);
+				off = rd_e(sh + 24, 8, be);
+				sz = rd_e(sh + 32, 8, be);
+			}
+			else {
+				fl = rd_e(sh + 8, 4, be);
+				addr = rd_e(sh + 12, 4, be);
+				off = rd_e(sh + 16, 4, be);
+				sz = rd_e(sh + 20, 4, be);
+			}
+			nm[0] = 0;
+			if (strsz && nameoff < strsz)
+				rd_cstr(rd, u, size, stroff + nameoff, nm, sizeof nm);
+			if (!nm[0]) snprintf(nm, sizeof nm, "%s", i ? "(unnamed)" : "(null)");
+			snprintf(fs, sizeof fs, "%c%c%c", (fl & 1) ? 'W' : '-',
+				(fl & 2) ? 'A' : '-', (fl & 4) ? 'X' : '-');
+			fmt_size(sb, sizeof sb, sz);
+			snprintf(h, sizeof h, "0x%08llX", (unsigned long long)addr);
+			snprintf(note, sizeof note, "%s  %s  offset 0x%llX  size %s",
+				elf_sht_name(type), fs, (unsigned long long)off, sb);
+			add_val(v, 2, so, nm, (int)shent, NULL, h, note, M_NONE, type == 0);
+		}
+		snprintf(t, sizeof t, "%d entries", group_count(v, 2));
+		set_info(v, 2, t);
+	}
+
+	if (trunc)
+		set_status(v, "List truncated: first 64 program headers and 200 sections shown.");
+}
+
+static int is_macho_magic(const unsigned char* m)
+{
+	uint32_t x = (uint32_t)rd_e(m, 4, 1);
+	return x == 0xFEEDFACEu || x == 0xFEEDFACFu || x == 0xCEFAEDFEu ||
+		x == 0xCFFAEDFEu || x == 0xCAFEBABEu || x == 0xCAFEBABFu;
+}
+
+static const char* macho_cpu_name(unsigned c)
+{
+	switch (c) {
+	case 7:          return "x86";
+	case 0x01000007: return "x86-64";
+	case 12:         return "ARM";
+	case 0x0100000C: return "ARM64";
+	case 0x0200000C: return "ARM64_32";
+	case 18:         return "PowerPC";
+	case 0x01000012: return "PowerPC64";
+	default:         return "Unknown";
+	}
+}
+
+static const char* macho_type_name(unsigned t)
+{
+	switch (t) {
+	case 1:  return "Object (MH_OBJECT)";
+	case 2:  return "Executable (MH_EXECUTE)";
+	case 3:  return "Fixed VM library";
+	case 4:  return "Core dump (MH_CORE)";
+	case 5:  return "Preloaded executable";
+	case 6:  return "Dynamic library (MH_DYLIB)";
+	case 7:  return "Dynamic linker (MH_DYLINKER)";
+	case 8:  return "Bundle (MH_BUNDLE)";
+	case 9:  return "Dylib stub";
+	case 10: return "Debug symbols (MH_DSYM)";
+	case 11: return "Kernel extension (MH_KEXT_BUNDLE)";
+	default: return "Unknown";
+	}
+}
+
+static const char* macho_lc_name(unsigned c)
+{
+	switch (c) {
+	case 0x1:        return "LC_SEGMENT";
+	case 0x2:        return "LC_SYMTAB";
+	case 0x4:        return "LC_THREAD";
+	case 0x5:        return "LC_UNIXTHREAD";
+	case 0xB:        return "LC_DYSYMTAB";
+	case 0xC:        return "LC_LOAD_DYLIB";
+	case 0xD:        return "LC_ID_DYLIB";
+	case 0xE:        return "LC_LOAD_DYLINKER";
+	case 0xF:        return "LC_ID_DYLINKER";
+	case 0x19:       return "LC_SEGMENT_64";
+	case 0x1B:       return "LC_UUID";
+	case 0x1D:       return "LC_CODE_SIGNATURE";
+	case 0x1E:       return "LC_SEGMENT_SPLIT_INFO";
+	case 0x21:       return "LC_ENCRYPTION_INFO";
+	case 0x22:       return "LC_DYLD_INFO";
+	case 0x24:       return "LC_VERSION_MIN_MACOSX";
+	case 0x25:       return "LC_VERSION_MIN_IPHONEOS";
+	case 0x26:       return "LC_FUNCTION_STARTS";
+	case 0x27:       return "LC_DYLD_ENVIRONMENT";
+	case 0x29:       return "LC_DATA_IN_CODE";
+	case 0x2A:       return "LC_SOURCE_VERSION";
+	case 0x2C:       return "LC_ENCRYPTION_INFO_64";
+	case 0x32:       return "LC_BUILD_VERSION";
+	case 0x80000018u: return "LC_LOAD_WEAK_DYLIB";
+	case 0x8000001Cu: return "LC_RPATH";
+	case 0x8000001Fu: return "LC_REEXPORT_DYLIB";
+	case 0x80000022u: return "LC_DYLD_INFO_ONLY";
+	case 0x80000028u: return "LC_MAIN";
+	case 0x80000033u: return "LC_DYLD_EXPORTS_TRIE";
+	case 0x80000034u: return "LC_DYLD_CHAINED_FIXUPS";
+	default:         return "LC_UNKNOWN";
+	}
+}
+
+static const NtFlag s_mh_flags[] = {
+	{ 0x1, "NOUNDEFS" },{ 0x4, "DYLDLINK" },{ 0x80, "TWOLEVEL" },
+	{ 0x2000, "SUBSECTIONS_VIA_SYMBOLS" },{ 0x8000, "WEAK_DEFINES" },
+	{ 0x10000, "BINDS_TO_WEAK" },{ 0x20000, "ALLOW_STACK_EXECUTION" },
+	{ 0x200000, "PIE" },{ 0x800000, "HAS_TLV_DESCRIPTORS" },
+	{ 0x1000000, "NO_HEAP_EXECUTION" },{ 0x2000000, "APP_EXTENSION_SAFE" }
+};
+
+static void build_macho(NtView* v, NtRead rd, void* u, uint64_t size)
+{
+	unsigned char b[32], lc[80];
+	uint64_t base = 0, co, end, val;
+	uint32_t magic;
+	int be, is64, fat = 0, trunc = 0;
+	unsigned hsz, n, ncmds, sizeofcmds, i, k;
+	char t[128], h[32], note[128], nm[40], sb[32], seg[17];
+
+	if (size < 8 || !rd(u, 0, b, 8)) { set_status(v, "Truncated Mach-O header."); return; }
+	magic = (uint32_t)rd_e(b, 4, 1);
+
+	set_titles(v, "FAT HEADER", "MACH HEADER", "LOAD COMMANDS", NULL);
+
+	if (magic == 0xCAFEBABEu || magic == 0xCAFEBABFu) {
+		int f64 = magic == 0xCAFEBABFu;
+		unsigned es = f64 ? 32 : 20;
+		unsigned nfat = (unsigned)rd_e(b + 4, 4, 1);
+		if (nfat == 0 || nfat >= 20) {
+			set_status(v, "Not a valid universal (fat) Mach-O file.");
+			return;
+		}
+		fat = 1;
+		add_hdr(v, 0);
+		add_cols(v, 0);
+		add_val(v, 0, 0, "magic", 4, b, f64 ? "0xCAFEBABF" : "0xCAFEBABE",
+			f64 ? "FAT_MAGIC_64" : "FAT_MAGIC", M_ENUM, 0);
+		add_hex_e(v, 0, 4, "nfat_arch", b + 4, 4, 1, "Architectures in this file", M_NONE);
+		for (k = 0; k < nfat && k < 8; ++k) {
+			unsigned char fa[32];
+			uint64_t fo = 8 + (uint64_t)k * es, soff, ssz;
+			unsigned cpu;
+			if (fo + es > size || !rd(u, fo, fa, es)) break;
+			cpu = (unsigned)rd_e(fa, 4, 1);
+			if (f64) { soff = rd_e(fa + 8, 8, 1); ssz = rd_e(fa + 16, 8, 1); }
+			else { soff = rd_e(fa + 8, 4, 1); ssz = rd_e(fa + 12, 4, 1); }
+			if (k == 0) base = soff;
+			fmt_size(sb, sizeof sb, ssz);
+			snprintf(nm, sizeof nm, "slice [%u]", k);
+			snprintf(h, sizeof h, "0x%08llX", (unsigned long long)soff);
+			snprintf(note, sizeof note, "%s, %s", macho_cpu_name(cpu), sb);
+			add_val(v, 0, fo, nm, (int)es, NULL, h, note, M_ENUM, 0);
+		}
+		snprintf(t, sizeof t, "%u architectures", nfat);
+		set_info(v, 0, t);
+	}
+
+	if (base + 28 > size) { set_status(v, "Slice offset is outside the file."); return; }
+	n = (unsigned)(base + 32 <= size ? 32 : size - base);
+	if (!rd(u, base, b, n)) { set_status(v, "Cannot read the Mach-O header."); return; }
+	magic = (uint32_t)rd_e(b, 4, 1);
+	switch (magic) {
+	case 0xFEEDFACEu: be = 1; is64 = 0; break;
+	case 0xFEEDFACFu: be = 1; is64 = 1; break;
+	case 0xCEFAEDFEu: be = 0; is64 = 0; break;
+	case 0xCFFAEDFEu: be = 0; is64 = 1; break;
+	default: set_status(v, "The slice is not a Mach-O image."); return;
+	}
+	hsz = is64 ? 32 : 28;
+	if (n < hsz) { set_status(v, "Truncated Mach-O header."); return; }
+
+	add_hdr(v, 1);
+	add_cols(v, 1);
+	snprintf(h, sizeof h, "0x%08X", (unsigned)rd_e(b, 4, be));
+	snprintf(note, sizeof note, "%s (%s)", is64 ? "MH_MAGIC_64" : "MH_MAGIC",
+		be ? "big-endian" : "little-endian");
+	add_val(v, 1, base, "magic", 4, b, h, note, M_ENUM, 0);
+	val = rd_e(b + 4, 4, be);
+	add_hex_e(v, 1, base + 4, "cputype", b + 4, 4, be, macho_cpu_name((unsigned)val), M_ENUM);
+	add_hex_e(v, 1, base + 8, "cpusubtype", b + 8, 4, be, "", M_NONE);
+	val = rd_e(b + 12, 4, be);
+	add_hex_e(v, 1, base + 12, "filetype", b + 12, 4, be, macho_type_name((unsigned)val), M_ENUM);
+	ncmds = (unsigned)rd_e(b + 16, 4, be);
+	sizeofcmds = (unsigned)rd_e(b + 20, 4, be);
+	snprintf(note, sizeof note, "%u load command%s", ncmds, ncmds == 1 ? "" : "s");
+	add_hex_e(v, 1, base + 16, "ncmds", b + 16, 4, be, note, M_NONE);
+	fmt_size(sb, sizeof sb, sizeofcmds);
+	add_hex_e(v, 1, base + 20, "sizeofcmds", b + 20, 4, be, sb, M_NONE);
+	val = rd_e(b + 24, 4, be);
+	snprintf(h, sizeof h, "0x%08X", (unsigned)val);
+	flags_text(note, sizeof note, val, s_mh_flags, COUNT(s_mh_flags));
+	add_val(v, 1, base + 24, "flags", 4, b + 24, h, note, M_FLAGS, val == 0);
+	if (is64) add_hex_e(v, 1, base + 28, "reserved", b + 28, 4, be, "", M_NONE);
+	snprintf(t, sizeof t, "%s, %s, %s", is64 ? "64-bit" : "32-bit",
+		be ? "big-endian" : "little-endian",
+		macho_cpu_name((unsigned)rd_e(b + 4, 4, be)));
+	set_info(v, 1, t);
+
+	if (ncmds) {
+		add_hdr(v, 2);
+		add_cols(v, 2);
+		co = base + hsz;
+		end = co + sizeofcmds;
+		if (end > size) end = size;
+		for (i = 0; i < ncmds; ++i) {
+			unsigned cmd, csz, rl;
+			if (i >= 250) { trunc = 1; break; }
+			if (co + 8 > end || !rd(u, co, lc, 8)) break;
+			cmd = (unsigned)rd_e(lc, 4, be);
+			csz = (unsigned)rd_e(lc + 4, 4, be);
+			if (csz < 8 || co + csz > end) break;
+			rl = csz < 72 ? csz : 72;
+			if (rl > 8) rd(u, co, lc, rl);
+			note[0] = 0;
+
+			if (cmd == 0x19 && rl >= 40) {
+				memcpy(seg, lc + 8, 16); seg[16] = 0;
+				snprintf(note, sizeof note, "%s  vmaddr 0x%llX  vmsize 0x%llX", seg,
+					(unsigned long long)rd_e(lc + 24, 8, be),
+					(unsigned long long)rd_e(lc + 32, 8, be));
+			}
+			else if (cmd == 0x1 && rl >= 32) {
+				memcpy(seg, lc + 8, 16); seg[16] = 0;
+				snprintf(note, sizeof note, "%s  vmaddr 0x%llX  vmsize 0x%llX", seg,
+					(unsigned long long)rd_e(lc + 24, 4, be),
+					(unsigned long long)rd_e(lc + 28, 4, be));
+			}
+			else if (cmd == 0x80000028u && rl >= 16) {
+				snprintf(note, sizeof note, "entry offset 0x%llX",
+					(unsigned long long)rd_e(lc + 8, 8, be));
+			}
+			else if (cmd == 0x1B && rl >= 24) {
+				snprintf(note, sizeof note,
+					"%02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X",
+					lc[8], lc[9], lc[10], lc[11], lc[12], lc[13], lc[14], lc[15],
+					lc[16], lc[17], lc[18], lc[19], lc[20], lc[21], lc[22], lc[23]);
+			}
+			else if ((cmd == 0xC || cmd == 0xD || cmd == 0x80000018u || cmd == 0x8000001Fu ||
+				cmd == 0x8000001Cu || cmd == 0xE || cmd == 0xF || cmd == 0x27) && rl >= 12) {
+				unsigned so = (unsigned)rd_e(lc + 8, 4, be);
+				if (so < csz) rd_cstr(rd, u, size, co + so, note, sizeof note);
+			}
+
+			snprintf(h, sizeof h, "0x%08X", cmd);
+			add_val(v, 2, co, macho_lc_name(cmd), (int)csz, NULL, h, note, M_NONE, 0);
+			co += csz;
+		}
+		snprintf(t, sizeof t, "%u commands", ncmds);
+		set_info(v, 2, t);
+	}
+
+	if (trunc) set_status(v, "List truncated: first 250 load commands shown.");
+	else if (fat) set_status(v, "Universal binary: showing the first slice.");
+}
+
+enum { F_NONE = 0, F_PE, F_ELF, F_MACHO };
+
+static void build(NtView* v, NtRead rd, void* u, uint64_t size)
+{
+	unsigned char m[4];
+	int f;
+
+	v->nrows = 0;
+	v->selected = -1;
+	v->scroll = 0;
+	memset(v->info, 0, sizeof v->info);
+	v->status[0] = 0;
+
+	if (size < 4 || !rd(u, 0, m, 4)) {
+		set_status(v, "File too small to have a header.");
+		return;
+	}
+	if (m[0] == 'M' && m[1] == 'Z')            f = F_PE;
+	else if (!memcmp(m, "\x7f" "ELF", 4))      f = F_ELF;
+	else if (is_macho_magic(m))                f = F_MACHO;
+	else {
+		set_status(v, "No PE, ELF or Mach-O header found.");
+		return;
+	}
+
+	if (v->fmt != f) {
+		memset(v->open, 0, sizeof v->open);
+		if (f == F_PE) { v->open[1] = 1; v->open[2] = 1; }
+		else if (f == F_ELF) { v->open[0] = 1; v->open[1] = 1; }
+		else { v->open[0] = 1; v->open[1] = 1; v->open[2] = 1; }
+		v->fmt = f;
+	}
+
+	if (f == F_PE) {
+		set_titles(v, s_titles[0], s_titles[1], s_titles[2], s_titles[3]);
+		build_pe(v, rd, u, size);
+	}
+	else if (f == F_ELF)  build_elf(v, rd, u, size);
+	else                  build_macho(v, rd, u, size);
 }
 
 static int row_h(const NtView* d, int i)
@@ -731,7 +1277,7 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 		const NtRow* r = &d->rows[i];
 		int rh = row_h(d, i);
 		if (!rh) continue;
-		if (y + rh <= 0) { y += rh; continue; }   
+		if (y + rh <= 0) { y += rh; continue; }
 
 		if (r->hdr == 1) {
 			PlRect t = { 16, y, w - 40, y + rh };
@@ -886,7 +1432,7 @@ static void on_wheel(void* u, int x, int y, int delta, int mods)
 {
 	NtView* d = (NtView*)u;
 	(void)x; (void)y; (void)mods;
-	d->scroll -= delta * WHEEL_STEP;   
+	d->scroll -= delta * WHEEL_STEP;
 	clamp_scroll(d);
 	pl_invalidate(d->w, NULL);
 }
@@ -923,7 +1469,7 @@ static void on_mouse_down(void* u, int x, int y)
 		d->selected = (d->selected == i) ? -1 : i;
 	else
 		return;
-	clamp_scroll(d);   
+	clamp_scroll(d);
 	pl_invalidate(d->w, NULL);
 }
 
@@ -948,7 +1494,7 @@ static void on_destroy(void* u)
 
 static const PlWidgetOps s_ops = {
 	on_paint, on_mouse_move, on_mouse_leave, on_mouse_down, on_resize,
-	on_hand, on_destroy, NULL, on_wheel, on_mouse_up 
+	on_hand, on_destroy, NULL, on_wheel, on_mouse_up
 };
 
 NtView* ntview_create(void* parent_native, int x, int y, int w, int h)

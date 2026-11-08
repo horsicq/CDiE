@@ -36,6 +36,7 @@
 #include "panels/options.h"
 #include "panels/entropy.h"
 #include "panels/sectionsview.h"
+#include "panels/ntview.h"
 #include "controls/hexviewer.h"
 #include "controls/disasmview.h"
 #include "core/virustotal.h"
@@ -60,6 +61,7 @@ static DisasmView* g_dasm;
 static EntropyView* g_entropy;
 static VtView* g_vt;
 static SecView* g_sec;
+static NtView* g_nt;
 static SigView* g_sig;
 static FILE* g_hexFile;
 static uint64_t g_hexSize;
@@ -121,6 +123,10 @@ static void load_views(const char* path)
     if (g_hexFile) entropyview_open(g_entropy, path, hex_read, NULL, g_hexSize);
     else entropyview_close(g_entropy);
   }
+  if (g_nt) {
+    if (g_hexFile) ntview_open(g_nt, hex_read, NULL, g_hexSize);
+    else ntview_close(g_nt);
+  }
   if (g_vt) vtview_set_file(g_vt, path);
   if (g_sec) secview_set_file(g_sec, path);
   if (g_strv) stringsview_set_file(g_strv, path);
@@ -142,8 +148,17 @@ static void goto_entropy(void* u)
   layout();
 }
 
-static void clear_scan(void)
+static void goto_hex(void* u, uint64_t offset, uint64_t length)
 {
+  (void)u;
+  if (!g_hex) return;
+  g_page = NAV_HEX;
+  layout();
+  hexview_goto(g_hex, offset);
+  hexview_set_selection(g_hex, offset, length);
+}
+
+static void clear_scan(void) {
   if (g_tree) resultstree_clear(g_tree);
   if (g_infobar) infobar_clear(g_infobar);
   if (g_header) header_clear(g_header);
@@ -498,6 +513,7 @@ static void on_nav(void* user, int nav_id)
   case NAV_HEX:
   case NAV_DISASM:
   case NAV_ENTROPY:
+  case NAV_HEADERS:
     g_page = nav_id; layout();
     break;
   default: break;
@@ -603,6 +619,7 @@ static void place_view(int page, int x, int y, int w, int h)
   case NAV_ENTROPY:    if (g_entropy) entropyview_set_rect(g_entropy, x, y, w, h); break;
   case NAV_VIRUSTOTAL: if (g_vt)      vtview_set_rect(g_vt, x, y, w, h); break;
   case NAV_SECTIONS:   if (g_sec)     secview_set_rect(g_sec, x, y, w, h); break;
+  case NAV_HEADERS:    if (g_nt)      ntview_set_rect(g_nt, x, y, w, h); break;
   case NAV_SIGNATURES: if (g_sig)     sigview_set_rect(g_sig, x, y, w, h); break;
   case NAV_STRINGS:    if (g_strv)    stringsview_set_rect(g_strv, x, y, w, h); break;
   default:             pl_widget_set_rect(resultstree_widget(g_tree), x, y, w, h); break;
@@ -612,7 +629,7 @@ static void place_view(int page, int x, int y, int w, int h)
 static void layout_impl(void)
 {
   static const int pages[] = { NAV_OVERVIEW, NAV_HEX, NAV_DISASM, NAV_ENTROPY,
-    NAV_VIRUSTOTAL, NAV_SECTIONS, NAV_SIGNATURES, NAV_STRINGS };
+  NAV_VIRUSTOTAL, NAV_SECTIONS, NAV_HEADERS, NAV_SIGNATURES, NAV_STRINGS };
   static int s_W = -1, s_H = -1, s_page = -1;
   int W, H, cx, cy, cw, tx, ty, tw, th, i, cur;
 
@@ -625,7 +642,7 @@ static void layout_impl(void)
   /* which "slot" is visible: anything that isn't a dedicated view uses the tree */
   cur = g_page;
   if (cur != NAV_HEX && cur != NAV_DISASM && cur != NAV_ENTROPY &&
-    cur != NAV_VIRUSTOTAL && cur != NAV_SECTIONS &&
+    cur != NAV_VIRUSTOTAL && cur != NAV_SECTIONS && cur != NAV_HEADERS &&
     cur != NAV_SIGNATURES && cur != NAV_STRINGS)
     cur = NAV_OVERVIEW;
 
@@ -643,7 +660,7 @@ static void layout_impl(void)
     pl_widget_set_rect(header_widget(g_header), cx, 0, cw, HEADER_H);
     pl_widget_set_rect(infobar_widget(g_infobar), cx, HEADER_H, cw, INFOBAR_H);
     pl_widget_set_rect(bottombar_widget(g_bottombar), cx, H - BOTTOMBAR_H, cw, BOTTOMBAR_H);
-    for (i = 0; i < 8; ++i)
+    for (i = 0; i < (int)(sizeof(pages) / sizeof(pages[0])); ++i)
       place_view(pages[i], tx, ty, pages[i] == cur ? tw : 0, pages[i] == cur ? th : 0);
   }
   else {
@@ -687,11 +704,11 @@ int gui_run(void)
   gtk_widget_set_size_request(win, 900, 540);
   g_signal_connect(win, "destroy", G_CALLBACK(gtk_main_quit), NULL);
   g_signal_connect(win, "key-press-event", G_CALLBACK(on_key_press), NULL);
-	g_signal_connect(win, "delete-event", G_CALLBACK(on_delete), NULL);
-	g_signal_connect(win, "window-state-event", G_CALLBACK(on_window_state), NULL);
+  g_signal_connect(win, "delete-event", G_CALLBACK(on_delete), NULL);
+  g_signal_connect(win, "window-state-event", G_CALLBACK(on_window_state), NULL);
 
   {
-    GtkCssProvider* css = gtk_css_provider_new(); 
+    GtkCssProvider* css = gtk_css_provider_new();
     gtk_css_provider_load_from_data(css,
       "window, scrolledwindow, viewport { background-color: #1F212E; }", -1, NULL);
     gtk_style_context_add_provider_for_screen(gdk_screen_get_default(),
@@ -722,6 +739,8 @@ int gui_run(void)
   if (g_entropy) entropyview_set_callbacks(g_entropy, opt_copy_text, NULL);
   g_vt = vtview_create(g_fixed, SIDEBAR_W, 0, 0, 0);
   if (g_vt) vtview_set_callbacks(g_vt, opt_copy_text, NULL);
+  g_nt = ntview_create(g_fixed, SIDEBAR_W, 0, 0, 0);
+  if (g_nt) ntview_set_callbacks(g_nt, goto_hex, NULL);
   g_sec = secview_create(g_fixed, SIDEBAR_W, 0, 0, 0);
   if (g_sec) secview_set_callbacks(g_sec, goto_entropy, NULL);
   g_sig = sigview_create(g_fixed, SIDEBAR_W, 0, 0, 0);
