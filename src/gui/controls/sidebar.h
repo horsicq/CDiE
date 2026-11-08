@@ -23,7 +23,7 @@
 #include "platform/platform.h"
 
 enum { NAV_OVERVIEW, NAV_SECTIONS, NAV_SIGNATURES, NAV_STRINGS, NAV_HEX,
-       NAV_DISASM, NAV_ENTROPY, NAV_VIRUSTOTAL, NAV_YARA, NAV_OPTIONS, NAV_COUNT };
+       NAV_DISASM, NAV_ENTROPY, NAV_VIRUSTOTAL, NAV_HEADERS, NAV_YARA, NAV_OPTIONS, NAV_COUNT };
 
 typedef void (*SidebarCb)(void *user, int nav_id);
 typedef struct Sidebar Sidebar;

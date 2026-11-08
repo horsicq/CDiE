@@ -55,26 +55,23 @@ struct SecView {
 	int state;
 	char path[2048];
 	char err[128];
-	char arch[32];                     /* e.g. "PE32+ (x64)" */
+	char arch[32];                     
 	SecInfo sec[SEC_MAX];
 	int count;
 	int sel;
 
-	/* hit areas from the last paint */
 	PlRect seg_rc[SEC_MAX], row_rc[SEC_MAX], leg_rc[SEC_MAX];
 	int nseg, nrow;
 	PlRect btn_entropy;
 	int has_entropy;
 	int hover_row, hover_btn, hover_seg;
-	int scroll, content_h;             /* page scroll offset and total page height */
+	int scroll, content_h;             
 	PlRect sb_track, sb_thumb;
 	int has_sb;
 
 	void (*entropy_cb)(void*);
 	void* entropy_user;
 };
-
-/* ================= PE parsing ================= */
 
 static FILE* open_utf8(const char* path)
 {
@@ -282,7 +279,7 @@ static void parse_elf(SecView* v)
 	is64 = eh[4] == 2;
 	be = eh[5] == 2;
 	if (is64 && got < 64) { fclose(f); set_err(v, "Invalid ELF header."); return; }
-	w64 = is64 ? 8 : 4;                                  /* width of address/offset/size fields */
+	w64 = is64 ? 8 : 4;                                 
 
 	machine = (unsigned)rdn(eh + 18, 2, be);
 	shoff = rdn(eh + (is64 ? 40 : 32), w64, be);
@@ -313,7 +310,7 @@ static void parse_elf(SecView* v)
 		strsz = rdn(sh + (is64 ? 32 : 20), w64, be);
 	}
 
-	for (i = 1; i < shnum && n < SEC_MAX; ++i) {          /* index 0 is the null section */
+	for (i = 1; i < shnum && n < SEC_MAX; ++i) {          
 		SecInfo* s = &v->sec[n];
 		uint32_t type, nameoff;
 		uint64_t flags, addr, off, size, avail = 0;
@@ -329,7 +326,7 @@ static void parse_elf(SecView* v)
 
 		memset(s, 0, sizeof * s);
 		s->elf = 1;
-		s->nobits = (type == 8);                          /* SHT_NOBITS, e.g. .bss */
+		s->nobits = (type == 8);                          
 
 		if (strsz && nameoff < strsz) {
 			uint64_t want = strsz - nameoff;
@@ -344,12 +341,12 @@ static void parse_elf(SecView* v)
 			if ((unsigned char)s->name[k] < 32 || (unsigned char)s->name[k] > 126) s->name[k] = '?';
 		if (!s->name[0]) snprintf(s->name, sizeof(s->name), "[%u]", i);
 
-		if (flags & 2) { s->va = addr; s->vsize = size; }  /* SHF_ALLOC: occupies memory */
+		if (flags & 2) { s->va = addr; s->vsize = size; }  
 		s->rawptr = off;
 		s->rawsize = s->nobits ? 0 : size;
-		s->chars = ((flags & 2) ? 0x40000000u : 0) |       /* R = allocated */
-			((flags & 1) ? 0x80000000u : 0) |              /* W = SHF_WRITE */
-			((flags & 4) ? 0x20000000u : 0);               /* X = SHF_EXECINSTR */
+		s->chars = ((flags & 2) ? 0x40000000u : 0) |       
+			((flags & 1) ? 0x80000000u : 0) |              
+			((flags & 4) ? 0x20000000u : 0);               
 
 		if (!s->nobits && off < fsz) {
 			avail = fsz - off;
@@ -378,7 +375,6 @@ static int is_std_name(const char* n)
 	return 0;
 }
 
-/* writes a comma-separated list of structural warnings, returns how many */
 static int build_flags(const SecInfo* s, char* out, size_t cap)
 {
 	int n = 0;
@@ -449,8 +445,6 @@ static const char* base_name(const char* path)
 	return name;
 }
 
-/* ================= painting ================= */
-
 #define SC_RED    ((PlColor)0xD9534F)
 #define SC_AMBER  ((PlColor)0xF0AD4E)
 #define SC_GREEN  ((PlColor)0x5CB85C)
@@ -491,7 +485,6 @@ static int draw_message(SecView* v, PlCanvas* c, int x, int y, int w,
 	return h;
 }
 
-/* R / W / X badges */
 static void draw_access(SecView* v, PlCanvas* c, int x, int y, const SecInfo* s)
 {
 	static const char* letters[3] = { "R", "W", "X" };
@@ -533,7 +526,6 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 	}
 	if (tw < 40) return;
 
-	/* ---- header ---- */
 	put_text(c, v->fTitle, x, y, tw, 24, translate("Sections"), CLR_TEXT_PRIMARY);
 	y += 24;
 	if (v->state == SS_OK) snprintf(line, sizeof(line), "%s  -  %s", base_name(v->path), v->arch);
@@ -554,7 +546,6 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 		return;
 	}
 
-	/* ---- summary cards ---- */
 	{
 		uint64_t tr = 0, tv = 0;
 		int warn = 0, gap = 12, cw = (tw - 3 * gap) / 4, k;
@@ -587,7 +578,6 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 		y += 58 + 16;
 	}
 
-	/* ---- image layout map ---- */
 	{
 		int n = v->count, gap = 3, rgap = 4, rowh = 28, bx = x + 16, bw = tw - 32;
 		int minw[SEC_MAX], wd[SEC_MAX], rowof[SEC_MAX];
@@ -601,7 +591,6 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 			if (minw[k] > bw) minw[k] = bw;
 		}
 
-		/* pack segments into rows, then share each row's spare width by size */
 		s = 0;
 		while (s < n) {
 			int used = 0, extra, sum = 0, big, rem;
@@ -623,7 +612,7 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 				sum += wd[k];
 				rowof[k] = rows;
 			}
-			rem = bw - (sum + gap * (e - s - 1));      /* rounding leftovers */
+			rem = bw - (sum + gap * (e - s - 1));      
 			if (rem > 0) wd[big] += rem;
 			++rows;
 			s = e;
@@ -677,13 +666,12 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 		y += ch + 16;
 	}
 
-	/* ---- section table ---- */
 	{
 		int rh = 30, hh = 28, th, k;
 		int cx[6];
 		static const int pct[6] = { 0, 20, 33, 46, 59, 70 };
 
-		th = hh + v->count * rh;           /* every section, no cap */
+		th = hh + v->count * rh;           
 		draw_card(c, x, y, tw, th);
 
 		for (k = 0; k < 6; ++k) cx[k] = x + 16 + (tw - 32) * pct[k] / 100;
@@ -723,7 +711,6 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 		y += th + 16;
 	}
 
-	/* ---- detail card ---- */
 	if (v->sel >= 0 && v->sel < v->count) {
 		const SecInfo* s = &v->sec[v->sel];
 		int colw = (tw - 32) / 5, k;
@@ -757,23 +744,24 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 		if (nf) put_text(c, v->fText, x + 16, y + 106, tw - 32, 20, fl, SC_RED);
 	}
 
-	/* ---- page height and scrollbar ---- */
-	v->content_h = y + v->scroll + 128 + 16;       /* detail card + bottom padding */
+	v->content_h = y + v->scroll + 128 + 16;       
 	if (v->content_h > h) {
 		int maxs2 = v->content_h - h;
-		int tl = h * h / v->content_h, pos;
+		int pad = 10, trkh = h - 2 * pad;          
+		int tl = trkh * h / v->content_h, pos;
 		PlRect trk, thb;
-		if (tl < 28) tl = 28;
+		if (tl < 24) tl = 24;
+		if (tl > trkh) tl = trkh;
 		if (v->scroll > maxs2) { v->scroll = maxs2; pl_invalidate(v->w, NULL); }
-		pos = (h - tl) * v->scroll / maxs2;
-		trk.l = w - 16; trk.t = 0; trk.r = w; trk.b = h;
-		thb.l = w - 6; thb.t = pos; thb.r = w - 1; thb.b = pos + tl;
-		pl_round_rect(c, thb, CLR_PANEL_BORDER, CLR_PANEL_BORDER, 6);
+		pos = pad + (trkh - tl) * v->scroll / maxs2;
+		trk.l = w - 16; trk.t = pad; trk.r = w; trk.b = h - pad;
+		thb.l = w - 6; thb.t = pos; thb.r = w - 3; thb.b = pos + tl;
+		pl_round_rect(c, thb, CLR_BTN_GHOST_BD, CLR_BTN_GHOST_BD, 1);
 		v->sb_track = trk; v->sb_thumb = thb; v->has_sb = 1;
 	}
-}
 
-/* ================= input ================= */
+	pl_frame_corners(c, w, h, 12, CLR_BG, CLR_PANEL_BORDER);
+}
 
 static int in_rect(PlRect r, int x, int y)
 {
@@ -822,11 +810,12 @@ static void on_mouse_down(void* u, int x, int y)
 		if (v->entropy_cb) v->entropy_cb(v->entropy_user);
 		return;
 	}
-	if (v->has_sb && in_rect(v->sb_track, x, y)) {     /* click the bar to jump */
+	if (v->has_sb && in_rect(v->sb_track, x, y)) {     
 		int maxs = v->content_h - v->height;
 		int tl = v->sb_thumb.b - v->sb_thumb.t;
-		if (maxs > 0 && v->height > tl) {
-			v->scroll = (y - tl / 2) * maxs / (v->height - tl);
+		int trkh = v->sb_track.b - v->sb_track.t;
+		if (maxs > 0 && trkh > tl) {
+			v->scroll = (y - v->sb_track.t - tl / 2) * maxs / (trkh - tl);
 			if (v->scroll < 0) v->scroll = 0;
 			if (v->scroll > maxs) v->scroll = maxs;
 			pl_invalidate(v->w, NULL);
@@ -867,7 +856,7 @@ static void on_wheel(void* u, int x, int y, int delta, int mods)
 	SecView* v = (SecView*)u;
 	(void)x; (void)y; (void)mods;
 	if (!delta) return;
-	secview_scroll(v, delta > 0 ? -60 : 60);     /* 60 px per notch */
+	secview_scroll(v, delta > 0 ? -60 : 60);     
 }
 
 static int on_hand(void* u, int x, int y)
@@ -885,8 +874,6 @@ static const PlWidgetOps s_sec_ops = {
 	on_resize, on_hand, on_destroy,
 	NULL, on_wheel
 };
-
-/* ================= public API ================= */
 
 SecView* secview_create(void* parent_native, int x, int y, int w, int h)
 {

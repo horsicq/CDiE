@@ -32,23 +32,23 @@ struct Sidebar {
 	PlWidget* w;
 	SidebarCb cb;
 	void* user;
-	int       selected, hovered, width, height;
+	int       selected, hovered, width, height, scroll;
 	int       open[SB_GROUPS];
 	PlFont* fontNav, * fontTitle, * fontBold;
 };
 
 static const char* s_labels[NAV_COUNT] = {
 		"Overview", "Sections", "Signatures", "Strings", "Hex viewer",
-		"Disassembly", "Entropy", "VirusTotal", "YARA rules", "Options"
+		"Disassembly", "Entropy", "VirusTotal", "NT headers", "YARA rules", "Options" 
 };
 typedef struct { int group; int nav; } SbRow;     
 
 static const char* s_group_names[SB_GROUPS] = { "ANALYSIS", "DATA", "CODE" };
 
 static const SbRow s_rows[] = {
-	{ 0, -1 },{ 0, NAV_OVERVIEW },{ 0, NAV_SECTIONS },{ 0, NAV_SIGNATURES },{ 0, NAV_VIRUSTOTAL },
+	{ 0, -1 },{ 0, NAV_OVERVIEW },{ 0, NAV_SECTIONS },{ 0, NAV_HEADERS },{ 0, NAV_SIGNATURES },{ 0, NAV_VIRUSTOTAL },
 	{ 1, -1 },{ 1, NAV_STRINGS },{ 1, NAV_HEX },{ 1, NAV_ENTROPY },
-	{ 2, -1 },{ 2, NAV_DISASM },{ 2, NAV_COUNT - 2 }          
+	{ 2, -1 },{ 2, NAV_DISASM },{ 2, NAV_COUNT - 2 }
 };
 #define SB_ROWS ((int)(sizeof s_rows / sizeof s_rows[0]))
 
@@ -59,9 +59,11 @@ static int row_visible(const Sidebar* d, int r)
 
 static int row_h(int r) { return s_rows[r].nav < 0 ? GRP_H : NAV_H; }
 
+#define LIST_TOP (LOGO_H + SEARCH_MY + SEARCH_H + SEARCH_MY + 4)
+
 static int row_y(const Sidebar* d, int r)
 {
-	int y = LOGO_H + SEARCH_MY + SEARCH_H + SEARCH_MY + 4, j;
+	int y = LIST_TOP - d->scroll, j;
 	for (j = 0; j < r; ++j)
 		if (row_visible(d, j)) y += row_h(j);
 	return y;
@@ -70,10 +72,31 @@ static int row_y(const Sidebar* d, int r)
 static int nav_item_y(const Sidebar* d, int i)
 {
 	int r;
-	if (i == NAV_OPTIONS) return d->height - BOTTOMBAR_H - NAV_H - 8;
+	if (i == NAV_OPTIONS) return d->height - NAV_H - 8;
 	for (r = 0; r < SB_ROWS; ++r)
 		if (s_rows[r].nav == i) return row_visible(d, r) ? row_y(d, r) : -1;
 	return -1;
+}
+
+static int list_bottom(const Sidebar* d)
+{
+	return nav_item_y(d, NAV_OPTIONS) - 8;     
+}
+
+static int content_h(const Sidebar* d)
+{
+	int r, h = 0;
+	for (r = 0; r < SB_ROWS; ++r)
+		if (row_visible(d, r)) h += row_h(r);
+	return h;
+}
+
+static void clamp_scroll(Sidebar* d)
+{
+	int max = content_h(d) - (list_bottom(d) - LIST_TOP);
+	if (max < 0) max = 0;
+	if (d->scroll > max) d->scroll = max;
+	if (d->scroll < 0) d->scroll = 0;
 }
 
 static int sidebar_hittest(Sidebar* d, int my)
@@ -81,6 +104,7 @@ static int sidebar_hittest(Sidebar* d, int my)
 	int r, y;
 	for (r = 0; r < SB_ROWS; ++r) {
 		if (!row_visible(d, r)) continue;
+		if (my < LIST_TOP || my >= list_bottom(d)) continue;   /* scrolled out of view */
 		y = row_y(d, r);
 		if (my >= y && my < y + row_h(r))
 			return s_rows[r].nav >= 0 ? s_rows[r].nav : -(s_rows[r].group + 2);
@@ -177,21 +201,14 @@ static void draw_logo(PlCanvas* c, int x, int y, PlColor bg)
 static void on_paint(void* u, PlCanvas* c, int w, int h)
 {
 	Sidebar* d = (Sidebar*)u;
-	PlRect dr = { 14, 13, 38, 37 };
 	PlRect tr = { 14 + LOGO_DRAW + 8, 13, w - 8, 37 };
-	int i;
+	int i, lb, th, ch;
 
 	d->width = w; d->height = h;
+	clamp_scroll(d);
+	lb = list_bottom(d);
 
 	pl_fill(c, 0, 0, w, h, CLR_SIDEBAR_BG);
-	pl_fill(c, 0, 0, w, LOGO_H, CLR_LOGO_BG);
-
-	pl_image(c, 14, (LOGO_H - LOGO_DRAW) / 2, LOGO_DRAW, LOGO_DRAW,
-		LOGO_IMG_W, LOGO_IMG_H, logo_rgba);
-	pl_text(c, d->fontTitle, tr, translate("Detect It Easy"), CLR_TEXT_PRIMARY, PL_TEXT_ELLIPSIS);
-	pl_line(c, 0, LOGO_H, w, LOGO_H, CLR_SEPARATOR);
-
-	draw_search(d, c, w);
 
 	for (i = 0; i < SB_ROWS; ++i) {
 		if (!row_visible(d, i)) continue;
@@ -199,10 +216,31 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 		else draw_item(d, c, s_rows[i].nav, w, h);
 	}
 
-	{
-		int yi = nav_item_y(d, NAV_OPTIONS);
-		pl_line(c, SEARCH_MX, yi - 8, w - SEARCH_MX, yi - 8, CLR_SEPARATOR);
-		draw_item(d, c, NAV_OPTIONS, w, h);
+	pl_fill(c, 0, 0, w, LIST_TOP, CLR_SIDEBAR_BG);
+	pl_fill(c, 0, lb, w, h, CLR_SIDEBAR_BG);
+
+	pl_fill(c, 0, 0, w, LOGO_H, CLR_LOGO_BG);
+	pl_image(c, 14, (LOGO_H - LOGO_DRAW) / 2, LOGO_DRAW, LOGO_DRAW,
+		LOGO_IMG_W, LOGO_IMG_H, logo_rgba);
+	pl_text(c, d->fontTitle, tr, translate("Detect It Easy"), CLR_TEXT_PRIMARY, PL_TEXT_ELLIPSIS);
+	pl_line(c, 0, LOGO_H, w, LOGO_H, CLR_SEPARATOR);
+
+	draw_search(d, c, w);
+
+	pl_line(c, SEARCH_MX, lb, w - SEARCH_MX, lb, CLR_SEPARATOR);
+	draw_item(d, c, NAV_OPTIONS, w, h);
+
+	th = lb - LIST_TOP;
+	ch = content_h(d);
+	if (ch > th && th > 0) {                    
+		int len = th * th / ch, pos;
+		if (len < 24) len = 24;
+		if (len > th) len = th;
+		pos = (th - len) * d->scroll / (ch - th);
+		{
+			PlRect sb = { w - 6, LIST_TOP + pos, w - 3, LIST_TOP + pos + len };
+			pl_round_rect(c, sb, CLR_BTN_GHOST_BD, CLR_BTN_GHOST_BD, 1);
+		}
 	}
 
 	pl_line(c, w - 1, 0, w - 1, h, CLR_SEPARATOR);
@@ -212,6 +250,7 @@ static void on_resize(void* u, int w, int h)
 {
 	Sidebar* d = (Sidebar*)u;
 	d->width = w; d->height = h;
+	clamp_scroll(d);
 	pl_invalidate(d->w, NULL);
 }
 
@@ -249,11 +288,9 @@ static void on_mouse_down(void* u, int x, int y)
 	if (hit == -1) return;
 	if (hit < -1) {                       /* group header: fold / unfold on click */
 		int g = -hit - 2;
-		PlRect r;
 		d->open[g] = !d->open[g];
-		r.l = 0; r.r = d->width;
-		r.t = group_y(d, g); r.b = d->height;
-		pl_invalidate(d->w, &r);
+		clamp_scroll(d);                 /* folding can shrink the list */
+		pl_invalidate(d->w, NULL);
 		return;
 	}
 	if (d->selected != hit) {
@@ -262,6 +299,15 @@ static void on_mouse_down(void* u, int x, int y)
 		invalidate_item(d, hit);
 	}
 	if (d->cb) d->cb(d->user, hit);
+}
+
+static void on_wheel(void* u, int x, int y, int delta, int mods)
+{
+	Sidebar* d = (Sidebar*)u;
+	(void)x; (void)y; (void)mods;
+	d->scroll -= delta * NAV_H * 2;      /* delta = notches, positive = up */
+	clamp_scroll(d);
+	pl_invalidate(d->w, NULL);
 }
 
 static void on_destroy(void* u)
@@ -274,7 +320,8 @@ static void on_destroy(void* u)
 }
 
 static const PlWidgetOps s_ops = {
-		on_paint, on_mouse_move, on_mouse_leave, on_mouse_down, on_resize, NULL, on_destroy
+		on_paint, on_mouse_move, on_mouse_leave, on_mouse_down, on_resize, NULL, on_destroy,
+		NULL, on_wheel 
 };
 
 Sidebar* sidebar_create(void* parent_native, int x, int y, int w, int h,

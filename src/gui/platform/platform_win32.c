@@ -117,8 +117,15 @@ static LRESULT CALLBACK pl_proc(HWND hw, UINT m, WPARAM wp, LPARAM lp)
 
 	case WM_LBUTTONDOWN:
 		SetFocus(hw);
+		if (w && w->ops.mouse_up) SetCapture(hw);   /* only widgets that handle mouse_up */
 		if (w && w->ops.mouse_down)
 			w->ops.mouse_down(w->user, (short)LOWORD(lp), (short)HIWORD(lp));
+		return 0;
+
+	case WM_LBUTTONUP:
+		if (GetCapture() == hw) ReleaseCapture();
+		if (w && w->ops.mouse_up)
+			w->ops.mouse_up(w->user, (short)LOWORD(lp), (short)HIWORD(lp));
 		return 0;
 
 	case WM_KEYDOWN: {
@@ -536,7 +543,53 @@ void pl_image(PlCanvas* c, int x, int y, int w, int h,
 	DeleteObject(bmp);
 }
 
-void pl_text(PlCanvas* c, PlFont* f, PlRect r, const char* s, PlColor col, int flags)
+static void frame_corner(HDC dc, int x0, int y0, int rr, int cx, int cy,
+	COLORREF bg, COLORREF bd)
+{
+	int px, py, i, j;
+	int R = rr * 8, Ri = (rr - 1) * 8, cx8 = cx * 8, cy8 = cy * 8;
+	for (py = y0; py < y0 + rr; ++py) {
+		for (px = x0; px < x0 + rr; ++px) {
+			int nb = 0, nr = 0, ni = 0;
+			COLORREF d;
+			for (j = 0; j < 4; ++j)
+				for (i = 0; i < 4; ++i) {
+					int dx = px * 8 + 2 * i + 1 - cx8;
+					int dy = py * 8 + 2 * j + 1 - cy8;
+					int d2 = dx * dx + dy * dy;
+					if (d2 > R * R) ++nb;
+					else if (d2 > Ri * Ri) ++nr;
+					else ++ni;
+				}
+			if (ni == 16) continue;
+			d = GetPixel(dc, px, py);
+			if (d == CLR_INVALID) continue;
+			SetPixelV(dc, px, py, RGB(
+				(GetRValue(bg) * nb + GetRValue(bd) * nr + GetRValue(d) * ni + 8) / 16,
+				(GetGValue(bg) * nb + GetGValue(bd) * nr + GetGValue(d) * ni + 8) / 16,
+				(GetBValue(bg) * nb + GetBValue(bd) * nr + GetBValue(d) * ni + 8) / 16));
+		}
+	}
+}
+
+void pl_frame_corners(PlCanvas* c, int w, int h, int rr, PlColor bg, PlColor border)
+{
+	int W = w - 1, H = h - 1;                 /* same box the other views use */
+	COLORREF cbg = to_cr(bg), cbd = to_cr(border);
+	if (W < 2 * rr || H < 2 * rr) return;
+	aa_fill(c->dc, W, 0, w, h, cbg);          /* outer 1px strip */
+	aa_fill(c->dc, 0, H, w, h, cbg);
+	aa_fill(c->dc, rr, 0, W - rr, 1, cbd);    /* straight border edges */
+	aa_fill(c->dc, rr, H - 1, W - rr, H, cbd);
+	aa_fill(c->dc, 0, rr, 1, H - rr, cbd);
+	aa_fill(c->dc, W - 1, rr, W, H - rr, cbd);
+	frame_corner(c->dc, 0, 0, rr, rr, rr, cbg, cbd);
+	frame_corner(c->dc, W - rr, 0, rr, W - rr, rr, cbg, cbd);
+	frame_corner(c->dc, 0, H - rr, rr, rr, H - rr, cbg, cbd);
+	frame_corner(c->dc, W - rr, H - rr, rr, W - rr, H - rr, cbg, cbd);
+}
+
+void pl_text(PlCanvas* c, PlFont* f, PlRect r, const char* s, PlColor col, int flags) 
 {
 	WCHAR buf[1024];
 	RECT rc;

@@ -184,7 +184,6 @@ int tray_handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, LRESULT* resu
     return 0;
 
   case WM_SYSCOMMAND:
-    /* original precedence bug fixed: only intercept SC_MINIMIZE */
     if ((wp & 0xFFF0) == SC_MINIMIZE && (g_enabled || g_persistent)) {
       tray_add(hwnd);
       if (g_added) { ShowWindow(hwnd, SW_HIDE); return 1; }

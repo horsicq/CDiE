@@ -26,7 +26,6 @@
 #define MAX_SECT 96
 #define MAX_CODE 256
 
-/* one mapped range: file offset <-> virtual address */
 typedef struct { uint64_t va, off, size; } Sect;
 
 static DasmRead s_rd;
@@ -58,8 +57,6 @@ static void add_code(uint64_t va, uint64_t off, uint64_t size)
 		++s_ncode;
 	}
 }
-
-/* ---------------- PE ---------------- */
 
 static int open_pe(DasmRead rd, void* user, const uint8_t* h)
 {
@@ -100,8 +97,6 @@ static int open_pe(DasmRead rd, void* user, const uint8_t* h)
 	return s_nseg > 0;
 }
 
-/* ---------------- ELF ---------------- */
-
 static int open_elf(DasmRead rd, void* user, const uint8_t* h)
 {
 	uint8_t ph[56], sh[64];
@@ -135,7 +130,6 @@ static int open_elf(DasmRead rd, void* user, const uint8_t* h)
 	phneed = is64 ? 56 : 32;
 	shneed = is64 ? 64 : 40;
 
-	/* PT_LOAD segments give the va <-> file offset map (works on stripped files) */
 	if (!phoff || phentsize < phneed) return 0;
 	for (i = 0; i < phnum && s_nseg < MAX_SECT; ++i) {
 		uint32_t type, flags;
@@ -154,7 +148,6 @@ static int open_elf(DasmRead rd, void* user, const uint8_t* h)
 	}
 	if (s_nseg == 0) return 0;
 
-	/* code ranges: executable sections (.text, .plt, .init ...) */
 	if (shoff && shentsize >= shneed) {
 		for (i = 1; i < shnum && i < 4096; ++i) {
 			uint64_t flags, addr, off, size;
@@ -170,7 +163,6 @@ static int open_elf(DasmRead rd, void* user, const uint8_t* h)
 			if ((flags & 4) && type != 8) add_code(addr, off, size);   /* SHF_EXECINSTR, not NOBITS */
 		}
 	}
-	/* fallback: executable segments (PF_X) when there are no section headers */
 	if (s_ncode == 0) {
 		for (i = 0; i < phnum; ++i) {
 			uint32_t type, flags;
@@ -191,8 +183,6 @@ static int open_elf(DasmRead rd, void* user, const uint8_t* h)
 	cdisasm_x86_cpu_decode_flag_mask(CDISASM_CPU_X86, mode, &s_flags);
 	return 1;
 }
-
-/* ---------------- public API ---------------- */
 
 int dasm_open(DasmRead rd, void* user, uint64_t file_size)
 {
@@ -247,7 +237,6 @@ uint64_t dasm_entry_offset(void)
 	return off;
 }
 
-/* TODO: needs the name/register string tables from cdisasm_x86_ids.h */
 static void format_insn(const cdisasm_x86_instruction* in, DasmLine* out)
 {
 	snprintf(out->mnemonic, sizeof out->mnemonic, "op_%u", (unsigned)in->name_id);

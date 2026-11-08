@@ -56,7 +56,8 @@ typedef uint32_t PlColor;                       /* 0xRRGGBB */
     int  (*hand_cursor_at)(void* u, int x, int y);
     void (*destroy)(void* u);
     void (*key)(void* u, int key, uint32_t ch, int mods);
-    void (*wheel)(void* u, int x, int y, int delta, int mods);  
+    void (*wheel)(void* u, int x, int y, int delta, int mods);
+    void (*mouse_up)(void* u, int x, int y);
   } PlWidgetOps;
 
   /* ---- widgets ---- */
@@ -84,6 +85,8 @@ typedef uint32_t PlColor;                       /* 0xRRGGBB */
   void pl_ellipse(PlCanvas* c, int l, int t, int r, int b, PlColor fill, PlColor border);
   void pl_text(PlCanvas* c, PlFont* f, PlRect r, const char* utf8, PlColor col, int flags);
   void pl_image(PlCanvas* c, int x, int y, int w, int h, int src_w, int src_h, const unsigned char* rgba);
+  /* call last in paint: rounds the four corners of the w x h area (anti-aliased) and draws the 1px border */
+  void pl_frame_corners(PlCanvas* c, int w, int h, int radius, PlColor bg, PlColor border);
 
   /* ---- top-level window (modal dialogs) ---- */
   PlWindow* pl_window_create(void* owner_native, const char* title, int w, int h, int min_w, int min_h,

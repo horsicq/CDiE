@@ -35,13 +35,17 @@ set "GUI=%SRC%\gui"
 set "DEP=%ROOT%\dep"
 set "RES=%GUI%\resource"
 set "STORE_BUILD=0"
-set "BUILD_INSTALLER=1"
+set "BUILD_INSTALLER="
 set "DO_REBUILD="
 for %%a in (%*) do (
     if /i "%%~a"=="store"       set "STORE_BUILD=1"
     if /i "%%~a"=="installer"   set "BUILD_INSTALLER=1"
     if /i "%%~a"=="noinstaller" set "BUILD_INSTALLER=0"
     if /i "%%~a"=="rebuild"     set "DO_REBUILD=1"
+)
+rem default: normal build makes an installer, Store build does not (unless "installer" is given)
+if not defined BUILD_INSTALLER (
+    if "%STORE_BUILD%"=="1" ( set "BUILD_INSTALLER=0" ) else ( set "BUILD_INSTALLER=1" )
 )
 
 rem --- Clean targets (no Visual Studio environment needed) -------------------
@@ -231,6 +235,17 @@ if errorlevel 1 ( echo BUILD FAILED ^(cdie_gui.exe^) & exit /b 1 )
 echo.
 echo Built in %OUT%\ :
 echo   cdie_gui.exe
+
+if "%BUILD_INSTALLER%"=="0" (
+    if not exist "%ROOT%\release" mkdir "%ROOT%\release"
+    if "%STORE_BUILD%"=="1" (
+        copy /y "%OUT%\cdie_gui.exe" "%ROOT%\release\cdie_gui_store.exe" >nul
+        echo Copied to %ROOT%\release\ : cdie_gui_store.exe
+    ) else (
+        copy /y "%OUT%\cdie_gui.exe" "%ROOT%\release\cdie_gui.exe" >nul
+        echo Copied to %ROOT%\release\ : cdie_gui.exe
+    )
+)
 
 if "%BUILD_INSTALLER%"=="1" (
     echo.

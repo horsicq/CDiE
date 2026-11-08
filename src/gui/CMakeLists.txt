@@ -26,14 +26,16 @@ if(WIN32)
         ${CMAKE_CURRENT_LIST_DIR}/core/tray.c
         ${CMAKE_CURRENT_LIST_DIR}/core/config.c
         ${CMAKE_CURRENT_LIST_DIR}/core/dlwatch.c
-        ${CMAKE_CURRENT_LIST_DIR}/core/updater.c
+        ${CMAKE_CURRENT_LIST_DIR}/core/dbupdater.c
+        ${CMAKE_CURRENT_LIST_DIR}/core/appupdate.c
         ${CMAKE_CURRENT_LIST_DIR}/core/i18n.c
         ${CMAKE_CURRENT_LIST_DIR}/panels/header.c
         ${CMAKE_CURRENT_LIST_DIR}/panels/infobar.c
         ${CMAKE_CURRENT_LIST_DIR}/panels/options.c
         ${CMAKE_CURRENT_LIST_DIR}/panels/entropy.c
         ${CMAKE_CURRENT_LIST_DIR}/panels/signatures.c
-        ${CMAKE_CURRENT_LIST_DIR}/panels/strings.c)
+        ${CMAKE_CURRENT_LIST_DIR}/panels/strings.c
+        ${CMAKE_CURRENT_LIST_DIR}/panels/ntview.c)
 else()
     target_sources(cdie_gui PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/main_gui_gtk.c)
@@ -46,9 +48,9 @@ target_sources(cdie_gui PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/controls/bottombar.c
     ${CMAKE_CURRENT_LIST_DIR}/controls/treeview.c
     ${CMAKE_CURRENT_LIST_DIR}/controls/hexviewer.c
-    ${CMAKE_CURRENT_LIST_DIR}/controls/disasmview.c  
+    ${CMAKE_CURRENT_LIST_DIR}/controls/disasmview.c
     ${CMAKE_CURRENT_LIST_DIR}/controls/palette.c
-    ${CMAKE_CURRENT_LIST_DIR}/core/disasm_backend.c  
+    ${CMAKE_CURRENT_LIST_DIR}/core/disasm_backend.c
     ${CMAKE_CURRENT_LIST_DIR}/core/virustotal.c
     ${CMAKE_CURRENT_LIST_DIR}/panels/sectionsview.c)
 
@@ -63,7 +65,7 @@ if(WIN32)
     if(CDIE_STORE_BUILD)
         target_compile_definitions(cdie_gui PRIVATE CDIE_STORE_BUILD)
     endif()
-	    target_compile_definitions(cdie_gui PRIVATE CDISASM_STATIC)
+    target_compile_definitions(cdie_gui PRIVATE CDISASM_STATIC)
     target_sources(cdie_gui PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/platform/platform_win32.c
         ${CMAKE_CURRENT_LIST_DIR}/resource/cdie_gui.rc)
@@ -84,13 +86,25 @@ else()
 endif()
 
 if(MSVC)
-    # The application resource owns the common-controls and DPI manifest.
+    foreach(_t die_engine cdisasm xxwidgets)
+    if(TARGET ${_t})
+        target_compile_options(${_t} PRIVATE
+            $<$<CONFIG:Release>:/O1>
+            $<$<CONFIG:Release>:/Oi>
+            $<$<CONFIG:Release>:/Gy>
+            $<$<CONFIG:Release>:/GF>)
+    endif()
+endforeach()
+
     target_link_options(cdie_gui PRIVATE /MANIFEST:NO)
-    target_compile_options(cdie_gui PRIVATE /utf-8)
+    target_compile_options(cdie_gui PRIVATE /utf-8
+        $<$<CONFIG:Release>:/O1>
+        $<$<CONFIG:Release>:/Gy>)
+    target_link_options(cdie_gui PRIVATE
+        $<$<CONFIG:Release>:/OPT:REF>
+        $<$<CONFIG:Release>:/OPT:ICF>)
+
     if(CDIE_NO_CRT AND NOT BUILD_SHARED_LIBS)
-        # CDIE_NO_CRT continues to govern the console and engine archive.
-        # xxwidgets uses the hosted runtime. Link it statically in this shape
-        # to match the archive and avoid adding a runtime DLL to the package.
         set_property(TARGET cdie_gui PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded")
         if(TARGET xxwidgets)
             set_property(TARGET xxwidgets PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded")
