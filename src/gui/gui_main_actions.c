@@ -11,6 +11,7 @@
 #include "gui_error.h"
 #include "app/cdie_hash.h"
 #include "app/cdie_translation.h"
+#include <xxfclib/die_engine/die_engine_db.h>
 #include <xxfclib/scan/xx_scan.h>
 #include <xxfclib/strings/xx_string.h>
 #include <stdio.h>

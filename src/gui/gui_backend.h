@@ -134,11 +134,11 @@ enum {
 unsigned int gui_backend_get_scan_modes(void);
 int gui_backend_set_scan_modes(unsigned int modes);
 
-/* Only compiled scanner implementations are accepted. Automatic currently
- * resolves to Detect It Easy; PEiD and YARA are not built into this frontend. */
+/* Only compiled scanner implementations are accepted. PEiD and YARA are not
+ * built into this frontend. */
 typedef struct gui_backend_scan_preferences {
     int recursive, profiling, sort, use_cache;
-    char engine[16]; /* "auto" or "die" */
+    char engine[16]; /* "die" */
 } gui_backend_scan_preferences;
 size_t gui_backend_engine_count(void);
 const char *gui_backend_engine_id(size_t index);

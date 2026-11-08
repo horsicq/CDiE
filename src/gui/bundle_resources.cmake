@@ -19,11 +19,11 @@ if(EXISTS "${CDISASM_DIR}/LICENSE")
     endforeach()
 endif()
 # cdie has no extra database: a db_extra beside db is never bundled. file(COPY)
-# never deletes, so a build tree that bundled one before keeps it; package
-# from a clean build tree.
+# never deletes, so a build tree that bundled one before would still carry it
+# into a package; RESOURCES_DIR is build output, so the leftover is removed.
 if(IS_DIRECTORY "${RESOURCES_DIR}/db_extra")
-    message(WARNING "cdie: ${RESOURCES_DIR}/db_extra is left over from an earlier build and is not used; "
-                    "package from a clean build tree")
+    file(REMOVE_RECURSE "${RESOURCES_DIR}/db_extra")
+    message(STATUS "cdie: removed ${RESOURCES_DIR}/db_extra left over from an earlier build")
 endif()
 if(DATABASE_DIR AND NOT DATABASE_DIR STREQUAL "NONE")
     foreach(database db db_custom)

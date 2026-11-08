@@ -29,7 +29,7 @@
 #define X_APPLICATIONNAME        "cdie"
 #endif
 #ifndef X_APPLICATIONVERSION
-#define X_APPLICATIONVERSION     "4.0.0"
+#define X_APPLICATIONVERSION     "4.1.0"
 #endif
 #define X_ORGANIZATIONNAME       "NTInfo"
 #define X_ORGANIZATIONDOMAIN     "ntinfo.biz"

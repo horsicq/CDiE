@@ -225,7 +225,7 @@ static xxwidgets_status scan_fill(scan_page *page, const gui_scan_page_values *v
             i < CHECK_BEHAVIORS ? (int)((values->modes >> (i - CHECK_MODES)) & 1u) : behavior(values, i - CHECK_BEHAVIORS);
         status = xxwidgets_widget_set_value(page->checks[i], value);
     }
-    if (status == XXWIDGETS_OK) status = xxwidgets_widget_set_value(page->engine, !xx_rt_strcmp(values->engine, "die") ? 1 : 0);
+    if (status == XXWIDGETS_OK) status = xxwidgets_widget_set_value(page->engine, 0);
     if (status == XXWIDGETS_OK && page->databases) {
         const char *paths[PATH_COUNT] = {page->databases->main_path, page->databases->custom_path};
         for (int i = 0; status == XXWIDGETS_OK && i < PATH_COUNT; ++i)
@@ -268,18 +268,17 @@ static xxwidgets_status scan_create_common(xxwidgets_widget *dialog, xxwidgets_r
     if (status == XXWIDGETS_OK) status = control(page, XXWIDGETS_LABEL, CDIE_N_("Scan engine"), (xxwidgets_rect){b.x, b.y + 10, 14, 1}, NULL);
     if (status == XXWIDGETS_OK) status = control(page, XXWIDGETS_COMBOBOX, "", (xxwidgets_rect){b.x + 14, b.y + 10, 28, 1}, &page->engine);
     if (status == XXWIDGETS_OK) {
-        /* The engine's own name stays as it is; "Automatic" is translated. */
-        const char *engines[2] = {CDIE_TR("Automatic"), "Detect It Easy (DiE)"};
-        xx_meta_string records[2] = {0};
-        xx_str_w_s names[2] = {{0}};
-        for (size_t i = 0; i < 2 && status == XXWIDGETS_OK; ++i) {
+        const char *engines[1] = {"Detect It Easy (DiE)"};
+        xx_meta_string records[1] = {0};
+        xx_str_w_s names[1] = {{0}};
+        for (size_t i = 0; i < 1 && status == XXWIDGETS_OK; ++i) {
             names[i].data = xx_str_utf8_to_unicode(engines[i]);
             if (!names[i].data) { status = XXWIDGETS_OUT_OF_MEMORY; break; }
             names[i].length = wcslen(names[i].data); names[i].capacity = names[i].length + 1; names[i].is_view = true;
             records[i].meta_string = &names[i]; records[i].var.type = XX_VAR_TYPE_UINT64; records[i].var.val.u64 = i;
         }
-        if (status == XXWIDGETS_OK) status = xxwidgets_combobox_set_records(page->engine, records, 2);
-        for (size_t i = 0; i < 2; ++i) xx_str_free_unicode(names[i].data);
+        if (status == XXWIDGETS_OK) status = xxwidgets_combobox_set_records(page->engine, records, 1);
+        for (size_t i = 0; i < 1; ++i) xx_str_free_unicode(names[i].data);
     }
     if (status == XXWIDGETS_OK) status = control(page, XXWIDGETS_BUTTON, CDIE_N_("Colors..."), (xxwidgets_rect){b.x + b.width - 18, b.y + 10, 18, 1}, &page->colors);
     if (status == XXWIDGETS_OK) status = control(page, XXWIDGETS_LABEL,
@@ -404,7 +403,7 @@ static xxwidgets_status scan_reset(void *state)
     xxwidgets_status status = xxwidgets_scan_options_init(&defaults.options);
     defaults.modes = GUI_SCAN_MODES_DEFAULT;
     defaults.scan_after_open = defaults.recursive = defaults.sort = defaults.highlight = 1;
-    xx_rt_memcpy(defaults.engine, "auto", 5);
+    xx_rt_memcpy(defaults.engine, "die", 4);
     xx_scan_color_options_init(&defaults.colors, 0); xx_scan_color_options_init(&defaults.dark_colors, 1);
     return status == XXWIDGETS_OK ? scan_fill(page, &defaults, 1) : status;
 }

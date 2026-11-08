@@ -16,7 +16,7 @@ void gui_options_values_init(gui_options_values *values)
     values->scan.recursive = 1;
     values->scan.sort = 1;
     values->scan.highlight = 1;
-    strcpy(values->scan.engine, "auto");
+    strcpy(values->scan.engine, "die");
     xx_scan_color_options_init(&values->scan.colors, 0);
     xx_scan_color_options_init(&values->scan.dark_colors, 1);
     (void)xxwidgets_font_options_init(&values->fonts);

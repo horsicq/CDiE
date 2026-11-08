@@ -43,6 +43,7 @@
 #include <xxnetlib/xxnetlib.h>
 
 #include <xxfclib/algo/md5/xx_md5.h>
+#include <xxfclib/die_engine/die_engine_db.h>
 #include <xxfclib/formats/archive/zip/xx_zip.h>
 #include <xxfclib/formats/xx_format.h>
 #include <xxfclib/fs/xx_fs.h>

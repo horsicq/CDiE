@@ -1358,7 +1358,10 @@ static int smoke_check_dialog(HWND dialog, int native_dialog, int retry)
         smoke_write(text);
         return smoke_fail_at(__LINE__, dialog, NULL);
     }
-    if (smoke_focus_known() && (!focus || (focus != dialog && !IsChild(dialog, focus)))) {
+    /* A layout-only pass can run in a headless session with no thread focus.
+     * Interactive dialog steps still require focus to remain in the dialog. */
+    if (g_smokeAction != SMOKE_MAIN_LAYOUT && smoke_focus_known() &&
+        (!focus || (focus != dialog && !IsChild(dialog, focus)))) {
         char text[160];
         if (retry) return -1;
         wsprintfA(text, "focus %p, active %p, foreground %p, dialog %p\r\n", (void *)focus, (void *)GetActiveWindow(),

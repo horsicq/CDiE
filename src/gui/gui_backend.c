@@ -54,7 +54,7 @@
 #include <xxfclib/formats/installer/ipa/xx_ipa.h>
 #include <xxfclib/formats/archive/rar/xx_rar.h>
 #include <xxfclib/data/xx_data.h>
-/* xx_format.h aliases fileType for format code; the scan result's member is fileType. */
+/* xx_format.h aliases fileType for database records. */
 #undef fileType
 #include <xxfclib/fs/xx_fs.h>
 #include <xxfclib/io/xx_io.h>
@@ -86,7 +86,7 @@ static const char *const g_dbNames[GUI_DB_COUNT] = {"db", "db_custom"};
 static char *g_pIncludeTags = NULL;
 static char *g_pExcludeTags = NULL;
 static char *g_info_path = NULL;
-static gui_backend_scan_preferences g_scan_preferences = {0, 0, 1, 0, "auto"};
+static gui_backend_scan_preferences g_scan_preferences = {0, 0, 1, 0, "die"};
 static uint64_t g_options_generation = 1, g_database_generation = 1;
 static xx_mutex_t *g_cache_lock;
 static struct {
@@ -122,16 +122,16 @@ void gui_backend_cache_statistics(uint64_t *hits, uint64_t *misses)
     if (g_cache_lock) xx_mutex_unlock(g_cache_lock);
 }
 
-size_t gui_backend_engine_count(void) { return 2; }
-const char *gui_backend_engine_id(size_t index) { return index == 0 ? "auto" : index == 1 ? "die" : NULL; }
-const char *gui_backend_engine_name(size_t index) { return index == 0 ? "Automatic" : index == 1 ? "Detect It Easy" : NULL; }
+size_t gui_backend_engine_count(void) { return 1; }
+const char *gui_backend_engine_id(size_t index) { return index == 0 ? "die" : NULL; }
+const char *gui_backend_engine_name(size_t index) { return index == 0 ? "Detect It Easy" : NULL; }
 
 static int valid_scan_preferences(const gui_backend_scan_preferences *p)
 {
     return p && (p->recursive == 0 || p->recursive == 1) && (p->profiling == 0 || p->profiling == 1) &&
         (p->sort == 0 || p->sort == 1) && (p->use_cache == 0 || p->use_cache == 1) &&
         xx_rt_memchr(p->engine, 0, sizeof(p->engine)) &&
-        (!xx_rt_strcmp(p->engine, "auto") || !xx_rt_strcmp(p->engine, "die"));
+        !xx_rt_strcmp(p->engine, "die");
 }
 
 int gui_backend_get_scan_preferences(gui_backend_scan_preferences *preferences)
@@ -180,7 +180,7 @@ int gui_backend_init(void)
     g_options.heuristic_scan = 1;
     g_options.verbose = 1;
     g_options.overlay_scan = 1;
-    g_scan_preferences = (gui_backend_scan_preferences){0, 0, 1, 0, "auto"};
+    g_scan_preferences = (gui_backend_scan_preferences){0, 0, 1, 0, "die"};
     g_options.recursive_scan = false;
     g_cache_lock = xx_mutex_create();
     g_cache.hits = g_cache.misses = 0;
@@ -674,7 +674,7 @@ static void describe_input(const char *path, int selected_type, const xx_scan_re
     xx_rt_memset(info->mode, 0, sizeof(info->mode));
     xx_rt_memset(info->architecture, 0, sizeof(info->architecture));
     xx_rt_memset(info->type, 0, sizeof(info->type));
-    if (!type_id && result) type_id = result->fileType;
+    if (!type_id && result) type_id = (int)result->compatibility_file_type;
     if (!gui_backend_file_facts(path, type_id, &facts)) return;
     copy_field(info->endianness, sizeof(info->endianness), facts.endianness);
     copy_field(info->mode, sizeof(info->mode), facts.mode);
@@ -826,7 +826,7 @@ static int scan_results_impl(const char *pUtf8Path, int nTypeId,
     }
 
     if (ppTypeName != NULL) {
-        pTypeName = cdie_strdup(xft_to_string(result.fileType));
+        pTypeName = cdie_strdup(xft_to_string((XFileType)result.compatibility_file_type));
     }
     if ((ppResultText && !pText) || (ppTypeName && !pTypeName)) {
         xx_rt_free(pText);

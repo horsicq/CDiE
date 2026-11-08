@@ -42,7 +42,7 @@ static int emit_record(const xx_scan_record *record, size_t parent, gui_backend_
     if (record->info && record->info[0]) xx_buf_appendf(&text, " [%s]", record->info);
     label = xx_buf_detach(&text, NULL);
     detection.name = record->name ? record->name : "Unknown";
-    detection.signature = record->signature;
+    detection.signature = record->source_ref;
     ok = label && callback(parent, label, type, &detection, user);
     xx_rt_free(label); xx_rt_free(type);
     return ok;
@@ -57,7 +57,7 @@ int gui_result_tree_emit(const xx_scan_result *result, int hide_unknown, gui_bac
     if (!result || result->nCount < 0 || (!result->pRecords && result->nCount) || !callback) return 0;
     groups = xx_rt_calloc((size_t)result->nCount + 1, sizeof(*groups));
     if (!groups) return 0;
-    if (!callback(SIZE_MAX, xft_to_string(result->fileType), "", NULL, user)) goto done;
+    if (!callback(SIZE_MAX, xx_scan_file_type_name(result->file_type), "", NULL, user)) goto done;
     for (i = 0; i < (size_t)result->nCount; ++i) {
         const xx_scan_record *record = &result->pRecords[i];
         if (!record->parent_id && record->scan_part == XX_SCAN_PART_INPUT) {

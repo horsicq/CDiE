@@ -54,9 +54,8 @@ set -euo pipefail
 #                                the temp directory; kept afterwards, so it
 #                                must not lie inside $TMPDIR/cdie_mac, which
 #                                every run deletes (CDIE_RELEASE_DIR neither).
-#                                A tree from an earlier version keeps the
-#                                db_extra it copied into die.app; the build
-#                                warns, and only a fresh tree drops it
+#                                A db_extra an earlier version copied into
+#                                die.app is removed by the build
 #   CDIE_RELEASE_DIR             where the packages go, default <repo>/release
 #   MACOS_PKG_IDENTIFIER         installer package id, default com.ntinfo.cdie
 #   MACOS_ADHOC_SIGN             what die.app gets when it is not signed with a

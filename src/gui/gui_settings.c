@@ -53,7 +53,7 @@ enum setting_kind {
     SK_LAST_DIRECTORY, /* empty while saving the last directory is off */
     SK_RECENT,         /* cdie's history; imports Detect It Easy's list while it has none (a
                         * one-entry INI list is Qt's @Variant(...), which is not read) */
-    SK_ENGINE,         /* unknown engines mean auto here, the stored one is kept */
+    SK_ENGINE,         /* unavailable engines resolve to die; the stored value is kept */
     SK_FONT,           /* QFont::toString; index 0-3 font roles, 4 Hex, 5 Disasm */
     SK_COLOR,          /* "#rrggbb|#rrggbb"; group 0 scan, 2 disassembly */
     SK_PLAIN_COLOR,    /* cdie-only decimal half; group 0 scan, 1 dark scan, 2 disassembly */
@@ -829,7 +829,7 @@ static char *stored_canonical(const xx_settings *store, const setting_spec *spec
         return value && value->type == XX_SETTINGS_VALUE_STRING_LIST ? recent_from_list(value) : NULL;
     case SK_ENGINE:
         text = value_text(value, &size);
-        return text ? text_dup(same_text(text, size, "die", 0) ? "die" : "auto") : NULL;
+        return text ? text_dup("die") : NULL;
     case SK_FONT: {
         xxwidgets_font font;
         text_fields fields;
@@ -919,7 +919,7 @@ static char *describe(const setting_spec *spec, const gui_options_values *values
     case SK_RECENT:
         return values->file.save_recent_files ? text_copy((const char *)member, bounded_length((const char *)member, spec->capacity)) : text_dup("");
     case SK_ENGINE:
-        return text_dup(strcmp(values->scan.engine, "die") ? "auto" : "die");
+        return text_dup("die");
     case SK_FONT:
         return font_text(values_font(source, spec->index));
     case SK_COLOR:
