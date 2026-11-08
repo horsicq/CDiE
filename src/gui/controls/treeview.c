@@ -102,7 +102,6 @@ static void badge_colors(const char* type, PlColor* bg, PlColor* fg)
   *bg = CLR_BTN_GHOST; *fg = CLR_TEXT_SECONDARY;
 }
 
-/* "(Heur) Packer" -> "(Heur) <translated Packer>". Colours still use the English type. */
 static void type_label(const char* type, char* out, size_t cap)
 {
   char prefix[40];

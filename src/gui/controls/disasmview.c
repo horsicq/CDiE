@@ -220,16 +220,16 @@ static void paint_scroll(DisasmView* dv, PlCanvas* c)
   int track, th, ty;
   uint64_t range;
   double frac;
-  if (!dv->open || !dv->over) return;
+  if (!dv->open) return;
   range = dv->hi - dv->lo;
   if (range < 2) return;
   track = dv->r_sb.b - dv->r_sb.t;
   th = (int)((double)track * (double)(dv->vis_rows * 4) / (double)range);
-  if (th < 18) th = 18;
+  if (th < 24) th = 24;
   if (th > track) th = track;
   frac = (double)(dv->top - dv->lo) / (double)range;
   ty = dv->r_sb.t + (int)((track - th) * frac);
-  pl_round_rect(c, mkr(dv->r_sb.l, ty, dv->r_sb.r, ty + th), CLR_BTN_GHOST_BD, CLR_BTN_GHOST_BD, 3);
+  pl_round_rect(c, mkr(dv->W - 6, ty, dv->W - 3, ty + th), CLR_BTN_GHOST_BD, CLR_BTN_GHOST_BD, 1);
 }
 
 static void on_paint(void* u, PlCanvas* c, int w, int h)
@@ -388,8 +388,6 @@ static const PlWidgetOps s_ops = {
   on_key, on_wheel
 };
 
-/* ---- public API ---- */
-
 DisasmView* disasmview_create(void* parent_native, PlFont* mono_font, int x, int y, int w, int h)
 {
   DisasmView* dv = (DisasmView*)calloc(1, sizeof(*dv));
@@ -460,7 +458,6 @@ void disasmview_goto_offset(DisasmView* dv, uint64_t off)
   if (off < dv->lo || off >= dv->hi) set_range_for(dv, off);
   dv->sel = off; dv->has_sel = 1;
   dv->top = off;
-  /* Show a few instructions of context above the target. */
   { int i; for (i = 0; i < 3 && dv->top > dv->lo; ++i) dv->top = prev_start(dv, dv->top); }
   redraw(dv);
 }

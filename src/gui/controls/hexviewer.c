@@ -696,13 +696,15 @@ static void paint_scroll(HexViewer* hv, PlCanvas* c)
   uint64_t trows = total_rows(hv);
   int track, th, ty;
   double frac;
-  if (!hv->over || trows <= (uint64_t)hv->vis_rows) return;
+  if (trows <= (uint64_t)hv->vis_rows) return;
   track = hv->r_sb.b - hv->r_sb.t;
   th = (int)((double)track * hv->vis_rows / (double)trows);
-  if (th < 18) th = 18;
+  if (th < 24) th = 24;
+  if (th > track) th = track;
   frac = max_scroll(hv) ? (double)hv->scroll / (double)max_scroll(hv) : 0.0;
   ty = hv->r_sb.t + (int)((track - th) * frac);
-  pl_round_rect(c, mkr(hv->r_sb.l, ty, hv->r_sb.r, ty + th), CLR_BTN_GHOST_BD, CLR_BTN_GHOST_BD, 3);
+  pl_round_rect(c, mkr(hv->hex_right - 6, ty, hv->hex_right - 3, ty + th),
+    CLR_BTN_GHOST_BD, CLR_BTN_GHOST_BD, 1);
 }
 
 static void insp_title(HexViewer* hv, PlCanvas* c, int x, int r, int y, const char* t)

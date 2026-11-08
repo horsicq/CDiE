@@ -25,6 +25,7 @@
 #ifndef CDIE_GUI_RESOURCE_H
 #define CDIE_GUI_RESOURCE_H
 
+#define IDI_APP								101
 #define IDD_OPTIONS           200
 #define IDC_OPT_MAIN          201
 #define IDC_OPT_MAIN_BROWSE   202

@@ -273,7 +273,6 @@ static int int_key(const char* line, const char* key, int* out)
   return 1;
 }
 
-/* Order matches OPTIONS_FONT_ROLES: Controls, Table views, Tree views, Text edits */
 static const char* s_font_role[CDIE_FONT_ROLES] = { "controls", "tables", "trees", "edits" };
 
 static void apply_font_field(CdieConfig* cfg, int k, const char* p)

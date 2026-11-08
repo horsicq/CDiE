@@ -24,7 +24,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "controls/sidebar.h"   /* same includes as sidebar.c, brings in the pl_* API */
+#include "controls/sidebar.h"
 #include "panels/entropy.h"
 #include "theme/theme.h"
 #include "core/i18n.h"
@@ -38,13 +38,10 @@
 #define HDR_H         24
 #define EV_PAD        18
 
- /* Text alignment flags. EV_L matches how sidebar.c draws left text. If your
-	* center/right flags are named differently, change these two lines. */
 #define EV_L  PL_TEXT_ELLIPSIS
 #define EV_C  PL_TEXT_CENTER
 #define EV_R  (PL_TEXT_RIGHT | PL_TEXT_ELLIPSIS)
 
-	/* PlColor is 0xRRGGBB */
 #define COL_LOW   0x43A047
 #define COL_MID   0xFFB300
 #define COL_HIGH  0xE53935
@@ -92,8 +89,6 @@ struct EntropyView {
 	PlRect   rb[B_COUNT], rTable, rChart;
 	PlFont* fN, * fB, * fBig;
 };
-
-/* ------------------------------------------------------------- helpers */
 
 static const char* T(const char* k) { const char* t = translate(k); return t ? t : k; }
 
@@ -148,7 +143,6 @@ static unsigned le32(const unsigned char* p)
 	return p[0] | (p[1] << 8) | (p[2] << 16) | ((unsigned)p[3] << 24);
 }
 
-/* ------------------------------------------------------------ computing */
 
 static double ev_calc(const unsigned* h, uint64_t total)
 {
@@ -163,7 +157,6 @@ static double ev_calc(const unsigned* h, uint64_t total)
 	return e;
 }
 
-/* Entropy of [off, off+size); big ranges are sampled (at most maxch chunks of 64 KiB). */
 static double ev_range(EntropyView* d, uint64_t off, uint64_t size, unsigned* hist, int maxch)
 {
 	unsigned local[256];
@@ -316,8 +309,6 @@ static void ev_load(EntropyView* d)
 	d->loaded = 1;
 }
 
-/* ------------------------------------------------------------ selection */
-
 static void ev_select(EntropyView* d, uint64_t off, uint64_t size, const char* label, int reg)
 {
 	if (off >= d->fsize || !size) return;
@@ -350,8 +341,6 @@ static int ev_find_region(const EntropyView* d, uint64_t off)
 		if (off >= d->reg[i].off && off < d->reg[i].off + d->reg[i].size) return i;
 	return -1;
 }
-
-/* --------------------------------------------------------------- layout */
 
 static void ev_layout(EntropyView* d, int w, int h)
 {
@@ -411,8 +400,6 @@ static int ev_hit_btn(const EntropyView* d, int x, int y)
 	return -1;
 }
 
-/* ---------------------------------------------------------------- paint */
-
 static void ev_button(EntropyView* d, PlCanvas* c, int b, const char* label, int active)
 {
 	PlRect r = d->rb[b];
@@ -465,14 +452,16 @@ static void ev_paint_table(EntropyView* d, PlCanvas* c)
 		txt(c, d->fN, t.l + CX[4], y, t.r - 14, y + ROW_H, g->name, CLR_TEXT_PRIMARY, EV_L);
 	}
 
-	if (d->nreg > d->vis) {              /* scrollbar (click the track to jump) */
-		int th = t.b - t.t - HDR_H - 4;
+	if (d->nreg > d->vis) {              
+		int top = t.t + HDR_H + 2;
+		int th = t.b - 2 - top;
 		int len = th * d->vis / d->nreg;
-		int pos = th * d->scroll / d->nreg;
-		if (len < 16) len = 16;
-		pl_fill(c, t.r - 8, t.t + HDR_H + 2, t.r - 3, t.b - 2, mixc(CLR_SEARCH_BG, CLR_TEXT_PRIMARY, 14));
-		pl_fill(c, t.r - 8, t.t + HDR_H + 2 + pos, t.r - 3, t.t + HDR_H + 2 + pos + len,
-			mixc(CLR_SEARCH_BG, CLR_TEXT_PRIMARY, 80));
+		int pos;
+		if (len < 24) len = 24;
+		if (len > th) len = th;
+		pos = (th - len) * d->scroll / (d->nreg - d->vis);
+		pl_round_rect(c, mk(t.r - 6, top + pos, t.r - 3, top + pos + len),
+			CLR_BTN_GHOST_BD, CLR_BTN_GHOST_BD, 1);
 	}
 }
 
@@ -722,8 +711,6 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 	}
 }
 
-/* --------------------------------------------------------------- events */
-
 static void ev_copy(EntropyView* d)
 {
 	size_t cap = (size_t)(d->nreg + 8) * 256, used = 0;
@@ -861,7 +848,7 @@ static void on_wheel(void* u, int x, int y, int delta, int mods)
 	EntropyView* d = (EntropyView*)u;
 	(void)x; (void)y; (void)mods;
 	if (!d->loaded || !delta) return;
-	entropyview_scroll(d, delta > 0 ? -3 : 3);   /* flip the signs if it scrolls backwards */
+	entropyview_scroll(d, delta > 0 ? -3 : 3);   
 }
 
 static void on_key(void* u, int key, uint32_t ch, int mods)
@@ -900,8 +887,6 @@ static const PlWidgetOps s_ops = {
 	on_paint, on_mouse_move, on_mouse_leave, on_mouse_down, on_resize,
 	on_hand, on_destroy, on_key, on_wheel
 };
-
-/* ----------------------------------------------------------- public API */
 
 EntropyView* entropyview_create(void* parent_native, int x, int y, int w, int h)
 {

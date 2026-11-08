@@ -29,7 +29,7 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <winhttp.h>
-#pragma comment(lib, "winhttp.lib")   /* MinGW: add -lwinhttp */
+#pragma comment(lib, "winhttp.lib")   
 #else
 #include <pthread.h>
 #include <unistd.h>
@@ -42,8 +42,6 @@
 #ifdef VT_USE_CURL
 #include <curl/curl.h>
 #endif
-
-/* ================= SHA-256 (portable) ================= */
 
 typedef struct {
 	uint32_t h[8];
@@ -169,8 +167,6 @@ int vt_sha256_file(const char* utf8_path, char out_hex[65])
 	return 1;
 }
 
-/* ================= Browser fallback ================= */
-
 static int is_hex64(const char* h)
 {
 	int i;
@@ -213,8 +209,6 @@ int vt_open_report(const char* sha256_hex)
 #endif
 }
 
-/* ================= API key ================= */
-
 static char s_api_key[128];
 
 static int is_space_ch(char c)
@@ -238,8 +232,6 @@ static const char* vt_key(void)
 	return getenv("VT_API_KEY");   /* fallback */
 }
 
-/* ================= API lookup ================= */
-
 static int json_int(const char* hay, const char* key)
 {
 	const char* p = strstr(hay, key);
@@ -261,7 +253,6 @@ static void parse_stats(const char* body, VtResult* out)
 }
 
 #if defined(_WIN32)
-/* ---- Windows: built-in WinHTTP, no extra DLLs ---- */
 
 int vt_api_available(void)
 {
@@ -322,7 +313,7 @@ int vt_lookup(const char* sha256_hex, VtResult* out)
 		ok = 1;
 	}
 	else if (code == 404) {
-		ok = 1;   /* completed, just not known */
+		ok = 1;   
 	}
 
 done:
@@ -334,8 +325,6 @@ done:
 }
 
 #elif defined(VT_USE_CURL)
-/* ---- Optional: link against libcurl (define VT_USE_CURL) ---- */
-
 typedef struct { char* data; size_t len; } Mem;
 
 static size_t write_cb(void* ptr, size_t size, size_t nmemb, void* ud)
@@ -383,7 +372,7 @@ int vt_lookup(const char* sha256_hex, VtResult* out)
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &mem);
 	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 20L);
 	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);   /* required for use from a thread */
+	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);   
 
 	if (curl_easy_perform(curl) == CURLE_OK) {
 		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &code);
@@ -398,7 +387,6 @@ int vt_lookup(const char* sha256_hex, VtResult* out)
 }
 
 #else
-/* ---- Linux / macOS default: use the system `curl` tool ---- */
 
 static int key_is_safe(const char* k)
 {
@@ -433,13 +421,12 @@ int vt_lookup(const char* sha256_hex, VtResult* out)
 	memset(out, 0, sizeof(*out));
 	if (!key || !key[0] || !is_hex64(sha256_hex) || !key_is_safe(key)) return 0;
 
-	/* curl reads its options from stdin, so the key never shows in `ps` */
 	snprintf(cfg, sizeof(cfg),
 		"url = \"https://www.virustotal.com/api/v3/files/%s\"\n"
 		"header = \"x-apikey: %s\"\n", sha256_hex, key);
 	cfglen = strlen(cfg);
 
-	signal(SIGPIPE, SIG_IGN);   /* curl missing => don't die on write */
+	signal(SIGPIPE, SIG_IGN);  
 	if (pipe(inp) < 0) return 0;
 	if (pipe(outp) < 0) { close(inp[0]); close(inp[1]); return 0; }
 
@@ -498,8 +485,6 @@ int vt_lookup(const char* sha256_hex, VtResult* out)
 
 #endif
 
-/* ================= GUI page ================= */
-
 enum { VTS_NOFILE, VTS_READY, VTS_BUSY, VTS_DONE, VTS_NOTFOUND, VTS_NOKEY, VTS_ERROR };
 
 struct VtView {
@@ -525,10 +510,9 @@ struct VtView {
 	pthread_t th;
 #endif
 
-	/* buttons from last paint */
 	PlRect btn_main, btn_browser, btn_copy;
 	int has_main, has_browser, has_copy;
-	int hover;                       /* 0 none, 1 main, 2 browser, 3 copy */
+	int hover;                       
 
 	int (*copy_cb)(void*, const char*);
 	void* copy_user;
@@ -609,9 +593,6 @@ static void start_check(VtView* v)
 	pl_invalidate(v->w, NULL);
 }
 
-/* ---- painting ---- */
-
-/* palette */
 #define VT_RED    ((PlColor)0xD9534F)
 #define VT_AMBER  ((PlColor)0xF0AD4E)
 #define VT_GREEN  ((PlColor)0x5CB85C)
@@ -641,7 +622,6 @@ static void draw_button(VtView* v, PlCanvas* c, PlRect r, const char* label,
 	pl_text(c, v->fText, tr, label, primary ? VT_WHITE : CLR_TEXT_PRIMARY, PL_TEXT_LEFT);
 }
 
-/* filled status pill, e.g. "CLEAN" / "MALICIOUS" */
 static void draw_pill(VtView* v, PlCanvas* c, int x, int y, const char* label, PlColor col)
 {
 	int w = (int)strlen(label) * 8 + 24;
@@ -651,7 +631,6 @@ static void draw_pill(VtView* v, PlCanvas* c, int x, int y, const char* label, P
 	pl_text(c, v->fText, tr, label, VT_WHITE, PL_TEXT_LEFT);
 }
 
-/* colored swatch + "Label  count" */
 static void draw_legend(VtView* v, PlCanvas* c, int x, int y, PlColor col,
 	const char* label, int n)
 {
@@ -682,7 +661,6 @@ static void draw_bar(PlCanvas* c, int x, int y, int w, int h, const VtResult* r)
 	}
 }
 
-/* card with a headline and an optional second line; returns card height */
 static int draw_message(VtView* v, PlCanvas* c, int x, int y, int w,
 	const char* l1, PlColor c1, const char* l2)
 {
@@ -707,7 +685,6 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 	pl_round_rect(c, frame, CLR_PANEL_BODY, CLR_PANEL_BORDER, 12);
 	if (tw < 40) return;
 
-	/* ---- header ---- */
 	put_text(c, v->fTitle, x, y, tw, 24, translate("VirusTotal"), CLR_TEXT_PRIMARY);
 	y += 24;
 	put_text(c, v->fText, x, y, tw, 20,
@@ -723,7 +700,6 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 		return;
 	}
 
-	/* ---- file card ---- */
 	{
 		const char* name = v->path, * p;
 		int ch = v->hash[0] ? 62 : 40;
@@ -754,7 +730,6 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 		return;
 	}
 
-	/* ---- result ---- */
 	if (v->state == VTS_DONE) {
 		const VtResult* r = &v->res;
 		int total = r->malicious + r->suspicious + r->harmless + r->undetected;
@@ -790,7 +765,6 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 		y += draw_message(v, c, x, y, tw, v->err, VT_RED, NULL) + 20;
 	}
 
-	/* ---- actions ---- */
 	btn.l = x; btn.t = y; btn.r = x + 120; btn.b = y + 34;
 	draw_button(v, c, btn, translate("Re-check"), 0, v->hover == 1);
 	v->btn_main = btn; v->has_main = 1;

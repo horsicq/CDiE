@@ -38,7 +38,7 @@
 #include "panels/signatures.h"
 #include "core/gui_backend.h"
 #include "core/config.h" 
-#include "core/updater.h"
+#include "core/dbupdater.h"
 #include "core/i18n.h"
 #include "theme/theme.h"
 

@@ -54,6 +54,7 @@
 #include "panels/sectionsview.h"
 #include "panels/signatures.h"
 #include "panels/strings.h"
+#include "panels/ntview.h"
 #include "controls/sidebar.h"
 #include "controls/tabbar.h"
 #include "controls/bottombar.h"
@@ -65,6 +66,7 @@
 #include "core/dlwatch.h"
 #include "core/i18n.h"
 #include "core/virustotal.h"
+#include "core/appupdate.h"
 
 
  /* Store / VSIX builds get updates from Microsoft */
@@ -75,6 +77,16 @@
 #define CDIE_SHOW_UPDATES 1
 #define CDIE_SHOW_CONTEXT 1
 #endif
+
+#if defined(_WIN64)
+#define CDIE_ARCH "x64"
+#else
+#define CDIE_ARCH "x86"
+#endif
+
+#define SIDEBAR_PALETTE_ID  1000
+#define PALETTE_ACTION_BASE 100
+#define INFO_LEN            80
 
 enum gui_action {
 	ACTION_NONE, ACTION_SCAN, ACTION_BROWSE,
@@ -100,9 +112,11 @@ static EntropyView* g_entropy;
 static Tabbar* g_tabbar;
 static VtView* g_vt;
 static SecView* g_sec;
+static NtView* g_nt;
 static Palette* g_pal;
 static SigView* g_sig;
 static StringsView* g_str;
+static HWND g_palWnd;
 
 static int g_page = NAV_OVERVIEW;
 static HANDLE g_hexFile = INVALID_HANDLE_VALUE;
@@ -122,16 +136,36 @@ static char g_lang[32];
 
 static void layout(void);
 
-static void on_tray_exit(void* user)
+static HWND native(xxwidgets_widget* widget)
 {
-	(void)user;
+	return (HWND)xxwidgets_widget_native_handle(widget);
+}
+
+static void quit_app(void)
+{
 	g_running = 0;
 	xxwidgets_app_quit(g_app, 0);
 }
 
-static HWND native(xxwidgets_widget* widget)
+static void on_tray_exit(void* user)
 {
-	return (HWND)xxwidgets_widget_native_handle(widget);
+	(void)user;
+	quit_app();
+}
+
+static void set_app_icon(void)
+{
+	static const int kind[2] = { ICON_BIG, ICON_SMALL };
+	static const int cx[2] = { SM_CXICON, SM_CXSMICON };
+	static const int cy[2] = { SM_CYICON, SM_CYSMICON };
+	HWND hwnd = native(g_window);
+	int i;
+	if (!hwnd) return;
+	for (i = 0; i < 2; ++i) {
+		HICON ico = (HICON)LoadImageW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(IDI_APP),
+			IMAGE_ICON, GetSystemMetrics(cx[i]), GetSystemMetrics(cy[i]), LR_SHARED);
+		if (ico) SendMessageW(hwnd, WM_SETICON, kind[i], (LPARAM)ico);
+	}
 }
 
 static WCHAR* utf8_to_wide(const char* text)
@@ -174,15 +208,6 @@ static void set_status(const char* text)
 	if (g_bottombar) bottombar_set_status(g_bottombar, text);
 }
 
-static void set_status_wide(const WCHAR* wide)
-{
-	char* text = wide_to_utf8(wide);
-	if (text) {
-		set_status(text);
-		HeapFree(GetProcessHeap(), 0, text);
-	}
-}
-
 static void set_scan_path(const char* path)
 {
 	char* copy = copy_utf8(path);
@@ -220,176 +245,151 @@ static void hex_close(void)
 	g_hexFile = INVALID_HANDLE_VALUE;
 }
 
-static void dasm_load(void)
-{
-	LARGE_INTEGER sz;
-	if (!g_dasm) return;
-	if (g_hexFile == INVALID_HANDLE_VALUE || !GetFileSizeEx(g_hexFile, &sz)) {
-		disasmview_close(g_dasm);
-		return;
-	}
-	disasmview_open(g_dasm, hex_read, NULL, (uint64_t)sz.QuadPart);
-}
-
-static void ent_load(const char* utf8_path)
-{
-	LARGE_INTEGER sz;
-	if (!g_entropy) return;
-	if (g_hexFile == INVALID_HANDLE_VALUE || !GetFileSizeEx(g_hexFile, &sz)) {
-		entropyview_close(g_entropy);
-		return;
-	}
-	entropyview_open(g_entropy, utf8_path, hex_read, NULL, (uint64_t)sz.QuadPart);
-}
-
-static void hex_open(const char* utf8_path)
+static void open_file_views(const char* utf8_path)
 {
 	WCHAR* wide = utf8_to_wide(utf8_path);
 	LARGE_INTEGER size;
+	int ok = 0;
+
 	hex_close();
-	if (!wide) return;
-	g_hexFile = CreateFileW(wide, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
-		NULL, OPEN_EXISTING, 0, NULL);
-	HeapFree(GetProcessHeap(), 0, wide);
-	if (g_hexFile == INVALID_HANDLE_VALUE) return;
-	if (!GetFileSizeEx(g_hexFile, &size)) { hex_close(); return; }
-	if (g_hex) hexview_set_source(g_hex, (uint64_t)size.QuadPart, hex_read, NULL, 0);
+	if (wide) {
+		g_hexFile = CreateFileW(wide, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+			NULL, OPEN_EXISTING, 0, NULL);
+		HeapFree(GetProcessHeap(), 0, wide);
+	}
+	if (g_hexFile != INVALID_HANDLE_VALUE) {
+		ok = GetFileSizeEx(g_hexFile, &size);
+		if (!ok) hex_close();
+	}
+
+	if (g_hex && ok)
+		hexview_set_source(g_hex, (uint64_t)size.QuadPart, hex_read, NULL, 0);
+
+	if (g_dasm) {
+		if (ok) disasmview_open(g_dasm, hex_read, NULL, (uint64_t)size.QuadPart);
+		else    disasmview_close(g_dasm);
+	}
+	if (g_entropy) {
+		if (ok) entropyview_open(g_entropy, utf8_path, hex_read, NULL, (uint64_t)size.QuadPart);
+		else    entropyview_close(g_entropy);
+	}
+	if (g_nt) {
+		if (ok) ntview_open(g_nt, hex_read, NULL, (uint64_t)size.QuadPart);
+		else    ntview_close(g_nt);
+	}
 }
 
 typedef struct {
-	WCHAR type_str[80];
-	WCHAR size_str[80];
-	WCHAR size_sub[80];
-	WCHAR ep_str[80];
-	WCHAR ep_sub[80];
-	WCHAR base_str[80];
-	WCHAR base_sub[80];
+	char type_str[INFO_LEN];
+	char size_str[INFO_LEN];
+	char size_sub[INFO_LEN];
+	char ep_str[INFO_LEN];
+	char ep_sub[INFO_LEN];
+	char base_str[INFO_LEN];
+	char base_sub[INFO_LEN];
 } FileInfo;
 
-static void format_size(ULONGLONG bytes, WCHAR* main_out, WCHAR* sub_out)
+static void format_size(ULONGLONG bytes, char* main_out, char* sub_out)
 {
 	if (bytes >= 1024ULL * 1024) {
 		ULONGLONG n100 = (bytes * 100ULL) / (1024ULL * 1024);
-		wsprintfW(main_out, L"%u.%02u MiB",
+		snprintf(main_out, INFO_LEN, "%u.%02u MiB",
 			(unsigned)(n100 / 100), (unsigned)(n100 % 100));
 	}
 	else if (bytes >= 1024) {
 		ULONGLONG n10 = (bytes * 10ULL) / 1024;
-		wsprintfW(main_out, L"%u.%u KiB",
+		snprintf(main_out, INFO_LEN, "%u.%u KiB",
 			(unsigned)(n10 / 10), (unsigned)(n10 % 10));
 	}
 	else {
-		wsprintfW(main_out, L"%u B", (unsigned)bytes);
+		snprintf(main_out, INFO_LEN, "%u B", (unsigned)bytes);
 	}
-	if (bytes < 1000000ULL) {
-		wsprintfW(sub_out, L"%u bytes", (unsigned)bytes);
+
+	if (bytes < 1000000ULL)
+		snprintf(sub_out, INFO_LEN, "%u bytes", (unsigned)bytes);
+	else
+		snprintf(sub_out, INFO_LEN, "%u,%06u bytes",
+			(unsigned)(bytes / 1000000ULL), (unsigned)(bytes % 1000000ULL));
+}
+
+static int read_at(HANDLE file, DWORD offset, void* buf, DWORD len)
+{
+	DWORD got = 0;
+	SetFilePointer(file, (LONG)offset, NULL, FILE_BEGIN);
+	return ReadFile(file, buf, len, &got, NULL) && got == len;
+}
+
+static void read_pe_info(const WCHAR* wpath, FileInfo* fi)
+{
+	HANDLE file = CreateFileW(wpath, GENERIC_READ, FILE_SHARE_READ,
+		NULL, OPEN_EXISTING, 0, NULL);
+	WORD dos_magic = 0, opt_magic = 0;
+	DWORD pe_off = 0, pe_sig = 0, ep = 0;
+	ULONGLONG base = 0;
+
+	if (file == INVALID_HANDLE_VALUE) return;
+
+	if (read_at(file, 0, &dos_magic, 2) && dos_magic == 0x5A4D
+		&& read_at(file, 0x3C, &pe_off, 4)
+		&& read_at(file, pe_off, &pe_sig, 4) && pe_sig == 0x00004550
+		&& read_at(file, pe_off + 24, &opt_magic, 2)
+		&& (opt_magic == 0x10B || opt_magic == 0x20B)) {
+
+		read_at(file, pe_off + 40, &ep, 4);
+		if (opt_magic == 0x10B) { /* PE32 */
+			DWORD base32 = 0;
+			read_at(file, pe_off + 52, &base32, 4);
+			base = base32;
+		}
+		else { /* PE32+ */
+			read_at(file, pe_off + 48, &base, 8);
+		}
+
+		snprintf(fi->ep_str, INFO_LEN, "0x%08X", (unsigned)ep);
+		if (base > 0xFFFFFFFF)
+			snprintf(fi->base_str, INFO_LEN, "0x%08X%08X",
+				(unsigned)(base >> 32), (unsigned)(base & 0xFFFFFFFF));
+		else
+			snprintf(fi->base_str, INFO_LEN, "0x%08X", (unsigned)base);
+		snprintf(fi->ep_sub, INFO_LEN, "RVA");
+		snprintf(fi->base_sub, INFO_LEN, "Preferred load");
 	}
-	else {
-		unsigned hi = (unsigned)(bytes / 1000000ULL);
-		unsigned lo = (unsigned)(bytes % 1000000ULL);
-		wsprintfW(sub_out, L"%u,%06u bytes", hi, lo);
-	}
+	CloseHandle(file);
 }
 
 static void get_file_info(const char* utf8_path, const char* type_name, FileInfo* fi)
 {
 	WCHAR* wpath = utf8_to_wide(utf8_path);
+	WIN32_FILE_ATTRIBUTE_DATA fa = { 0 };
 
 	/* type string */
-	if (type_name && type_name[0]) {
-		WCHAR* wt = utf8_to_wide(type_name);
-		if (wt) { lstrcpynW(fi->type_str, wt, 79); HeapFree(GetProcessHeap(), 0, wt); }
-		else lstrcpyW(fi->type_str, L"Unknown");
-	}
-	else {
-		lstrcpyW(fi->type_str, L"Unknown");
-	}
+	snprintf(fi->type_str, INFO_LEN, "%s",
+		type_name && type_name[0] ? type_name : "Unknown");
 
 	/* file size */
-	lstrcpyW(fi->size_str, L"N/A");
-	lstrcpyW(fi->size_sub, L"");
-	if (wpath) {
-		WIN32_FILE_ATTRIBUTE_DATA fa = { 0 };
-		if (GetFileAttributesExW(wpath, GetFileExInfoStandard, &fa)) {
-			ULONGLONG bytes =
-				((ULONGLONG)fa.nFileSizeHigh << 32) | fa.nFileSizeLow;
-			format_size(bytes, fi->size_str, fi->size_sub);
-		}
-	}
+	snprintf(fi->size_str, INFO_LEN, "N/A");
+	fi->size_sub[0] = 0;
 
 	/* default EP / base */
-	lstrcpyW(fi->ep_str, L"N/A");
-	lstrcpyW(fi->ep_sub, L"");
-	lstrcpyW(fi->base_str, L"N/A");
-	lstrcpyW(fi->base_sub, L"");
+	snprintf(fi->ep_str, INFO_LEN, "N/A");
+	fi->ep_sub[0] = 0;
+	snprintf(fi->base_str, INFO_LEN, "N/A");
+	fi->base_sub[0] = 0;
+
+	if (!wpath) return;
+
+	if (GetFileAttributesExW(wpath, GetFileExInfoStandard, &fa))
+		format_size(((ULONGLONG)fa.nFileSizeHigh << 32) | fa.nFileSizeLow,
+			fi->size_str, fi->size_sub);
 
 	/* Try to read PE optional header */
-	if (wpath) {
-		HANDLE hf = CreateFileW(wpath, GENERIC_READ, FILE_SHARE_READ,
-			NULL, OPEN_EXISTING, 0, NULL);
-		if (hf != INVALID_HANDLE_VALUE) {
-			WORD  dos_magic = 0;
-			DWORD read = 0, pe_off = 0;
-			if (ReadFile(hf, &dos_magic, 2, &read, NULL) && read == 2
-				&& dos_magic == 0x5A4D) {
-				SetFilePointer(hf, 0x3C, NULL, FILE_BEGIN);
-				if (ReadFile(hf, &pe_off, 4, &read, NULL) && read == 4) {
-					DWORD pe_sig = 0;
-					SetFilePointer(hf, (LONG)pe_off, NULL, FILE_BEGIN);
-					if (ReadFile(hf, &pe_sig, 4, &read, NULL)
-						&& read == 4 && pe_sig == 0x00004550) {
-						WORD opt_magic = 0;
-						SetFilePointer(hf, (LONG)(pe_off + 24), NULL, FILE_BEGIN);
-						if (ReadFile(hf, &opt_magic, 2, &read, NULL) && read == 2) {
-							if (opt_magic == 0x10B) { /* PE32 */
-								DWORD ep32 = 0, base32 = 0;
-								SetFilePointer(hf, (LONG)(pe_off + 40), NULL, FILE_BEGIN);
-								ReadFile(hf, &ep32, 4, &read, NULL);
-								SetFilePointer(hf, (LONG)(pe_off + 52), NULL, FILE_BEGIN);
-								ReadFile(hf, &base32, 4, &read, NULL);
-								wsprintfW(fi->ep_str, L"0x%08X", ep32);
-								wsprintfW(fi->base_str, L"0x%08X", base32);
-								lstrcpyW(fi->ep_sub, L"RVA");
-								lstrcpyW(fi->base_sub, L"Preferred load");
-							}
-							else if (opt_magic == 0x20B) { /* PE32+ */
-								DWORD ep64 = 0;
-								ULONGLONG base64 = 0;
-								SetFilePointer(hf, (LONG)(pe_off + 40), NULL, FILE_BEGIN);
-								ReadFile(hf, &ep64, 4, &read, NULL);
-								SetFilePointer(hf, (LONG)(pe_off + 48), NULL, FILE_BEGIN);
-								ReadFile(hf, &base64, 8, &read, NULL);
-								wsprintfW(fi->ep_str, L"0x%08X", ep64);
-								if (base64 > 0xFFFFFFFF)
-									wsprintfW(fi->base_str, L"0x%08X%08X",
-										(unsigned)(base64 >> 32),
-										(unsigned)(base64 & 0xFFFFFFFF));
-								else
-									wsprintfW(fi->base_str, L"0x%08X",
-										(unsigned)base64);
-								lstrcpyW(fi->ep_sub, L"RVA");
-								lstrcpyW(fi->base_sub, L"Preferred load");
-							}
-						}
-					}
-				}
-			}
-			CloseHandle(hf);
-		}
-		HeapFree(GetProcessHeap(), 0, wpath);
-	}
-}
-
-static void w2u(const WCHAR* w, char* out, int cap)
-{
-	out[0] = 0;
-	if (w && !WideCharToMultiByte(CP_UTF8, 0, w, -1, out, cap, NULL, NULL))
-		out[0] = 0;
+	read_pe_info(wpath, fi);
+	HeapFree(GetProcessHeap(), 0, wpath);
 }
 
 static void update_chrome_after_scan(const char* utf8_path, const char* type_name)
 {
-	FileInfo fi = { { 0 },{ 0 },{ 0 },{ 0 },{ 0 },{ 0 },{ 0 } };
+	FileInfo fi = { { 0 } };
 
 	get_file_info(utf8_path, type_name, &fi);
 
@@ -411,22 +411,12 @@ static void update_chrome_after_scan(const char* utf8_path, const char* type_nam
 	}
 
 	if (g_infobar_wnd) {
-		char type[256], size[256], size_sub[256];
-		char ep[256], ep_sub[256], base[256], base_sub[256];
 		InfoCard cards[4];
 
-		w2u(fi.type_str, type, 256);
-		w2u(fi.size_str, size, 256);
-		w2u(fi.size_sub, size_sub, 256);
-		w2u(fi.ep_str, ep, 256);
-		w2u(fi.ep_sub, ep_sub, 256);
-		w2u(fi.base_str, base, 256);
-		w2u(fi.base_sub, base_sub, 256);
-
-		cards[0].label = "FILE TYPE";    cards[0].value = type; cards[0].subvalue = "";
-		cards[1].label = "FILE SIZE";    cards[1].value = size; cards[1].subvalue = size_sub;
-		cards[2].label = "ENTRY POINT";  cards[2].value = ep;   cards[2].subvalue = ep_sub;
-		cards[3].label = "BASE ADDRESS"; cards[3].value = base; cards[3].subvalue = base_sub;
+		cards[0].label = "FILE TYPE";    cards[0].value = fi.type_str; cards[0].subvalue = "";
+		cards[1].label = "FILE SIZE";    cards[1].value = fi.size_str; cards[1].subvalue = fi.size_sub;
+		cards[2].label = "ENTRY POINT";  cards[2].value = fi.ep_str;   cards[2].subvalue = fi.ep_sub;
+		cards[3].label = "BASE ADDRESS"; cards[3].value = fi.base_str; cards[3].subvalue = fi.base_sub;
 
 		infobar_set_cards(g_infobar_wnd, cards, 4);
 	}
@@ -449,6 +439,7 @@ static void collect_result(const char* type, const char* name,
 static void do_scan(void)
 {
 	char* path, * type = NULL;
+	char text[512];
 	unsigned int count = 0, msec = 0;
 	LARGE_INTEGER frequency, started, ended;
 	int ok;
@@ -473,23 +464,18 @@ static void do_scan(void)
 	QueryPerformanceCounter(&ended);
 
 	if (ok) {
-		WCHAR text[512];
-		WCHAR* type_name = utf8_to_wide(type && type[0] ? type : "Unknown type");
 		if (frequency.QuadPart > 0)
 			msec = (unsigned int)(((ended.QuadPart - started.QuadPart) * 1000)
 				/ frequency.QuadPart);
-		wsprintfW(text, L"Scan complete (%s). %u result%s in %u ms.",
-			type_name ? type_name : L"Unknown type",
-			count, count == 1 ? L"" : L"s", msec);
-		set_status_wide(text);
-		if (type_name) HeapFree(GetProcessHeap(), 0, type_name);
+		snprintf(text, sizeof(text), "Scan complete (%s). %u result%s in %u ms.",
+			type && type[0] ? type : "Unknown type",
+			count, count == 1 ? "" : "s", msec);
+		set_status(text);
 
 		update_chrome_after_scan(path, type);
 		if (g_lastPath) HeapFree(GetProcessHeap(), 0, g_lastPath);
 		g_lastPath = copy_utf8(path);
-		hex_open(path);
-		dasm_load();
-		ent_load(path);
+		open_file_views(path);
 		if (g_vt) vtview_set_file(g_vt, path);
 		if (g_sec) secview_set_file(g_sec, path);
 		if (g_str) stringsview_set_file(g_str, path);
@@ -505,14 +491,14 @@ static void do_browse(void)
 {
 	OPENFILENAMEW picker;
 	WCHAR file[32768];
+	WCHAR* current = utf8_to_wide(g_scanPath);
+
 	file[0] = 0;
-	{
-		WCHAR* current = utf8_to_wide(g_scanPath);
-		if (current) {
-			lstrcpynW(file, current, (int)(sizeof(file) / sizeof(file[0])));
-			HeapFree(GetProcessHeap(), 0, current);
-		}
+	if (current) {
+		lstrcpynW(file, current, (int)(sizeof(file) / sizeof(file[0])));
+		HeapFree(GetProcessHeap(), 0, current);
 	}
+
 	ZeroMemory(&picker, sizeof(picker));
 	picker.lStructSize = sizeof(picker);
 	picker.hwndOwner = native(g_window);
@@ -598,13 +584,14 @@ static int opt_browse_folder(void* u, char* out, size_t cap)
 
 static void opt_db_changed(void* u)
 {
-	WCHAR text[160];
+	char text[160];
 	(void)u;
 	clear_scan();
 	if (g_sig) sigview_reload(g_sig);
-	wsprintfW(text, L"Database reloaded: %d signatures. Choose a file and press Scan.",
+	snprintf(text, sizeof(text),
+		"Database reloaded: %d signatures. Choose a file and press Scan.",
 		gui_backend_signature_count());
-	set_status_wide(text);
+	set_status(text);
 }
 
 typedef struct { WCHAR** names; SIZE_T count, cap; int failed; int fixed_only; } font_list;
@@ -613,6 +600,8 @@ static int CALLBACK enum_font_proc(const LOGFONTW* lf, const TEXTMETRICW* tm,
 	DWORD type, LPARAM param)
 {
 	font_list* list = (font_list*)param;
+	SIZE_T len;
+	WCHAR* copy;
 	(void)tm;
 	if (list->failed) return 0;
 	if (lf->lfFaceName[0] == L'@') return 1;
@@ -627,13 +616,12 @@ static int CALLBACK enum_font_proc(const LOGFONTW* lf, const TEXTMETRICW* tm,
 		if (!n) { list->failed = 1; return 0; }
 		list->names = n; list->cap = cap;
 	}
-	{
-		SIZE_T len = lstrlenW(lf->lfFaceName) + 1;
-		WCHAR* copy = (WCHAR*)HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
-		if (!copy) { list->failed = 1; return 0; }
-		CopyMemory(copy, lf->lfFaceName, len * sizeof(WCHAR));
-		list->names[list->count++] = copy;
-	}
+
+	len = lstrlenW(lf->lfFaceName) + 1;
+	copy = (WCHAR*)HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+	if (!copy) { list->failed = 1; return 0; }
+	CopyMemory(copy, lf->lfFaceName, len * sizeof(WCHAR));
+	list->names[list->count++] = copy;
 	return 1;
 }
 
@@ -646,22 +634,23 @@ static void enumerate_fonts(font_list* list, int fixed_only)
 {
 	LOGFONTW lf = { 0 };
 	HDC dc = GetDC(NULL);
+	SIZE_T i, out = 0;
+
 	lf.lfCharSet = DEFAULT_CHARSET;
 	list->fixed_only = fixed_only;
 	EnumFontFamiliesExW(dc, &lf, enum_font_proc, (LPARAM)list, 0);
 	ReleaseDC(NULL, dc);
+
 	if (list->count > 1)
 		qsort(list->names, list->count, sizeof(WCHAR*), cmp_name);
-	{
-		SIZE_T i, out = 0;
-		for (i = 0; i < list->count; ++i) {
-			if (out && !lstrcmpiW(list->names[out - 1], list->names[i]))
-				HeapFree(GetProcessHeap(), 0, list->names[i]);
-			else
-				list->names[out++] = list->names[i];
-		}
-		list->count = out;
+
+	for (i = 0; i < list->count; ++i) {
+		if (out && !lstrcmpiW(list->names[out - 1], list->names[i]))
+			HeapFree(GetProcessHeap(), 0, list->names[i]);
+		else
+			list->names[out++] = list->names[i];
 	}
+	list->count = out;
 }
 
 static int opt_list_fonts(void* u, int fixed_only,
@@ -809,17 +798,30 @@ static int opt_copy_text(void* u, const char* text)
 
 static int opt_check_update(void* u, char* out, size_t cap)
 {
-	HINSTANCE r;
+	AppUpdateInfo info;
+	char err[160];
 	(void)u;
-	r = ShellExecuteW(NULL, L"open",
-		L"https://github.com/horsicq/CDiE/releases",
-		NULL, NULL, SW_SHOWNORMAL);
-	if ((INT_PTR)r <= 32) {
-		lstrcpynA(out, "Could not open the browser.", (int)cap);
+
+	if (!appupd_check(opt_get_version(NULL), &info, err, sizeof(err))) {
+		lstrcpynA(out, err, (int)cap);
 		return 0;
 	}
-	lstrcpynA(out, "Opened the releases page in your browser.", (int)cap);
-	return 1;
+	if (!info.newer) {
+		snprintf(out, cap, "You are up to date (latest: %s).", info.tag);
+		return 1;
+	}
+
+	{
+		HWND owner = GetActiveWindow();            /* the Options window */
+		if (appupd_dialog_show(owner, &info, opt_get_version(NULL))) {
+			lstrcpynA(out, "Update installed. Restarting...", (int)cap);
+			if (owner) PostMessageW(owner, WM_CLOSE, 0, 0);   /* close Options */
+			quit_app();
+			return 1;
+		}
+		snprintf(out, cap, "Version %s is available.", info.tag);
+		return 1;
+	}
 }
 
 static int opt_list_languages(void* u,
@@ -870,11 +872,6 @@ static void do_options_window(int page)
 	options_show(g_app, g_window, &host, page);
 }
 
-static void do_about(void)
-{
-	do_options_window(OPTIONS_PAGE_ABOUT);
-}
-
 static void do_virustotal(void)
 {
 	char hash[65];
@@ -918,10 +915,12 @@ static void do_virustotal(void)
 		set_status("Could not open the browser.");
 }
 
+#define VIEW_RECT(page) tx, ty, g_page == (page) ? tw : 0, g_page == (page) ? th : 0
+
 static void layout(void)
 {
 	RECT bounds, window_bounds;
-	int W, H, cx, cy, cw;
+	int W, H, cx, cy, cw, tx, ty, tw, th;
 	if (!g_window) return;
 
 	GetClientRect(native(g_window), &bounds);
@@ -947,39 +946,22 @@ static void layout(void)
 		pl_widget_set_rect(bottombar_widget(g_bottombar),
 			cx, H - BOTTOMBAR_H, cw, BOTTOMBAR_H);
 
-	{
-		int tx = cx + CONTENT_PAD, tw = cw - 2 * CONTENT_PAD;
-		int ty = cy + 4, th = H - cy - BOTTOMBAR_H - 8;
-		int on_tree = (g_page != NAV_HEX && g_page != NAV_DISASM && g_page != NAV_ENTROPY
-			&& g_page != NAV_VIRUSTOTAL && g_page != NAV_SECTIONS
-			&& g_page != NAV_SIGNATURES && g_page != NAV_STRINGS);
-		if (tw < 40) tw = 40;
-		if (th < 40) th = 40;
-		if (g_tree)
-			pl_widget_set_rect(resultstree_widget(g_tree), tx, ty,
-				on_tree ? tw : 0, on_tree ? th : 0);
-		if (g_hex)
-			hexview_set_rect(g_hex, tx, ty,
-				g_page == NAV_HEX ? tw : 0, g_page == NAV_HEX ? th : 0);
-		if (g_dasm)
-			disasmview_set_rect(g_dasm, tx, ty,
-				g_page == NAV_DISASM ? tw : 0, g_page == NAV_DISASM ? th : 0);
-		if (g_entropy)
-			entropyview_set_rect(g_entropy, tx, ty,
-				g_page == NAV_ENTROPY ? tw : 0, g_page == NAV_ENTROPY ? th : 0);
-		if (g_vt)
-			vtview_set_rect(g_vt, tx, ty,
-				g_page == NAV_VIRUSTOTAL ? tw : 0, g_page == NAV_VIRUSTOTAL ? th : 0);
-		if (g_sec)
-			secview_set_rect(g_sec, tx, ty,
-				g_page == NAV_SECTIONS ? tw : 0, g_page == NAV_SECTIONS ? th : 0);
-		if (g_sig)
-			sigview_set_rect(g_sig, tx, ty,
-				g_page == NAV_SIGNATURES ? tw : 0, g_page == NAV_SIGNATURES ? th : 0);
-		if (g_str)
-			stringsview_set_rect(g_str, tx, ty,
-				g_page == NAV_STRINGS ? tw : 0, g_page == NAV_STRINGS ? th : 0);
-	}
+	tx = cx + CONTENT_PAD;
+	tw = cw - 2 * CONTENT_PAD;
+	ty = cy + 4;
+	th = H - cy - BOTTOMBAR_H - 8;
+	if (tw < 40) tw = 40;
+	if (th < 40) th = 40;
+
+	if (g_tree)    pl_widget_set_rect(resultstree_widget(g_tree), VIEW_RECT(NAV_OVERVIEW));
+	if (g_hex)     hexview_set_rect(g_hex, VIEW_RECT(NAV_HEX));
+	if (g_dasm)    disasmview_set_rect(g_dasm, VIEW_RECT(NAV_DISASM));
+	if (g_entropy) entropyview_set_rect(g_entropy, VIEW_RECT(NAV_ENTROPY));
+	if (g_vt)      vtview_set_rect(g_vt, VIEW_RECT(NAV_VIRUSTOTAL));
+	if (g_sec)     secview_set_rect(g_sec, VIEW_RECT(NAV_SECTIONS));
+	if (g_nt)      ntview_set_rect(g_nt, VIEW_RECT(NAV_HEADERS));	
+	if (g_sig)     sigview_set_rect(g_sig, VIEW_RECT(NAV_SIGNATURES));
+	if (g_str)     stringsview_set_rect(g_str, VIEW_RECT(NAV_STRINGS));
 
 	GetWindowRect(native(g_window), &window_bounds);
 	g_minWindowWidth = SIDEBAR_W + 520 +
@@ -989,6 +971,8 @@ static void layout(void)
 		(window_bounds.bottom - window_bounds.top - H);
 	if (g_minWindowHeight < 540) g_minWindowHeight = 540;
 }
+
+#undef VIEW_RECT
 
 static void on_browse(void* user)
 {
@@ -1002,42 +986,33 @@ static void on_nav(void* user, int nav_id)
 	switch (nav_id) {
 	case NAV_OPTIONS:
 		g_pending = ACTION_OPTIONS;
-		break;
+		return;
 
-	case NAV_SIGNATURES:
-		g_page = nav_id;
-		layout();
-		if (g_sig) sigview_activate(g_sig);
-		break;
-
-	case NAV_STRINGS:
-		g_page = nav_id;
-		layout();
-		if (g_str) stringsview_activate(g_str);
-		break;
-
-	case 1000:                         
+	case SIDEBAR_PALETTE_ID:
 		g_pending = ACTION_PALETTE;
-		break;
-
-	case NAV_VIRUSTOTAL:
-		g_page = nav_id;
-		layout();
-		if (g_vt) vtview_refresh(g_vt);
-		break;
+		return;
 
 	case NAV_OVERVIEW:
 	case NAV_SECTIONS:
 	case NAV_HEX:
 	case NAV_DISASM:
 	case NAV_ENTROPY:
-		g_page = nav_id;
-		layout();
+	case NAV_SIGNATURES:
+	case NAV_STRINGS:
+	case NAV_VIRUSTOTAL:
+	case NAV_HEADERS :
 		break;
 
 	default:
-		break;
+		return;
 	}
+
+	g_page = nav_id;
+	layout();
+
+	if (nav_id == NAV_SIGNATURES && g_sig) sigview_activate(g_sig);
+	else if (nav_id == NAV_STRINGS && g_str) stringsview_activate(g_str);
+	else if (nav_id == NAV_VIRUSTOTAL && g_vt) vtview_refresh(g_vt);
 }
 
 static void mon_request_scan(const char* path, void* u)
@@ -1114,30 +1089,36 @@ static LRESULT CALLBACK window_subclass(HWND handle, UINT message,
 static void on_event(xxwidgets_app* app, const xxwidgets_event* event,
 	void* user_data)
 {
-	(void)user_data;
-	if (event->type == XXWIDGETS_EVENT_CLOSE && event->widget == g_window) {
-		g_running = 0;
-		xxwidgets_app_quit(app, 0);
-	}
-	else if (event->type == XXWIDGETS_EVENT_RESIZE && event->widget == g_window) {
+	(void)app; (void)user_data;
+	if (event->type == XXWIDGETS_EVENT_CLOSE && event->widget == g_window)
+		quit_app();
+	else if (event->type == XXWIDGETS_EVENT_RESIZE && event->widget == g_window)
 		layout();
-	}
-	else if (event->type == XXWIDGETS_EVENT_SHORTCUT) {
+	else if (event->type == XXWIDGETS_EVENT_SHORTCUT)
 		g_pending = event->value;
-	}
 }
 
 static void goto_entropy(void* user)
 {
 	(void)user;
 	g_page = NAV_ENTROPY;
-	layout();          
+	layout();
+}
+
+static void goto_hex(void* user, uint64_t offset, uint64_t length)
+{
+	(void)user;
+	if (!g_hex) return;
+	g_page = NAV_HEX;
+	layout();
+	hexview_goto(g_hex, offset);                  
+	hexview_set_selection(g_hex, offset, length);
 }
 
 static void on_palette(void* user, int id)
 {
 	(void)user;
-	if (id >= 100) g_pending = id - 100;
+	if (id >= PALETTE_ACTION_BASE) g_pending = id - PALETTE_ACTION_BASE;
 	else on_nav(NULL, id);
 }
 
@@ -1145,22 +1126,21 @@ static void fill_palette(void)
 {
 	palette_add(g_pal, "Overview", "view", NAV_OVERVIEW);
 	palette_add(g_pal, "Sections", "view", NAV_SECTIONS);
+	palette_add(g_pal, "NT headers", "view", NAV_HEADERS);
 	palette_add(g_pal, "Signatures", "view", NAV_SIGNATURES);
 	palette_add(g_pal, "VirusTotal", "view", NAV_VIRUSTOTAL);
 	palette_add(g_pal, "Strings", "view", NAV_STRINGS);
 	palette_add(g_pal, "Hex viewer", "view", NAV_HEX);
 	palette_add(g_pal, "Entropy", "view", NAV_ENTROPY);
 	palette_add(g_pal, "Disassembly", "view", NAV_DISASM);
-	palette_add(g_pal, "Open file...", "action", 100 + ACTION_BROWSE);
-	palette_add(g_pal, "Scan again", "action", 100 + ACTION_SCAN);
-	palette_add(g_pal, "Options", "action", 100 + ACTION_OPTIONS);
-	palette_add(g_pal, "Database paths", "action", 100 + ACTION_DATABASE_PATHS);
-	palette_add(g_pal, "Monitor downloads", "action", 100 + ACTION_MONITOR);
-	palette_add(g_pal, "Check on VirusTotal (browser)", "action", 100 + ACTION_VIRUSTOTAL);
-	palette_add(g_pal, "About", "action", 100 + ACTION_ABOUT);
+	palette_add(g_pal, "Open file...", "action", PALETTE_ACTION_BASE + ACTION_BROWSE);
+	palette_add(g_pal, "Scan again", "action", PALETTE_ACTION_BASE + ACTION_SCAN);
+	palette_add(g_pal, "Options", "action", PALETTE_ACTION_BASE + ACTION_OPTIONS);
+	palette_add(g_pal, "Database paths", "action", PALETTE_ACTION_BASE + ACTION_DATABASE_PATHS);
+	palette_add(g_pal, "Monitor downloads", "action", PALETTE_ACTION_BASE + ACTION_MONITOR);
+	palette_add(g_pal, "Check on VirusTotal (browser)", "action", PALETTE_ACTION_BASE + ACTION_VIRUSTOTAL);
+	palette_add(g_pal, "About", "action", PALETTE_ACTION_BASE + ACTION_ABOUT);
 }
-
-static HWND g_palWnd;
 
 static void pal_round(void)
 {
@@ -1199,133 +1179,137 @@ static void do_palette(void)
 	set_status(found ? "Palette: shown" : "Palette: window not found");
 }
 
-static LRESULT CALLBACK pal_hook(int code, WPARAM wp, LPARAM lp)
+static int key_modifiers(void)
 {
-	if (code >= 0 && wp == PM_REMOVE && g_pal && palette_is_open(g_pal)) {
-		MSG* m = (MSG*)lp;
-		int mods = 0, key = 0;
-		if (GetKeyState(VK_CONTROL) & 0x8000) mods |= PL_MOD_CTRL;
-		if (GetKeyState(VK_SHIFT) & 0x8000) mods |= PL_MOD_SHIFT;
+	int mods = 0;
+	if (GetKeyState(VK_CONTROL) & 0x8000) mods |= PL_MOD_CTRL;
+	if (GetKeyState(VK_SHIFT) & 0x8000) mods |= PL_MOD_SHIFT;
+	return mods;
+}
 
-		if (m->message == WM_LBUTTONDOWN || m->message == WM_RBUTTONDOWN ||
-			m->message == WM_NCLBUTTONDOWN) {
-			RECT pr;
-			if (g_palWnd && GetWindowRect(g_palWnd, &pr) && !PtInRect(&pr, m->pt))
-				palette_close(g_pal);
-		}
+static int is_text_char(const MSG* m, int mods)
+{
+	return m->message == WM_CHAR && m->wParam >= 32 && m->wParam != 127
+		&& !(mods & PL_MOD_CTRL);
+}
 
-		if (m->message == WM_KEYDOWN) {
-			switch (m->wParam) {
-			case VK_ESCAPE: key = PL_KEY_ESC;   break;
-			case VK_RETURN: key = PL_KEY_ENTER; break;
-			case VK_UP:     key = PL_KEY_UP;    break;
-			case VK_DOWN:   key = PL_KEY_DOWN;  break;
-			case VK_BACK:   key = PL_KEY_BACK;  break;
-			default: break;
-			}
-			if (key) {
-				palette_key(g_pal, key, 0, mods);
-				pal_round();
-				m->message = WM_NULL;         
-			}
+static int map_edit_key(WPARAM vk)
+{
+	switch (vk) {
+	case VK_BACK:   return PL_KEY_BACK;
+	case VK_LEFT:   return PL_KEY_LEFT;
+	case VK_RIGHT:  return PL_KEY_RIGHT;
+	case VK_HOME:   return PL_KEY_HOME;
+	case VK_END:    return PL_KEY_END;
+	case VK_UP:     return PL_KEY_UP;
+	case VK_DOWN:   return PL_KEY_DOWN;
+	case VK_PRIOR:  return PL_KEY_PGUP;
+	case VK_NEXT:   return PL_KEY_PGDN;
+	case VK_RETURN: return PL_KEY_ENTER;
+	case VK_TAB:    return PL_KEY_TAB;
+	case VK_F3:     return PL_KEY_F3;
+	default:        return 0;
+	}
+}
+
+static void hook_palette(MSG* m)
+{
+	int mods = key_modifiers(), key = 0;
+
+	if (m->message == WM_LBUTTONDOWN || m->message == WM_RBUTTONDOWN ||
+		m->message == WM_NCLBUTTONDOWN) {
+		RECT pr;
+		if (g_palWnd && GetWindowRect(g_palWnd, &pr) && !PtInRect(&pr, m->pt))
+			palette_close(g_pal);
+	}
+
+	if (m->message == WM_KEYDOWN) {
+		switch (m->wParam) {
+		case VK_ESCAPE: key = PL_KEY_ESC;   break;
+		case VK_RETURN: key = PL_KEY_ENTER; break;
+		case VK_UP:     key = PL_KEY_UP;    break;
+		case VK_DOWN:   key = PL_KEY_DOWN;  break;
+		case VK_BACK:   key = PL_KEY_BACK;  break;
+		default: break;
 		}
-		else if (m->message == WM_CHAR && m->wParam >= 32 && m->wParam != 127
-			&& !(mods & PL_MOD_CTRL)) {
-			palette_key(g_pal, PL_KEY_CHAR, (uint32_t)m->wParam, mods);
+		if (key) {
+			palette_key(g_pal, key, 0, mods);
 			pal_round();
 			m->message = WM_NULL;
 		}
 	}
+	else if (is_text_char(m, mods)) {
+		palette_key(g_pal, PL_KEY_CHAR, (uint32_t)m->wParam, mods);
+		pal_round();
+		m->message = WM_NULL;
+	}
+}
 
-	if (code >= 0 && wp == PM_REMOVE
-		&& ((g_str && g_page == NAV_STRINGS) || (g_sig && g_page == NAV_SIGNATURES))
-		&& !(g_pal && palette_is_open(g_pal))
-		&& GetActiveWindow() == native(g_window)) {
-		MSG* m = (MSG*)lp;
-		int mods = 0, key = 0;
-		uint32_t ch = 0;
-		if (GetKeyState(VK_CONTROL) & 0x8000) mods |= PL_MOD_CTRL;
-		if (GetKeyState(VK_SHIFT) & 0x8000) mods |= PL_MOD_SHIFT;
+static void send_text_view_key(int key, uint32_t ch, int mods)
+{
+	if (g_page == NAV_STRINGS) stringsview_key(g_str, key, ch, mods);
+	else sigview_key(g_sig, key, ch, mods);
+}
 
-		if (m->message == WM_KEYDOWN) {
-			switch (m->wParam) {
-			case VK_BACK:   key = PL_KEY_BACK;  break;
-			case VK_DELETE: key = PL_KEY_DEL;   break;
-			case VK_LEFT:   key = PL_KEY_LEFT;  break;
-			case VK_RIGHT:  key = PL_KEY_RIGHT; break;
-			case VK_HOME:   key = PL_KEY_HOME;  break;
-			case VK_END:    key = PL_KEY_END;   break;
-			case VK_UP:     key = PL_KEY_UP;    break;
-			case VK_DOWN:   key = PL_KEY_DOWN;  break;
-			case VK_PRIOR:  key = PL_KEY_PGUP;  break;
-			case VK_NEXT:   key = PL_KEY_PGDN;  break;
-			case VK_RETURN: key = PL_KEY_ENTER; break;
-			case VK_TAB:    key = PL_KEY_TAB;   break;
-			case VK_F3:     key = PL_KEY_F3;    break;
-			case 'F':
-				if (mods & PL_MOD_CTRL) { key = PL_KEY_CHAR; ch = 'f'; }
-				break;
-			case 'S':
-				if (mods & PL_MOD_CTRL) { key = PL_KEY_CHAR; ch = 's'; }
-				break;
-			default: break;
-			}
-			if (key) {
-				if (g_page == NAV_STRINGS) stringsview_key(g_str, key, ch, mods);
-				else sigview_key(g_sig, key, ch, mods);
-				m->message = WM_NULL;
-			}
+static void hook_text_view(MSG* m)
+{
+	int mods = key_modifiers(), key = 0;
+	uint32_t ch = 0;
+
+	if (m->message == WM_KEYDOWN) {
+		key = map_edit_key(m->wParam);
+		if (!key && m->wParam == VK_DELETE)
+			key = PL_KEY_DEL;
+		if (!key && (mods & PL_MOD_CTRL) && (m->wParam == 'F' || m->wParam == 'S')) {
+			key = PL_KEY_CHAR;
+			ch = m->wParam == 'F' ? 'f' : 's';
 		}
-		else if (m->message == WM_CHAR && m->wParam >= 32 && m->wParam != 127
-			&& !(mods & PL_MOD_CTRL)) {
-			if (g_page == NAV_STRINGS)
-				stringsview_key(g_str, PL_KEY_CHAR, (uint32_t)m->wParam, mods);
-			else
-				sigview_key(g_sig, PL_KEY_CHAR, (uint32_t)m->wParam, mods);
+		if (key) {
+			send_text_view_key(key, ch, mods);
 			m->message = WM_NULL;
 		}
 	}
+	else if (is_text_char(m, mods)) {
+		send_text_view_key(PL_KEY_CHAR, (uint32_t)m->wParam, mods);
+		m->message = WM_NULL;
+	}
+}
 
-	if (code >= 0 && wp == PM_REMOVE && g_hex && g_page == NAV_HEX
-		&& !(g_pal && palette_is_open(g_pal))
-		&& GetActiveWindow() == native(g_window)) {
-		MSG* m = (MSG*)lp;
-		int mods = 0, key = 0;
-		if (GetKeyState(VK_CONTROL) & 0x8000) mods |= PL_MOD_CTRL;
-		if (GetKeyState(VK_SHIFT) & 0x8000) mods |= PL_MOD_SHIFT;
+static void hook_hex(MSG* m)
+{
+	int mods = key_modifiers(), key = 0;
 
-		if (m->message == WM_KEYDOWN) {
-			switch (m->wParam) {
-			case VK_ESCAPE: key = PL_KEY_ESC;   break;
-			case VK_BACK:   key = PL_KEY_BACK;  break;
-			case VK_LEFT:   key = PL_KEY_LEFT;  break;
-			case VK_RIGHT:  key = PL_KEY_RIGHT; break;
-			case VK_HOME:   key = PL_KEY_HOME;  break;
-			case VK_END:    key = PL_KEY_END;   break;
-			case VK_UP:     key = PL_KEY_UP;    break;
-			case VK_DOWN:   key = PL_KEY_DOWN;  break;
-			case VK_PRIOR:  key = PL_KEY_PGUP;  break;
-			case VK_NEXT:   key = PL_KEY_PGDN;  break;
-			case VK_RETURN: key = PL_KEY_ENTER; break;
-			case VK_TAB:    key = PL_KEY_TAB;   break;
-			case VK_F3:     key = PL_KEY_F3;    break;
-			default: break;
-			}
-			if (key) {
-				hexview_key(g_hex, key, 0, mods);
-				m->message = WM_NULL;
-			}
+	if (m->message == WM_KEYDOWN) {
+		key = map_edit_key(m->wParam);
+		if (!key && m->wParam == VK_ESCAPE)
+			key = PL_KEY_ESC;
+		if (key) {
+			hexview_key(g_hex, key, 0, mods);
+			m->message = WM_NULL;
 		}
-		else if (m->message == WM_CHAR) {
-			if ((mods & PL_MOD_CTRL) &&
-				(m->wParam == 1 || m->wParam == 3 || m->wParam == 6 || m->wParam == 7)) {
-				hexview_key(g_hex, PL_KEY_CHAR, (uint32_t)m->wParam, mods);
-				m->message = WM_NULL;
-			}
-			else if (m->wParam >= 32 && m->wParam != 127 && !(mods & PL_MOD_CTRL)) {
-				hexview_key(g_hex, PL_KEY_CHAR, (uint32_t)m->wParam, mods);
-				m->message = WM_NULL;
-			}
+	}
+	else if (m->message == WM_CHAR) {
+		int ctrl_char = (mods & PL_MOD_CTRL) &&
+			(m->wParam == 1 || m->wParam == 3 || m->wParam == 6 || m->wParam == 7);
+		if (ctrl_char || is_text_char(m, mods)) {
+			hexview_key(g_hex, PL_KEY_CHAR, (uint32_t)m->wParam, mods);
+			m->message = WM_NULL;
+		}
+	}
+}
+
+static LRESULT CALLBACK input_hook(int code, WPARAM wp, LPARAM lp)
+{
+	if (code >= 0 && wp == PM_REMOVE) {
+		MSG* m = (MSG*)lp;
+		if (g_pal && palette_is_open(g_pal)) {
+			hook_palette(m);
+		}
+		else if (GetActiveWindow() == native(g_window)) {
+			if ((g_str && g_page == NAV_STRINGS) || (g_sig && g_page == NAV_SIGNATURES))
+				hook_text_view(m);
+			else if (g_hex && g_page == NAV_HEX)
+				hook_hex(m);
 		}
 	}
 	return CallNextHookEx(g_palHook, code, wp, lp);
@@ -1357,6 +1341,7 @@ static int create_controls(void)
 	g_infobar_wnd = infobar_create(native(g_window), SIDEBAR_W, HEADER_H, 800, INFOBAR_H);
 	g_bottombar = bottombar_create(native(g_window), SIDEBAR_W, 500, 800, BOTTOMBAR_H, NULL, NULL);
 	g_tree = resultstree_create(native(g_window), SIDEBAR_W, 0, 100, 100);
+
 	g_hex = hexview_create(native(g_window), NULL, SIDEBAR_W, 0, 0, 0);
 	if (g_hex) hexview_set_callbacks(g_hex, NULL, opt_copy_text, NULL);
 
@@ -1369,6 +1354,8 @@ static int create_controls(void)
 	g_vt = vtview_create(native(g_window), SIDEBAR_W, 0, 0, 0);
 	if (g_vt) vtview_set_callbacks(g_vt, opt_copy_text, NULL);
 
+	g_nt = ntview_create(native(g_window), SIDEBAR_W, 0, 0, 0);
+	if (g_nt) ntview_set_callbacks(g_nt, goto_hex, NULL);
 	g_sec = secview_create(native(g_window), SIDEBAR_W, 0, 0, 0);
 	if (g_sec) secview_set_callbacks(g_sec, goto_entropy, NULL);
 
@@ -1377,8 +1364,9 @@ static int create_controls(void)
 
 	g_pal = palette_create(native(g_window), on_palette, NULL);
 	if (g_pal) fill_palette();
-	g_palHook = SetWindowsHookExW(WH_GETMESSAGE, pal_hook, NULL, GetCurrentThreadId());
-	if (!g_sidebar || !g_header_wnd || !g_infobar_wnd || !g_bottombar || !g_tree || !g_hex || !g_dasm || !g_entropy || !g_vt || !g_sec) {
+	g_palHook = SetWindowsHookExW(WH_GETMESSAGE, input_hook, NULL, GetCurrentThreadId());
+
+	if (!g_sidebar || !g_header_wnd || !g_infobar_wnd || !g_bottombar || !g_tree || !g_hex || !g_dasm || !g_entropy || !g_vt || !g_sec || !g_nt) {
 		WCHAR msg[200];
 		wsprintfW(msg,
 			L"Chrome creation failed (1 = ok):\nsidebar=%d header=%d infobar=%d "
@@ -1405,6 +1393,16 @@ static int set_startup_file(void)
 	}
 	if (arguments) LocalFree(arguments);
 	return has_file;
+}
+
+static void copy_db_paths_from_backend(CdieConfig* cfg)
+{
+	const char* m = gui_backend_main_db_path();
+	const char* e = gui_backend_extra_db_path();
+	const char* c = gui_backend_custom_db_path();
+	snprintf(cfg->main_db, sizeof(cfg->main_db), "%s", m ? m : "");
+	snprintf(cfg->extra_db, sizeof(cfg->extra_db), "%s", e ? e : "");
+	snprintf(cfg->custom_db, sizeof(cfg->custom_db), "%s", c ? c : "");
 }
 
 static void fill_prefs(CdieConfig* cfg)
@@ -1454,13 +1452,8 @@ static int init_backend_with_config(void)
 
 	if (!have_file) {
 		/* Portable first run: create the file with the paths the engine is using now */
-		const char* m = gui_backend_main_db_path();
-		const char* e = gui_backend_extra_db_path();
-		const char* c = gui_backend_custom_db_path();
 		memset(&cfg, 0, sizeof(cfg));
-		snprintf(cfg.main_db, sizeof(cfg.main_db), "%s", m ? m : "");
-		snprintf(cfg.extra_db, sizeof(cfg.extra_db), "%s", e ? e : "");
-		snprintf(cfg.custom_db, sizeof(cfg.custom_db), "%s", c ? c : "");
+		copy_db_paths_from_backend(&cfg);
 		fill_prefs(&cfg);
 		config_save(&cfg);
 	}
@@ -1470,17 +1463,9 @@ static int init_backend_with_config(void)
 static void save_config_on_exit(void)
 {
 	CdieConfig cfg;
-	const char* m;
-	const char* e;
-	const char* c;
 	if (config_db_required()) return;
 	config_load(&cfg);                 /* keep saved preferences */
-	m = gui_backend_main_db_path();
-	e = gui_backend_extra_db_path();
-	c = gui_backend_custom_db_path();
-	snprintf(cfg.main_db, sizeof(cfg.main_db), "%s", m ? m : "");
-	snprintf(cfg.extra_db, sizeof(cfg.extra_db), "%s", e ? e : "");
-	snprintf(cfg.custom_db, sizeof(cfg.custom_db), "%s", c ? c : "");
+	copy_db_paths_from_backend(&cfg);
 	if (g_prefsReady) fill_prefs(&cfg);
 	config_save(&cfg);
 }
@@ -1520,25 +1505,86 @@ static void apply_saved_prefs(void)
 	}
 }
 
+static void load_saved_settings(void)
+{
+	CdieConfig cfg;
+	if (!config_load(&cfg)) return;
+	vt_set_api_key(cfg.vt_key);
+	if (cfg.language[0]) {
+		snprintf(g_lang, sizeof(g_lang), "%s", cfg.language);
+		i18n_load(g_lang);
+	}
+}
+
+static int create_main_window(void)
+{
+	xxwidgets_rect bounds = { 8, 4, 118, 40 };
+	xxwidgets_status status;
+	char title[160];
+	BOOL dark = TRUE;
+
+	snprintf(title, sizeof(title), "%s (" CDIE_ARCH ")", gui_backend_app_title());
+
+	xxwidgets_app_set_create_hidden(g_app, 1);
+	status = xxwidgets_widget_create(g_app, NULL, XXWIDGETS_WINDOW,
+		title, bounds, &g_window);
+	xxwidgets_app_set_create_hidden(g_app, 0);
+	if (status != XXWIDGETS_OK) {
+		MessageBoxW(NULL, L"Main window creation failed", L"cdie", MB_ICONERROR);
+		return 0;
+	}
+
+	DwmSetWindowAttribute(native(g_window), 20, &dark, sizeof(dark));
+	set_app_icon();
+	xxwidgets_widget_set_visible(g_window, 0);
+	if (!create_controls()) {
+		MessageBoxW(NULL, L"create_controls failed", L"cdie", MB_ICONERROR);
+		return 0;
+	}
+	return 1;
+}
+
+static void init_tray_and_monitor(void)
+{
+	DlWatchHost mh;
+
+	tray_init(on_tray_exit, NULL);
+	tray_win32_attach(native(g_window));
+
+	memset(&mh, 0, sizeof(mh));
+	mh.native = native(g_window);
+	mh.request_scan = mon_request_scan;
+	mh.set_status = mon_set_status;
+	mh.restore_flags = mon_restore_flags;
+	dlwatch_init(&mh);
+
+	tray_set_callbacks(dlwatch_balloon_click, NULL, dlwatch_menu_toggle, NULL);
+}
+
+static void run_action(int action)
+{
+	switch (action) {
+	case ACTION_SCAN:           do_scan();           break;
+	case ACTION_BROWSE:         do_browse();         break;
+	case ACTION_OPTIONS:        do_options_window(OPTIONS_PAGE_SCAN); break;
+	case ACTION_ABOUT:          do_options_window(OPTIONS_PAGE_ABOUT); break;
+	case ACTION_MONITOR:        dlwatch_set_enabled(!dlwatch_enabled()); break;
+	case ACTION_DATABASE_PATHS: do_options_window(OPTIONS_PAGE_DATABASES); break;
+	case ACTION_VIRUSTOTAL:     do_virustotal();     break;
+	case ACTION_PALETTE:        do_palette();        break;
+	case ACTION_SIGNATURES:     signatures_show(g_app, g_window); break;
+	default: break;
+	}
+}
+
 int gui_run(void)
 {
 	xxwidgets_config config = { XXWIDGETS_BACKEND_NATIVE, on_event, NULL };
-	xxwidgets_rect   bounds = { 8, 4, 118, 40 };
 	xxwidgets_status status;
-	int   result = 0, db_ok = 0;
-	WCHAR title[160], ready[512];
-	WCHAR* base;
-	char* utf8_title;
+	int result = 0, db_ok;
+	char ready[512];
 
-	{
-		CdieConfig lc;
-		if (config_load(&lc)) vt_set_api_key(lc.vt_key);
-		if (config_load(&lc) && lc.language[0]) {
-			snprintf(g_lang, sizeof(g_lang), "%s", lc.language);
-			i18n_load(g_lang);
-		}
-	}
-
+	load_saved_settings();
 
 	status = xxwidgets_app_create(&config, &g_app);
 	if (status != XXWIDGETS_OK) {
@@ -1546,58 +1592,22 @@ int gui_run(void)
 		return 1;
 	}
 
-	base = utf8_to_wide(gui_backend_app_title());
-#if defined(_WIN64)
-	wsprintfW(title, L"%s (x64)", base ? base : L"cdie");
-#else
-	wsprintfW(title, L"%s (x86)", base ? base : L"cdie");
-#endif
-	if (base) HeapFree(GetProcessHeap(), 0, base);
-
-	utf8_title = wide_to_utf8(title);
-	if (!utf8_title) { result = 1; goto finish; }
-	xxwidgets_app_set_create_hidden(g_app, 1);
-	status = xxwidgets_widget_create(g_app, NULL, XXWIDGETS_WINDOW,
-		utf8_title, bounds, &g_window);
-	xxwidgets_app_set_create_hidden(g_app, 0);
-	HeapFree(GetProcessHeap(), 0, utf8_title);
-	if (status != XXWIDGETS_OK) {
-		MessageBoxW(NULL, L"Main window creation failed", L"cdie", MB_ICONERROR);
-		result = 1; goto finish;
+	if (!create_main_window()) {
+		result = 1;
+		goto finish;
 	}
 
-	{
-		BOOL dark = TRUE;
-		DwmSetWindowAttribute(native(g_window), 20, &dark, sizeof(dark));
-	}
-
-	xxwidgets_widget_set_visible(g_window, 0);
-	if (!create_controls()) {
-		MessageBoxW(NULL, L"create_controls failed", L"cdie", MB_ICONERROR);
-		result = 1; goto finish;
-	}
-
-	tray_init(on_tray_exit, NULL);
-	tray_win32_attach(native(g_window));
-	{
-		DlWatchHost mh;
-		memset(&mh, 0, sizeof(mh));          /* ZeroMemory is Windows-only */
-		mh.native = native(g_window);        /* was mh.hwnd; HWND on Windows, ignored elsewhere */
-		mh.request_scan = mon_request_scan;
-		mh.set_status = mon_set_status;
-		mh.restore_flags = mon_restore_flags;
-		dlwatch_init(&mh);
-	}
-
-	tray_set_callbacks(dlwatch_balloon_click, NULL, dlwatch_menu_toggle, NULL);
-	SetWindowPos(native(g_window), NULL, 0, 0, 1150, 700, SWP_NOMOVE | SWP_NOZORDER);
+	init_tray_and_monitor();
+	SetWindowPos(native(g_window), NULL, 0, 0, 1281, 700, SWP_NOMOVE | SWP_NOZORDER);
 	db_ok = init_backend_with_config();
-	apply_saved_prefs();          /* before the status text, since set_fonts writes one */
+	apply_saved_prefs();
 	g_prefsReady = 1;
+
 	if (db_ok) {
-		wsprintfW(ready, L"Ready. %d signatures loaded. Choose a file or drag one here, then press Scan.",
+		snprintf(ready, sizeof(ready),
+			"Ready. %d signatures loaded. Choose a file or drag one here, then press Scan.",
 			gui_backend_signature_count());
-		set_status_wide(ready);
+		set_status(ready);
 	}
 	else {
 		set_status("Main signature database not found. "
@@ -1617,19 +1627,11 @@ int gui_run(void)
 		status = xxwidgets_app_poll(g_app, 30);
 		if (status != XXWIDGETS_OK) { result = 1; break; }
 		if (!g_running) break;
-		action = g_pending; g_pending = ACTION_NONE;
-		switch (action) {
-		case ACTION_SCAN:           do_scan();           break;
-		case ACTION_BROWSE:         do_browse();         break;
-		case ACTION_OPTIONS:        do_options_window(OPTIONS_PAGE_SCAN); break;
-		case ACTION_ABOUT:          do_about();          break;
-		case ACTION_MONITOR:        dlwatch_set_enabled(!dlwatch_enabled()); break;
-		case ACTION_DATABASE_PATHS: do_options_window(OPTIONS_PAGE_DATABASES); break;
-		case ACTION_VIRUSTOTAL:     do_virustotal();     break;
-		case ACTION_PALETTE:        do_palette();        break;
-		case ACTION_SIGNATURES:     signatures_show(g_app, g_window); break;
-		default: break;
-		}
+
+		action = g_pending;
+		g_pending = ACTION_NONE;
+		run_action(action);
+
 		if (g_vt) vtview_tick(g_vt);
 		if (g_str) stringsview_tick(g_str);
 		if (g_sig) sigview_tick(g_sig);
