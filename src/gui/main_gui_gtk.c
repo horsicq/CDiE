@@ -390,14 +390,18 @@ static void do_database_paths(void)
   gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(dlg))), grid, TRUE, TRUE, 0);
   gtk_widget_show_all(dlg);
 
-  while (gtk_dialog_run(GTK_DIALOG(dlg)) == GTK_RESPONSE_ACCEPT) {
-    if (gui_backend_set_db_paths(gtk_entry_get_text(GTK_ENTRY(entry[0])),
-      gtk_entry_get_text(GTK_ENTRY(entry[1])),
-      gtk_entry_get_text(GTK_ENTRY(entry[2])))) {
-      saved = 1; break;
-    }
-    gtk_label_set_text(GTK_LABEL(err),
-      "Cannot load the main signature database. Check its folder and try again.");
+  if (gtk_dialog_run(GTK_DIALOG(dlg)) == GTK_RESPONSE_ACCEPT) {
+    CdieConfig cfg;
+    const char* m = gtk_entry_get_text(GTK_ENTRY(entry[0]));
+    const char* e = gtk_entry_get_text(GTK_ENTRY(entry[1]));
+    const char* c = gtk_entry_get_text(GTK_ENTRY(entry[2]));
+    gui_backend_set_db_paths(m, e, c);   /* may load 0 signatures, that's fine */
+    config_load(&cfg);
+    g_snprintf(cfg.main_db, sizeof(cfg.main_db), "%s", m);
+    g_snprintf(cfg.extra_db, sizeof(cfg.extra_db), "%s", e);
+    g_snprintf(cfg.custom_db, sizeof(cfg.custom_db), "%s", c);
+    config_save(&cfg);
+    saved = 1;
   }
   gtk_widget_destroy(dlg);
 
@@ -759,14 +763,22 @@ int gui_run(void)
   g_signal_connect(win, "drag-data-received", G_CALLBACK(on_drag_received), NULL);
   g_signal_connect(g_sw, "size-allocate", G_CALLBACK(on_size_allocate), NULL);
 
-  if (gui_backend_init()) {
-    g_snprintf(ready, sizeof(ready),
-      "Ready. %d signatures loaded. Choose a file or drag one here.",
-      gui_backend_signature_count());
-    set_status(ready);
-  }
-  else {
-    set_status("Main signature database not found. Use Database paths (Ctrl+Shift+D) to select it.");
+  {
+    CdieConfig dc;
+    int ok = gui_backend_init();
+    if (config_load(&dc) && dc.main_db[0]) {
+      gui_backend_set_db_paths(dc.main_db, dc.extra_db, dc.custom_db);
+      ok = 1;
+    }
+    if (ok) {
+      g_snprintf(ready, sizeof(ready),
+        "Ready. %d signatures loaded. Choose a file or drag one here.",
+        gui_backend_signature_count());
+      set_status(ready);
+    }
+    else {
+      set_status("Main signature database not found. Use Database paths (Ctrl+Shift+D) to select it.");
+    }
   }
   apply_flags_to_backend();
 
