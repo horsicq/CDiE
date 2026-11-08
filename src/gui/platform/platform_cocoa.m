@@ -304,6 +304,45 @@ void pl_ellipse(PlCanvas *c, int l, int t, int r, int b, PlColor fill, PlColor b
     }
 }
 
+void pl_frame_corners(PlCanvas *c, int w, int h, int rr, PlColor bg, PlColor border)
+{
+    int W = w - 1, H = h - 1, i;
+    NSRect inner = NSMakeRect(0, 0, W, H);
+    NSRect ring  = NSMakeRect(0.5, 0.5, W - 1, H - 1);
+    (void)c;
+    if (W < 2 * rr || H < 2 * rr) return;
+
+    pl_fill(c, W, 0, w, h, bg);
+    pl_fill(c, 0, H, w, h, bg);
+    pl_fill(c, rr, 0, W - rr, 1, border);
+    pl_fill(c, rr, H - 1, W - rr, H, border);
+    pl_fill(c, 0, rr, 1, H - rr, border);
+    pl_fill(c, W - 1, rr, W, H - rr, border);
+
+    for (i = 0; i < 4; ++i) {
+        NSRect box = NSMakeRect((i & 1) ? W - rr : 0, (i & 2) ? H - rr : 0, rr, rr);
+        NSBezierPath *outside = [NSBezierPath bezierPathWithRect:box];
+        NSBezierPath *ringPath = [NSBezierPath bezierPathWithRoundedRect:ring
+                                                                 xRadius:rr - 0.5
+                                                                 yRadius:rr - 0.5];
+
+        [NSGraphicsContext saveGraphicsState];
+        NSRectClip(box);
+
+        [outside appendBezierPath:[NSBezierPath bezierPathWithRoundedRect:inner
+                                                                  xRadius:rr yRadius:rr]];
+        outside.windingRule = NSWindingRuleEvenOdd;
+        [ns(bg) setFill];
+        [outside fill];
+
+        ringPath.lineWidth = 1.0;
+        [ns(border) setStroke];
+        [ringPath stroke];
+
+        [NSGraphicsContext restoreGraphicsState];
+    }
+}
+
 void pl_text(PlCanvas *c, PlFont *f, PlRect r, const char *s, PlColor col, int flags)
 {
     NSMutableParagraphStyle *ps = [[NSMutableParagraphStyle alloc] init];
