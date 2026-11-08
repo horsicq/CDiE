@@ -87,7 +87,6 @@ if not defined VSCMD_VER (
     call "!VCVARS!" >nul
 )
 
-rem --- Dependency include roots ----------------------------------------------
 set "XXW_INC=%DEP%\xxwidgets\include"
 set "XXF_INC=%DEP%\xxfclib\include"
 
@@ -104,7 +103,6 @@ if not exist "%XXF_INC%\xxfclib\die_engine\die_engine.h" (
     exit /b 1
 )
 
-rem --- Dependency libraries: find, build if missing, find again --------------
 if defined REBUILD_DEPS (
     set "XXW_LIB="
     set "XXF_LIB="
@@ -272,10 +270,6 @@ if "%BUILD_INSTALLER%"=="1" (
 endlocal
 exit /b 0
 
-rem ===========================================================================
-rem Subroutines
-rem ===========================================================================
-
 rem :copy_setup <search root>
 rem   Copies any cdie-setup*.exe found under the root into the release folder.
 :copy_setup
@@ -335,7 +329,7 @@ where ninja >nul 2>&1 && set "GEN=-G Ninja"
 set "TGT="
 if not "%~2"=="" set "TGT=--target %~2"
 echo Building %~1 ...
-cmake -S "%~1" -B "%~1\build" !GEN! -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DCMAKE_POLICY_DEFAULT_CMP0091=NEW -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DXXWIDGETS_BUILD_EXAMPLES=OFF -DXXWIDGETS_BUILD_TESTS=OFF -DXXWIDGETS_BUILD_SETTINGS=OFF -DBUILD_TESTING=OFF
+cmake -S "%~1" -B "%~1\build" !GEN! -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DCMAKE_POLICY_DEFAULT_CMP0091=NEW -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DXXWIDGETS_BUILD_EXAMPLES=OFF -DXXWIDGETS_BUILD_TESTS=OFF -DXXWIDGETS_BUILD_SETTINGS=OFF -DBUILD_TESTING=OFF -DCMAKE_C_FLAGS_RELEASE="/O1 /Oi /Gy /GF /Gw /GL /DNDEBUG" -DCMAKE_CXX_FLAGS_RELEASE="/O1 /Oi /Gy /GF /Gw /GL /DNDEBUG" -DCMAKE_STATIC_LINKER_FLAGS_RELEASE=/LTCG
 if errorlevel 1 (
     echo ERROR: cmake configure failed for %~1
     exit /b 1

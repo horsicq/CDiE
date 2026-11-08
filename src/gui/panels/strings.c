@@ -593,7 +593,7 @@ void stringsview_set_file(StringsView* d, const char* path)
   strncpy(d->path, path ? path : "", sizeof(d->path) - 1);
   d->path[sizeof(d->path) - 1] = 0;
   d->dirty = 1;
-  if (d->W > 0) { load_now(d); redraw(d); }   /* visible: load now, else wait */
+  if (d->W > 0) { load_now(d); redraw(d); }   
 }
 
 void stringsview_activate(StringsView* d)

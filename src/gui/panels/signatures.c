@@ -1613,7 +1613,9 @@ void sigview_activate(SigView* s)
 
 void sigview_reload(SigView* s)
 {
-  if (s && s->inited) rebuild_tree(s);
+  if (!s || !s->inited) return;
+  rebuild_tree(s);
+  if (s->upd.phase != UPD_RUNNING) updater_check(&s->upd);
 }
 
 void sigview_key(SigView* s, int key, uint32_t ch, int mods)

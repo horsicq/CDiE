@@ -67,7 +67,7 @@
 #include "core/i18n.h"
 #include "core/virustotal.h"
 #include "core/appupdate.h"
-
+#include "panels/versions.h"
 
  /* Store / VSIX builds get updates from Microsoft */
 #ifdef CDIE_STORE_BUILD
@@ -93,7 +93,7 @@ enum gui_action {
 	ACTION_OPTIONS, ACTION_ABOUT,
 	ACTION_DATABASE_PATHS,
 	ACTION_SIGNATURES, ACTION_STRINGS,
-	ACTION_MONITOR, ACTION_VIRUSTOTAL, ACTION_PALETTE
+	ACTION_MONITOR, ACTION_VIRUSTOTAL, ACTION_PALETTE, ACTION_VERSIONS
 };
 
 static xxwidgets_app* g_app;
@@ -450,6 +450,12 @@ static void do_scan(void)
 		return;
 	}
 	if (!g_scanPath || !g_scanPath[0]) { g_pending = ACTION_BROWSE; return; }
+	if (gui_backend_signature_count() == 0) {
+		set_status("No signatures loaded. Download them from the Signatures page first.");
+		g_page = NAV_SIGNATURES; layout();
+		if (g_sig) sigview_activate(g_sig);
+		return;
+	}
 	path = copy_utf8(g_scanPath);
 	if (!path) { set_status("Out of memory."); return; }
 
@@ -1140,8 +1146,10 @@ static void fill_palette(void)
 	palette_add(g_pal, "Monitor downloads", "action", PALETTE_ACTION_BASE + ACTION_MONITOR);
 	palette_add(g_pal, "Check on VirusTotal (browser)", "action", PALETTE_ACTION_BASE + ACTION_VIRUSTOTAL);
 	palette_add(g_pal, "About", "action", PALETTE_ACTION_BASE + ACTION_ABOUT);
+#ifdef CDIE_STORE_BUILD
+	palette_add(g_pal, "Version history (rollback)", "action", PALETTE_ACTION_BASE + ACTION_VERSIONS);
+#endif
 }
-
 static void pal_round(void)
 {
 	if (g_palWnd) SetWindowRgn(g_palWnd, NULL, TRUE);   /* no clipping: smooth corners */
@@ -1323,7 +1331,10 @@ static int create_controls(void)
 		{ "F1",           ACTION_ABOUT },
 		{ "Ctrl+Shift+D", ACTION_DATABASE_PATHS },
 		{ "Ctrl+M",       ACTION_MONITOR },
-		{ "Ctrl+K",       ACTION_PALETTE }
+		{ "Ctrl+K",       ACTION_PALETTE },
+#ifdef CDIE_STORE_BUILD
+		{ "Ctrl+Shift+V", ACTION_VERSIONS },
+#endif
 	};
 
 	if (!SetWindowSubclass(native(g_window), window_subclass, 1, 0))
@@ -1400,9 +1411,9 @@ static void copy_db_paths_from_backend(CdieConfig* cfg)
 	const char* m = gui_backend_main_db_path();
 	const char* e = gui_backend_extra_db_path();
 	const char* c = gui_backend_custom_db_path();
-	snprintf(cfg->main_db, sizeof(cfg->main_db), "%s", m ? m : "");
-	snprintf(cfg->extra_db, sizeof(cfg->extra_db), "%s", e ? e : "");
-	snprintf(cfg->custom_db, sizeof(cfg->custom_db), "%s", c ? c : "");
+	if (m && m[0]) snprintf(cfg->main_db, sizeof(cfg->main_db), "%s", m);
+	if (e && e[0]) snprintf(cfg->extra_db, sizeof(cfg->extra_db), "%s", e);
+	if (c && c[0]) snprintf(cfg->custom_db, sizeof(cfg->custom_db), "%s", c);
 }
 
 static void fill_prefs(CdieConfig* cfg)
@@ -1442,9 +1453,8 @@ static int init_backend_with_config(void)
 	int have_file = config_load(&cfg);
 
 	if (have_file && cfg.main_db[0]) {
-		if (gui_backend_set_db_paths(cfg.main_db, cfg.extra_db, cfg.custom_db))
-			ok = 1;            /* saved folders worked, even if the default failed */
-		return ok;
+		gui_backend_set_db_paths(cfg.main_db, cfg.extra_db, cfg.custom_db);
+		return 1;   /* folder is configured, even if it is still empty */
 	}
 
 	/* Program Files / Store: never use the shipped folder, the user must choose one */
@@ -1572,6 +1582,11 @@ static void run_action(int action)
 	case ACTION_DATABASE_PATHS: do_options_window(OPTIONS_PAGE_DATABASES); break;
 	case ACTION_VIRUSTOTAL:     do_virustotal();     break;
 	case ACTION_PALETTE:        do_palette();        break;
+#ifdef CDIE_STORE_BUILD
+	case ACTION_VERSIONS:
+		if (versions_show(native(g_window), opt_get_version(NULL))) quit_app();
+		break;
+#endif
 	case ACTION_SIGNATURES:     signatures_show(g_app, g_window); break;
 	default: break;
 	}
@@ -1603,7 +1618,10 @@ int gui_run(void)
 	apply_saved_prefs();
 	g_prefsReady = 1;
 
-	if (db_ok) {
+	if (db_ok && gui_backend_signature_count() == 0) {
+		set_status("No signatures yet. Open Signatures to download the database.");
+	}
+	else if (db_ok) {
 		snprintf(ready, sizeof(ready),
 			"Ready. %d signatures loaded. Choose a file or drag one here, then press Scan.",
 			gui_backend_signature_count());
