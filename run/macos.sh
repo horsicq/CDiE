@@ -117,6 +117,7 @@ done < <(find "$SRC" -type f -name '*.c' | sort)
 while IFS= read -r f; do
     case "$f" in
         */main_gui.c) continue ;;                          # Windows entry (main_gui_mac.mm replaces it)
+		*/panels/versions.c) continue ;; 
         *_win32.c|*_win32.cpp|*_win32.mm) continue ;;      # Win32-only
         *_gtk.c|*_gtk*.c|*_linux.c|*_linux*.c) continue ;; # GTK / Linux-only
         */main_gui_linux.c|*/main_gui_gtk.c) continue ;;
