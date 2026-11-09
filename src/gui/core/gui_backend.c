@@ -291,7 +291,7 @@ int gui_backend_scan_results_type(const char* pUtf8Path, int nTypeId,
 	}
 
 	if (ppTypeName != NULL) {
-		pTypeName = cdie_strdup(xft_to_string(result.fileType));
+		pTypeName = cdie_strdup(xft_to_string((XFileType)result.compatibility_file_type));
 	}
 	if ((ppResultText && !pText) || (ppTypeName && !pTypeName)) {
 		xx_rt_free(pText);
