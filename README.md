@@ -25,4 +25,8 @@ diec -D /path/to/Detect-It-Easy/db target.exe
 
 Run `die-update --check` to check for updates, or `die-update` to install them.
 
+## Microsoft Store
+
+DevX-Cipher has my permission to publish CDiE on the Microsoft Store. Issues with that package can be reported here
+
 MIT license. See [LICENSE](LICENSE).
