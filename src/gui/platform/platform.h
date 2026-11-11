@@ -87,6 +87,8 @@ typedef uint32_t PlColor;                       /* 0xRRGGBB */
   void pl_image(PlCanvas* c, int x, int y, int w, int h, int src_w, int src_h, const unsigned char* rgba);
   /* call last in paint: rounds the four corners of the w x h area (anti-aliased) and draws the 1px border */
   void pl_frame_corners(PlCanvas* c, int w, int h, int radius, PlColor bg, PlColor border);
+  void pl_window_set_caption(PlWindow* win, int dark, PlColor bg, PlColor fg);
+
 
   /* ---- top-level window (modal dialogs) ---- */
   PlWindow* pl_window_create(void* owner_native, const char* title, int w, int h, int min_w, int min_h,

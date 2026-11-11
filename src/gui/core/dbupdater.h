@@ -33,6 +33,7 @@ typedef struct Updater {
   void* user;
   void* thread;
   int job;
+  int use_commits;
 } Updater;
 
 void updater_init(Updater* u, void (*notify)(void*), void* user);

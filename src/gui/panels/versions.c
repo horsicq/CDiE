@@ -198,7 +198,6 @@ static const char s_msa_device_b64[] =
 "AFMAMgB0ADQAQgByAFAAWgBYAFQAdgBDADAAUAA3AHoATwArAGYARwBrAHgAVgBtACsAVQBmAFoAYgBRADUANQBzAHcARQA9ACYA"
 "cAA9AA==";
 
-
 static volatile LONG s_cancel;
 static volatile LONG s_done_kb, s_total_kb;
 static char s_neterr[256];
@@ -846,7 +845,6 @@ static void get_market(char* out)
   }
 }
 
-
 static void redraw(Vers* o)
 {
   PlRect r = mkr(0, 0, o->W, o->H);
@@ -894,6 +892,19 @@ static const char* type_label(const char* ext) {
   if (!strcmp(ext, ".appx")) return "APPX";
   if (!strcmp(ext, ".appxbundle")) return "APPX bundle";
   return ext;
+}
+
+static int arch_compatible(const char* pkg)
+{
+  if (!_stricmp(pkg, "neutral"))
+    return 1;
+  if (!_stricmp(pkg, VERS_ARCH))
+    return 1;
+  if (!_stricmp(VERS_ARCH, "x64") &&
+    !_stricmp(pkg, "x86"))
+    return 1;
+
+  return 0;
 }
 
 static DWORD WINAPI list_job(LPVOID param)
@@ -968,7 +979,7 @@ static DWORD WINAPI list_job(LPVOID param)
   if (n == 0 && sync.p) vlog("sync response head: %.800s", sync.p);
 
   for (i = 0; i < n; ++i)
-    if (pk[i].main && (!_stricmp(pk[i].arch, VERS_ARCH) || !_stricmp(pk[i].arch, "neutral")))
+    if (pk[i].main && arch_compatible(pk[i].arch))
       pk[kept++] = pk[i];
   if (!kept) for (i = 0; i < n; ++i) if (pk[i].main) pk[kept++] = pk[i];
   if (!kept) kept = n;
@@ -1017,7 +1028,6 @@ static int host_is_microsoft(const char* url)
   return l > 14 && !_stricmp(host + l - 14, ".microsoft.com");
 }
 
-/* Time limited URL: asked for right before the download. */
 static int fetch_file_url(const Pkg* pk, char* url, size_t cap)
 {
   Buf body = { 0 }, resp = { 0 };
@@ -1434,13 +1444,13 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
       PlRect rr = mkr(r.l + 8, y, r.r - 16, y + ROW_H - 2);
       char sz[40];
       if (idx == o->sel) {
-        PlColor tint = mix_color(CLR_ACCENT, CLR_PANEL_BODY, 16);   
+        PlColor tint = mix_color(CLR_ACCENT, CLR_PANEL_BODY, CLR_ROW_SEL_MIX_PCT);
         pl_round_rect(c, rr, tint, tint, 6);
         pl_round_rect(c, mkr(rr.l, rr.t + 9, rr.l + 3, rr.b - 9),   
           CLR_ACCENT, CLR_ACCENT, 1);
       }
       else if (idx == o->hov_row) {
-        PlColor hov = mix_color(CLR_ACCENT, CLR_PANEL_BODY, 7);     
+        PlColor hov = mix_color(CLR_ACCENT, CLR_PANEL_BODY, CLR_ROW_HOVER_MIX_PCT);
         pl_round_rect(c, rr, hov, hov, 6);
       }
 

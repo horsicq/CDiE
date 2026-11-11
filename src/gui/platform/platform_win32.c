@@ -657,8 +657,6 @@ PlWindow* pl_window_create(void* owner_native, const char* title, int w, int h,
 {
 	PlWindow* win;
 	WCHAR wtitle[256];
-	BOOL dark = TRUE;
-	COLORREF cap = RGB(0x1F, 0x21, 0x2E), capText = RGB(0xEC, 0xEC, 0xF8);
 	HINSTANCE inst = GetModuleHandleW(NULL);
 
 	if (!s_win_class_registered) {
@@ -685,10 +683,19 @@ PlWindow* pl_window_create(void* owner_native, const char* title, int w, int h,
 		win->owner, NULL, inst, win);
 	if (!win->hwnd) { free(win); return NULL; }
 
-	DwmSetWindowAttribute(win->hwnd, 20, &dark, sizeof(dark));        /* dark title bar */
-	DwmSetWindowAttribute(win->hwnd, 35, &cap, sizeof(cap));          /* caption colour */
-	DwmSetWindowAttribute(win->hwnd, 36, &capText, sizeof(capText));  /* caption text   */
 	return win;
+}
+
+void pl_window_set_caption(PlWindow* win, int dark, PlColor bg, PlColor fg)
+{
+	BOOL d = dark ? TRUE : FALSE;
+	COLORREF cap = to_cr(bg), txt = to_cr(fg);
+	if (!win || !win->hwnd) return;
+	DwmSetWindowAttribute(win->hwnd, 20, &d, sizeof(d));
+	DwmSetWindowAttribute(win->hwnd, 35, &cap, sizeof(cap));
+	DwmSetWindowAttribute(win->hwnd, 36, &txt, sizeof(txt));
+	SetWindowPos(win->hwnd, NULL, 0, 0, 0, 0,
+		SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
 }
 
 void* pl_window_client(PlWindow* win)

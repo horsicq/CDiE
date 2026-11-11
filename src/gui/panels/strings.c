@@ -362,7 +362,7 @@ static void paint_list(Dlg* d, PlCanvas* c)
       pl_round_rect(c, mkr(d->r_list.l + 4, y, d->r_list.r - 4, y + ROW_H), CLR_SIDEBAR_SEL, CLR_SIDEBAR_SEL, 6);
 
     snprintf(off, sizeof(off), "0x%08llX", (unsigned long long)d->str[idx].off);
-    tc = d->str[idx].type == T_ASCII ? PL_RGB(98, 219, 196) : PL_RGB(187, 154, 247);
+    tc = d->str[idx].type == T_ASCII ? CLR_STR_ASCII : CLR_STR_UTF16;
 
     pl_text(c, d->font, mkr(x0 + COL_OFF, y, x0 + COL_TYPE - 6, y + ROW_H), off, CLR_TEXT_CODE, PL_TEXT_LEFT);
     pl_text(c, d->font, mkr(x0 + COL_TYPE, y, x0 + COL_TXT - 6, y + ROW_H),

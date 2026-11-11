@@ -68,7 +68,7 @@
 
 typedef volatile long upd_atom;
 
-static unsigned long s_http_status, s_win_err;   /* last failure details */
+static unsigned long s_http_status, s_win_err;   
 static upd_atom s_done_kb, s_total_kb, s_cancel;
 static AppUpdProgressFn s_hook;
 static void* s_hook_ud;
@@ -79,12 +79,14 @@ static unsigned long upd_tick(void) { return (unsigned long)GetTickCount(); }
 static void upd_sleep_ms(unsigned ms) { Sleep(ms); }
 #else
 static void atom_set(upd_atom* p, long v) { __atomic_store_n(p, v, __ATOMIC_SEQ_CST); }
+
 static unsigned long upd_tick(void)
 {
 	struct timespec ts;
 	clock_gettime(CLOCK_MONOTONIC, &ts);
 	return (unsigned long)(ts.tv_sec * 1000UL + ts.tv_nsec / 1000000UL);
 }
+
 static void upd_sleep_ms(unsigned ms) { usleep(ms * 1000u); }
 #endif
 

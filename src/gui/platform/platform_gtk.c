@@ -197,6 +197,11 @@ PlWidget *pl_widget_create(void *parent_native, const PlWidgetOps *ops, void *us
     return w;
 }
 
+void pl_window_set_caption(PlWindow* win, int dark, PlColor bg, PlColor fg)
+{
+  (void)win; (void)dark; (void)bg; (void)fg;
+}
+
 void pl_widget_destroy(PlWidget *w) { if (w) gtk_widget_destroy(w->da); }
 
 void pl_widget_set_rect(PlWidget *w, int x, int y, int width, int height)

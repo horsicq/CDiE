@@ -78,10 +78,14 @@
 #define CDIE_SHOW_CONTEXT 1
 #endif
 
-#if defined(_WIN64)
+#if defined(_M_ARM64)
+#define CDIE_ARCH "ARM64"
+#elif defined(_M_X64)
 #define CDIE_ARCH "x64"
-#else
+#elif defined(_M_IX86)
 #define CDIE_ARCH "x86"
+#else
+#define CDIE_ARCH "Unknown"
 #endif
 
 #define SIDEBAR_PALETTE_ID  1000
@@ -100,7 +104,6 @@ static xxwidgets_app* g_app;
 static xxwidgets_widget* g_window;
 static char* g_scanPath;          /* file to scan */
 
-/* Custom dark-chrome child windows */
 static Sidebar* g_sidebar;
 static Header* g_header_wnd;
 static Infobar* g_infobar_wnd;
@@ -133,12 +136,26 @@ static int g_bFlagDeep = 1, g_bFlagHeur = 1, g_bFlagVerbose = 1;
 static int g_bFlagAggr, g_bFlagHideUnknown, g_bFlagFormat;
 static int g_bDbExtra = 1, g_bDbCustom = 1;
 static char g_lang[32];
+static int g_themeMode;
 
 static void layout(void);
+static void sync_system_theme(void);
 
 static HWND native(xxwidgets_widget* widget)
 {
 	return (HWND)xxwidgets_widget_native_handle(widget);
+}
+
+static void repaint_all(void)
+{
+	HWND hwnd = native(g_window);
+
+	if (!hwnd)
+		return;
+
+	InvalidateRect(hwnd, NULL, TRUE);
+	RedrawWindow(hwnd, NULL, NULL,
+		RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
 }
 
 static void quit_app(void)
@@ -839,6 +856,15 @@ static int opt_list_languages(void* u,
 
 static const char* opt_get_language(void* u) { (void)u; return g_lang; }
 
+static int opt_set_theme(void* u, int mode)
+{
+	(void)u;
+	if (mode < 0 || mode > 2) return 0;
+	g_themeMode = mode;
+	sync_system_theme();
+	return 1;
+}
+
 static int opt_set_language(void* u, const char* code)
 {
 	(void)u;
@@ -875,7 +901,8 @@ static void do_options_window(int page)
 	host.list_languages = opt_list_languages;
 	host.get_language = opt_get_language;
 	host.set_language = opt_set_language;
-	options_show(g_app, g_window, &host, page);
+	host.set_theme = opt_set_theme;
+	options_show(g_app, native(g_window), &host, page);
 }
 
 static void do_virustotal(void)
@@ -1040,6 +1067,57 @@ static void mon_restore_flags(void* u)
 	apply_flags_to_backend();
 }
 
+static int system_theme_is_dark(void)
+{
+	DWORD value = 1;
+	DWORD size = sizeof(value);
+	HKEY key;
+
+	if (RegOpenKeyExW(
+		HKEY_CURRENT_USER,
+		L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+		0,
+		KEY_READ,
+		&key) == ERROR_SUCCESS)
+	{
+		RegQueryValueExW(
+			key,
+			L"AppsUseLightTheme",
+			NULL,
+			NULL,
+			(LPBYTE)&value,
+			&size);
+
+		RegCloseKey(key);
+	}
+
+	return value == 0;
+}
+
+static void sync_system_theme(void)
+{
+	BOOL dark;
+	HWND hwnd = native(g_window);
+
+	if (!hwnd)
+		return;
+
+	if (g_themeMode == 1)      dark = FALSE;
+	else if (g_themeMode == 2) dark = TRUE;
+	else                       dark = system_theme_is_dark() ? TRUE : FALSE;
+
+	DwmSetWindowAttribute(
+		hwnd,
+		DWMWA_USE_IMMERSIVE_DARK_MODE,
+		&dark,
+		sizeof(dark));
+
+	theme_set(dark ? THEME_DARK : THEME_LIGHT);
+
+	repaint_all();
+}
+
+
 static LRESULT CALLBACK window_subclass(HWND handle, UINT message,
 	WPARAM wp, LPARAM lp,
 	UINT_PTR subclass_id, DWORD_PTR reference)
@@ -1051,6 +1129,10 @@ static LRESULT CALLBACK window_subclass(HWND handle, UINT message,
 	if (dlwatch_handle_message(handle, message, wp, lp, &tray_result))
 		return tray_result;
 	switch (message) {
+	case WM_SETTINGCHANGE:
+	case WM_THEMECHANGED:
+		sync_system_theme();
+		return 0;
 	case WM_GETMINMAXINFO: {
 		MINMAXINFO* info = (MINMAXINFO*)lp;
 		info->ptMinTrackSize.x = g_minWindowWidth;
@@ -1520,6 +1602,7 @@ static void load_saved_settings(void)
 	CdieConfig cfg;
 	if (!config_load(&cfg)) return;
 	vt_set_api_key(cfg.vt_key);
+	g_themeMode = cfg.theme_mode;
 	if (cfg.language[0]) {
 		snprintf(g_lang, sizeof(g_lang), "%s", cfg.language);
 		i18n_load(g_lang);
@@ -1531,7 +1614,6 @@ static int create_main_window(void)
 	xxwidgets_rect bounds = { 8, 4, 118, 40 };
 	xxwidgets_status status;
 	char title[160];
-	BOOL dark = TRUE;
 
 	snprintf(title, sizeof(title), "%s (" CDIE_ARCH ")", gui_backend_app_title());
 
@@ -1544,13 +1626,17 @@ static int create_main_window(void)
 		return 0;
 	}
 
-	DwmSetWindowAttribute(native(g_window), 20, &dark, sizeof(dark));
+	sync_system_theme();
 	set_app_icon();
 	xxwidgets_widget_set_visible(g_window, 0);
 	if (!create_controls()) {
 		MessageBoxW(NULL, L"create_controls failed", L"cdie", MB_ICONERROR);
 		return 0;
 	}
+
+	g_theme_listener = repaint_all;
+	sync_system_theme();
+
 	return 1;
 }
 

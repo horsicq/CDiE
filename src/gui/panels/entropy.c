@@ -32,8 +32,6 @@
 #define EV_CURVE_MAX  320
 #define EV_REG_MAX    96
 #define EV_CHUNK      (64 * 1024)
-#define EV_T_PACKED   6.5
-#define EV_T_HIGH     7.2
 #define ROW_H         22
 #define HDR_H         24
 #define EV_PAD        18
@@ -42,9 +40,7 @@
 #define EV_C  PL_TEXT_CENTER
 #define EV_R  (PL_TEXT_RIGHT | PL_TEXT_ELLIPSIS)
 
-#define COL_LOW   0x43A047
-#define COL_MID   0xFFB300
-#define COL_HIGH  0xE53935
+
 
 enum { B_ENT, B_BYTES, B_GRID, B_RANGE, B_CLEAR, B_RELOAD, B_COPY, B_COUNT };
 
@@ -102,32 +98,9 @@ static int inside(const PlRect* r, int x, int y)
 	return x >= r->l && x < r->r && y >= r->t && y < r->b;
 }
 
-static PlColor mixc(PlColor a, PlColor b, int t)
-{
-	unsigned ar = (a >> 16) & 255, ag = (a >> 8) & 255, ab = a & 255;
-	unsigned br = (b >> 16) & 255, bg = (b >> 8) & 255, bb = b & 255;
-	if (t < 0) t = 0;
-	if (t > 256) t = 256;
-	return (PlColor)((((ar * (256 - t) + br * t) >> 8) << 16) |
-		(((ag * (256 - t) + bg * t) >> 8) << 8) |
-		((ab * (256 - t) + bb * t) >> 8));
-}
-
-static PlColor ev_col(double e)
-{
-	if (e <= 4.5) return COL_LOW;
-	if (e < EV_T_PACKED)
-		return mixc(COL_LOW, COL_MID, (int)((e - 4.5) / (EV_T_PACKED - 4.5) * 256));
-	if (e < EV_T_HIGH)
-		return mixc(COL_MID, COL_HIGH, (int)((e - EV_T_PACKED) / (EV_T_HIGH - EV_T_PACKED) * 256));
-	return COL_HIGH;
-}
-
-static int ev_lvl(double e) { return e >= EV_T_HIGH ? 2 : (e >= EV_T_PACKED ? 1 : 0); }
-
 static const char* ev_status(double e)
 {
-	int l = ev_lvl(e);
+	int l = theme_entropy_lvl(e);
 	return l == 2 ? T("encrypted or compressed") : l == 1 ? T("packed") : T("not packed");
 }
 
@@ -262,7 +235,7 @@ static int ev_cmp(const void* a, const void* b)
 	switch (g_sort->sortCol) {
 	case 1: c = (x->size > y->size) - (x->size < y->size); break;
 	case 2: c = (x->ent > y->ent) - (x->ent < y->ent); break;
-	case 3: c = ev_lvl(x->ent) - ev_lvl(y->ent); break;
+	case 3: c = theme_entropy_lvl(x->ent) - theme_entropy_lvl(y->ent); break;
 	case 4: c = strcmp(x->name, y->name); break;
 	default: break;
 	}
@@ -414,7 +387,7 @@ static void ev_paint_table(EntropyView* d, PlCanvas* c)
 {
 	PlRect t = d->rTable;
 	static const char* heads[5] = { "Offset", "Size", "Entropy", "Status", "Name" };
-	PlColor cHdr = mixc(CLR_SEARCH_BG, CLR_TEXT_PRIMARY, 14);
+	PlColor cHdr = theme_mix(CLR_SEARCH_BG, CLR_TEXT_PRIMARY, 14);
 	char s[128];
 	int i, r;
 
@@ -432,7 +405,7 @@ static void ev_paint_table(EntropyView* d, PlCanvas* c)
 		int y = t.t + HDR_H + r * ROW_H;
 		int sel = d->selActive && d->selReg == idx;
 		PlColor bg = sel ? CLR_SIDEBAR_SEL : (d->hovRow == r ? CLR_SIDEBAR_HOVER : CLR_SEARCH_BG);
-		PlColor col = ev_col(g->ent);
+		PlColor col = theme_entropy_col(g->ent);
 
 		pl_fill(c, t.l + 1, y, t.r - 1, y + ROW_H, bg);
 		if (sel) pl_fill(c, t.l + 1, y, t.l + 4, y + ROW_H, CLR_ACCENT);
@@ -444,7 +417,7 @@ static void ev_paint_table(EntropyView* d, PlCanvas* c)
 		snprintf(s, sizeof(s), "%.5f", g->ent);
 		txt(c, d->fN, t.l + CX[2], y, t.l + CX[2] + 70, y + ROW_H, s, CLR_TEXT_PRIMARY, EV_L);
 
-		pl_fill(c, t.l + CX[2] + 78, y + 8, t.l + CX[2] + 138, y + 14, mixc(bg, CLR_TEXT_PRIMARY, 24));
+		pl_fill(c, t.l + CX[2] + 78, y + 8, t.l + CX[2] + 138, y + 14, theme_mix(bg, CLR_TEXT_PRIMARY, 24));
 		pl_fill(c, t.l + CX[2] + 78, y + 8,
 			t.l + CX[2] + 78 + (int)(g->ent / 8.0 * 60.0), y + 14, col);
 
@@ -468,7 +441,7 @@ static void ev_paint_table(EntropyView* d, PlCanvas* c)
 static void ev_chart_entropy(EntropyView* d, PlCanvas* c, const PlRect* p)
 {
 	PlColor bgc = CLR_SEARCH_BG, cT = CLR_TEXT_PRIMARY, cS = CLR_TEXT_SECONDARY;
-	PlColor cGrid = mixc(bgc, cT, 28), cAxis = mixc(bgc, cT, 90);
+	PlColor cGrid = theme_mix(bgc, cT, 28), cAxis = theme_mix(bgc, cT, 90);
 	int W = p->r - p->l, H = p->b - p->t, n = d->ncurve;
 	int x, i, py = 0, hasBand = 0, bx0 = 0, bx1 = 0;
 	char s[160];
@@ -497,17 +470,17 @@ static void ev_chart_entropy(EntropyView* d, PlCanvas* c, const PlRect* p)
 		if (i1 >= n) i1 = n - 1;
 		v = d->curve[i0] * (1.0 - f) + d->curve[i1] * f;
 		y = p->b - (int)(v / 8.0 * H + 0.5);
-		col = ev_col(v);
+		col = theme_entropy_col(v);
 		in = hasBand ? (px >= bx0 && px < bx1) : 1;
-		pl_fill(c, px, y, px + 1, p->b, mixc(bgc, col, hasBand ? (in ? 190 : 70) : 120));
+		pl_fill(c, px, y, px + 1, p->b, theme_mix(bgc, col, hasBand ? (in ? 190 : 70) : 120));
 		if (x == 0) py = y;
-		pl_fill(c, px, y < py ? y : py, px + 1, (y > py ? y : py) + 1, in ? col : mixc(bgc, col, 170));
+		pl_fill(c, px, y < py ? y : py, px + 1, (y > py ? y : py) + 1, in ? col : theme_mix(bgc, col, 170));
 		py = y;
 	}
 
 	for (i = 1; i < d->nreg; ++i) {      /* region dividers */
 		int rx = p->l + (int)((double)d->reg[i].off / (double)d->fsize * W);
-		pl_fill(c, rx, p->t, rx + 1, p->b, mixc(bgc, cT, 45));
+		pl_fill(c, rx, p->t, rx + 1, p->b, theme_mix(bgc, cT, 45));
 	}
 
 	for (i = 0; i <= 8; ++i) {           /* y labels + optional grid */
@@ -526,7 +499,7 @@ static void ev_chart_entropy(EntropyView* d, PlCanvas* c, const PlRect* p)
 		}
 
 	{                                    /* threshold lines */
-		int y1 = p->b - (int)(EV_T_PACKED / 8.0 * H), y2 = p->b - (int)(EV_T_HIGH / 8.0 * H), gx;
+		int y1 = p->b - (int)(ENT_T_PACKED / 8.0 * H), y2 = p->b - (int)(ENT_T_HIGH / 8.0 * H), gx;
 		for (gx = p->l; gx < p->r; gx += 6) {
 			pl_fill(c, gx, y1, gx + 3, y1 + 1, COL_MID);
 			pl_fill(c, gx, y2, gx + 3, y2 + 1, COL_HIGH);
@@ -553,7 +526,7 @@ static void ev_chart_entropy(EntropyView* d, PlCanvas* c, const PlRect* p)
 		snprintf(s, sizeof(s), "%s: 0x%llX", T("Offset"), (unsigned long long)off);
 		txt(c, d->fN, tx + 10, ty + 4, tx + 240, ty + 22, s, cT, EV_L);
 		snprintf(s, sizeof(s), "%s: %.5f  (%s)", T("Entropy"), d->curve[bi], ev_status(d->curve[bi]));
-		txt(c, d->fN, tx + 10, ty + 22, tx + 240, ty + 40, s, ev_col(d->curve[bi]), EV_L);
+		txt(c, d->fN, tx + 10, ty + 22, tx + 240, ty + 40, s, theme_entropy_col(d->curve[bi]), EV_L);
 		txt(c, d->fN, tx + 10, ty + 42, tx + 240, ty + 62,
 			ri >= 0 ? d->reg[ri].name : T("(no region)"), cS, EV_L);
 	}
@@ -583,12 +556,12 @@ static void ev_chart_bytes(EntropyView* d, PlCanvas* c, const PlRect* p)
 		int x0 = p->l + b * W / 256, x1 = p->l + (b + 1) * W / 256;
 		int h = lmx > 0 ? (int)(log(1.0 + hs[b]) / lmx * H) : 0;
 		PlColor col;
-		if (b == 0) col = 0x5C9DFF;
+		if (b == 0) col = CLR_BYTE_NULL;
 		else if (b == 0xFF) col = COL_HIGH;
 		else if (b >= 0x20 && b < 0x7F) col = COL_LOW;
-		else if (b < 0x20 || b == 0x7F) col = 0x9E9EB8;
+		else if (b < 0x20 || b == 0x7F) col = CLR_BYTE_CTRL;
 		else col = COL_MID;
-		if (b == hov) col = mixc(col, 0xFFFFFF, 90);
+		if (b == hov) col = theme_mix(col, CLR_TEXT_PRIMARY, 90);
 		if (hs[b] && h < 2) h = 2;
 		pl_fill(c, x0, p->b - h, x1 > x0 + 2 ? x1 - 1 : x1, p->b, col);
 	}
@@ -598,7 +571,7 @@ static void ev_chart_bytes(EntropyView* d, PlCanvas* c, const PlRect* p)
 		snprintf(s, sizeof(s), "0x%02X", i == 4 ? 255 : i * 64);
 		txt(c, d->fN, l, p->b + 5, l + 60, p->b + 22, s, cS, i == 0 ? EV_L : (i == 4 ? EV_R : EV_C));
 	}
-	pl_fill(c, p->l - 1, p->b, p->r, p->b + 1, mixc(bgc, cT, 90));
+	pl_fill(c, p->l - 1, p->b, p->r, p->b + 1, theme_mix(bgc, cT, 90));
 
 	if (total) {
 		snprintf(s, sizeof(s), "%s %u/256   %s %.1f%%   %s %.1f%%   (%s)",
@@ -631,7 +604,7 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 	}
 
 	/* total entropy card */
-	oc = ev_col(d->overall);
+	oc = theme_entropy_col(d->overall);
 	txt(c, d->fN, P, P, P + 170, P + 18, T("TOTAL ENTROPY"), CLR_TEXT_SECONDARY, EV_L);
 	snprintf(s, sizeof(s), "%.5f", d->overall);
 	txt(c, d->fBig, P, P + 18, P + 170, P + 52, s, oc, EV_L);
@@ -642,10 +615,10 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 		for (x = bx0 + 2; x < bx1 - 2; ++x) {
 			double f = (double)(x - bx0 - 2) / (double)(bx1 - bx0 - 4);
 			if (f * 8.0 > d->overall) break;
-			pl_fill(c, x, o + 11, x + 1, o + 25, ev_col(f * 8.0));
+			pl_fill(c, x, o + 11, x + 1, o + 25, theme_entropy_col(f * 8.0));
 		}
-		pl_fill(c, bx0 + (int)(EV_T_PACKED / 8.0 * (bx1 - bx0)), o + 6, bx0 + (int)(EV_T_PACKED / 8.0 * (bx1 - bx0)) + 1, o + 30, CLR_TEXT_SECONDARY);
-		pl_fill(c, bx0 + (int)(EV_T_HIGH / 8.0 * (bx1 - bx0)), o + 6, bx0 + (int)(EV_T_HIGH / 8.0 * (bx1 - bx0)) + 1, o + 30, CLR_TEXT_SECONDARY);
+		pl_fill(c, bx0 + (int)(ENT_T_PACKED / 8.0 * (bx1 - bx0)), o + 6, bx0 + (int)(ENT_T_PACKED / 8.0 * (bx1 - bx0)) + 1, o + 30, CLR_TEXT_SECONDARY);
+		pl_fill(c, bx0 + (int)(ENT_T_HIGH / 8.0 * (bx1 - bx0)), o + 6, bx0 + (int)(ENT_T_HIGH / 8.0 * (bx1 - bx0)) + 1, o + 30, CLR_TEXT_SECONDARY);
 		snprintf(s, sizeof(s), "%s (%d%%)", ev_status(d->overall), (int)(d->overall / 8.0 * 100.0));
 		txt(c, d->fB, bx0, o + 32, bx0 + 320, o + 52, s, oc, EV_L);
 		snprintf(s, sizeof(s), "%s   |   %s %.2f   |   %s %.2f", d->ftype, T("Low"), d->cmin, T("Peak"), d->cmax);

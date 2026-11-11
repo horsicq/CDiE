@@ -445,16 +445,6 @@ static const char* base_name(const char* path)
 	return name;
 }
 
-#define SC_RED    ((PlColor)0xD9534F)
-#define SC_AMBER  ((PlColor)0xF0AD4E)
-#define SC_GREEN  ((PlColor)0x5CB85C)
-#define SC_WHITE  ((PlColor)0xFFFFFF)
-
-static const PlColor s_pal[6] = {
-	(PlColor)0x4C82F5, (PlColor)0x2FA6A0, (PlColor)0x8E6BD8,
-	(PlColor)0xD8843A, (PlColor)0x6C7A94, (PlColor)0xD9534F
-};
-
 static void put_text(PlCanvas* c, PlFont* f, int x, int y, int w, int h,
 	const char* s, PlColor col)
 {
@@ -497,10 +487,10 @@ static void draw_access(SecView* v, PlCanvas* c, int x, int y, const SecInfo* s)
 		PlRect r = { x + k * 23, y, x + k * 23 + 20, y + 20 };
 		PlRect tr = { r.l + 6, r.t, r.r, r.b };
 		PlColor fill = !on[k] ? CLR_BG
-			: bad ? SC_RED
-			: (k == 1 ? SC_AMBER : (k == 2 ? CLR_ACCENT : SC_GREEN));
+			: bad ? CLR_DANGER
+			: (k == 1 ? CLR_WARNING : (k == 2 ? CLR_ACCENT : CLR_SUCCESS));
 		pl_round_rect(c, r, fill, on[k] ? fill : CLR_PANEL_BORDER, 4);
-		pl_text(c, v->fText, tr, letters[k], on[k] ? SC_WHITE : CLR_TEXT_SECONDARY, PL_TEXT_LEFT);
+		pl_text(c, v->fText, tr, letters[k], on[k] ? CLR_ON_COLOR : CLR_TEXT_SECONDARY, PL_TEXT_LEFT);
 	}
 }
 
@@ -542,7 +532,7 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 		return;
 	}
 	if (v->state == SS_ERROR) {
-		draw_message(v, c, x, y, tw, v->err, SC_RED, NULL);
+		draw_message(v, c, x, y, tw, v->err, CLR_DANGER, NULL);
 		return;
 	}
 
@@ -567,7 +557,7 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 		labels[2] = translate("Total virtual size");
 		labels[3] = translate("With warnings");
 		for (k = 0; k < 4; ++k) vcol[k] = CLR_TEXT_PRIMARY;
-		if (warn > 0) vcol[3] = SC_RED;
+		if (warn > 0) vcol[3] = CLR_DANGER;
 
 		for (k = 0; k < 4; ++k) {
 			int cx = x + k * (cw + gap);
@@ -626,14 +616,14 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 
 		for (k = 0; k < n; ++k) {
 			PlRect r, tr;
-			PlColor fc = s_pal[k % 6];
+			PlColor fc = CLR_SEC_PAL_0 + (k % CLR_SEC_PAL_COUNT);
 			int ry = y + 32 + rowof[k] * (rowh + rgap);
 			if (k == 0 || rowof[k] != rowof[k - 1]) cx = bx;
 			r.l = cx; r.t = ry; r.r = cx + wd[k]; r.b = ry + rowh;
 			pl_round_rect(c, r, fc,
 				(k == v->sel || k == v->hover_seg) ? CLR_TEXT_PRIMARY : fc, 5);
 			tr.l = r.l + 6; tr.t = r.t; tr.r = r.r - 2; tr.b = r.b;
-			pl_text(c, v->fText, tr, v->sec[k].name, SC_WHITE, PL_TEXT_LEFT);
+			pl_text(c, v->fText, tr, v->sec[k].name, CLR_ON_COLOR, PL_TEXT_LEFT);
 			v->seg_rc[k] = r;
 			cx += wd[k] + gap;
 		}
@@ -693,7 +683,7 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 			if (k == v->sel || k == v->hover_row) pl_fill(c, rr.l, rr.t, rr.r, rr.b, CLR_SIDEBAR_SEL);
 			if (k == v->sel) pl_fill(c, rr.l, rr.t, rr.l + 3, rr.b, CLR_ACCENT);
 
-			pl_fill(c, cx[0], ry + 10, cx[0] + 10, ry + 20, s_pal[k % 6]);
+			pl_fill(c, cx[0], ry + 10, cx[0] + 10, ry + 20, CLR_SEC_PAL_0 + (k % CLR_SEC_PAL_COUNT));
 			put_text(c, v->fText, cx[0] + 18, ry + 5, 100, 20, s->name, CLR_TEXT_PRIMARY);
 			snprintf(line, sizeof(line), "0x%08X", (unsigned)s->va);
 			put_text(c, v->fText, cx[1], ry + 5, 110, 20, line, CLR_TEXT_PRIMARY);
@@ -702,7 +692,7 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 			snprintf(line, sizeof(line), "0x%08X", (unsigned)s->rawsize);
 			put_text(c, v->fText, cx[3], ry + 5, 110, 20, line, CLR_TEXT_PRIMARY);
 			draw_access(v, c, cx[4], ry + 5, s);
-			if (nf) put_text(c, v->fText, cx[5], ry + 5, x + tw - 16 - cx[5], 20, fl, SC_RED);
+			if (nf) put_text(c, v->fText, cx[5], ry + 5, x + tw - 16 - cx[5], 20, fl, CLR_DANGER);
 			else put_text(c, v->fText, cx[5], ry + 5, 40, 20, "-", CLR_TEXT_SECONDARY);
 
 			v->row_rc[k] = rr;
@@ -741,7 +731,7 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 			else put_text(c, v->fText, cx, y + 62, colw, 20, val, CLR_TEXT_PRIMARY);
 		}
 		put_text(c, v->fText, x + 16, y + 90, tw - 32, 20, describe(s->name), CLR_TEXT_SECONDARY);
-		if (nf) put_text(c, v->fText, x + 16, y + 106, tw - 32, 20, fl, SC_RED);
+		if (nf) put_text(c, v->fText, x + 16, y + 106, tw - 32, 20, fl, CLR_DANGER);
 	}
 
 	v->content_h = y + v->scroll + 128 + 16;       

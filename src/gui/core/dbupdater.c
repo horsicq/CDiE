@@ -41,15 +41,16 @@
 #define SEP '/'
 #endif
 
-#define RELEASE_API "https://api.github.com/repos/horsicq/Detect-It-Easy/releases/tags/current-database"
-#define RELEASE_ZIP "https://github.com/horsicq/Detect-It-Easy/releases/download/current-database/db.zip"
-#define RELEASE_ZIP_FALLBACK "https://github.com/horsicq/Detect-It-Easy/archive/refs/heads/master.zip"
+#define RELEASE_API           "https://api.github.com/repos/horsicq/Detect-It-Easy/releases/tags/current-database"
+#define RELEASE_ZIP           "https://github.com/horsicq/Detect-It-Easy/releases/download/current-database/db.zip"
+#define RELEASE_ZIP_FALLBACK  "https://github.com/horsicq/Detect-It-Easy/archive/refs/heads/master.zip"
+#define COMMITS_API           "https://api.github.com/repos/horsicq/Detect-It-Easy/commits?sha=master&per_page=1"
+#define COMMITS_ZIP_FMT       "https://github.com/horsicq/Detect-It-Easy/archive/%s.zip"
 
 enum { JOB_CHECK, JOB_INSTALL };
 
 typedef struct { char name[512]; int isdir; } Ent;
 typedef struct { Updater* u; int total, done; } CopyCtx;
-
 
 static void notify(Updater* u) { if (u->notify) u->notify(u->user); }
 static void set_pct(Updater* u, int p) { if (p != u->pct) { u->pct = p; notify(u); } }
@@ -480,6 +481,21 @@ static int parse_zip_url(const char* json, char* out, size_t cap)
   return 0;
 }
 
+static int parse_commit_sha(const char* json, char* out, size_t cap)
+{
+  const char* p = strstr(json, "\"sha\"");
+  size_t n = 0;
+  out[0] = 0;
+  if (!p) return 0;
+  p += 5;
+  while (*p == ' ' || *p == ':') ++p;
+  if (*p != '"') return 0;
+  ++p;
+  while (p[n] && p[n] != '"' && n + 1 < cap) { out[n] = p[n]; ++n; }
+  out[n] = 0;
+  return n >= 7;
+}
+
 static int writable_dir(const char* dir)
 {
   char t[1300]; FILE* f;
@@ -554,16 +570,28 @@ static void job_check(Updater* u)
         usleep(1500000u * (unsigned)attempt);
 #endif
       }
-      got_it = http_get(u, RELEASE_API, file, 0);
+      got_it = http_get(u, u->use_commits ? COMMITS_API : RELEASE_API, file, 0);
     }
     if (!got_it) { fail(u, "Could not reach GitHub (server busy or offline). Try again in a moment."); return; }
   }
   json = read_all(file);
   del_file(file);
   if (!json) { fail(u, "Could not read the release information."); return; }
-  parse_version(json, u->latest, sizeof(u->latest));
-  if (!parse_zip_url(json, u->url, sizeof(u->url)))
-    snprintf(u->url, sizeof(u->url), "%s", RELEASE_ZIP);
+  if (u->use_commits) {
+    char sha[64];
+    if (!parse_commit_sha(json, sha, sizeof(sha))) {
+      free(json);
+      fail(u, "Could not read the latest commit from GitHub.");
+      return;
+    }
+    snprintf(u->latest, sizeof(u->latest), "git:%.7s", sha);
+    snprintf(u->url, sizeof(u->url), COMMITS_ZIP_FMT, sha);
+  }
+  else {
+    parse_version(json, u->latest, sizeof(u->latest));
+    if (!parse_zip_url(json, u->url, sizeof(u->url)))
+      snprintf(u->url, sizeof(u->url), "%s", RELEASE_ZIP);
+  }
   free(json);
   if (!u->latest[0]) { fail(u, "Could not find the latest database version."); return; }
   if (!db_present(u)) snprintf(u->installed, sizeof(u->installed), "none");
@@ -593,7 +621,8 @@ static void job_install(Updater* u)
         usleep(2000000u * (unsigned)attempt);
 #endif
       }
-      got_it = http_get(u, attempt == 1 ? RELEASE_ZIP_FALLBACK : (u->url[0] ? u->url : RELEASE_ZIP), zip, 1);
+      got_it = http_get(u, (attempt == 1 && !u->use_commits) ? RELEASE_ZIP_FALLBACK
+        : (u->url[0] ? u->url : RELEASE_ZIP), zip, 1);
     }
     if (!got_it) {
       if (u->cancel) u->phase = UPD_READY;
@@ -682,6 +711,7 @@ static void load_paths(Updater* u)
   snprintf(u->main_db, sizeof(u->main_db), "%s", cfg.main_db[0] ? cfg.main_db : (m ? m : ""));
   snprintf(u->extra_db, sizeof(u->extra_db), "%s", cfg.extra_db[0] ? cfg.extra_db : (e ? e : ""));
   snprintf(u->custom_db, sizeof(u->custom_db), "%s", cfg.custom_db[0] ? cfg.custom_db : (c ? c : ""));
+  u->use_commits = cfg.db_commits;
   if (config_db_required()) u->main_db[0] = 0;     /* installed/Store: user must choose a folder first */
 }
 

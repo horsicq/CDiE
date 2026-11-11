@@ -33,6 +33,8 @@
 #include "panels/versions.h"
 #ifdef _WIN32
 #include <windows.h>
+#include <dwmapi.h>
+#pragma comment(lib, "dwmapi.lib")
 #endif
 
 #ifndef _WIN32
@@ -50,10 +52,10 @@
 #define DD_MAXVIS 8
 
 
-enum { PG_SCAN, PG_DB, PG_OPT, PG_FONTS, PG_LANG, PG_VT, PG_CTX, PG_UPDATE, PG_VERSIONS, PG_ABOUT, PG_COUNT };
+enum { PG_SCAN, PG_DB, PG_OPT, PG_FONTS, PG_APPEARANCE, PG_LANG, PG_VT, PG_CTX, PG_UPDATE, PG_VERSIONS, PG_ABOUT, PG_COUNT };
 enum {
   IK_HEAD, IK_TEXT, IK_NOTE, IK_CHECK, IK_BTN, IK_ACCENT, IK_VALUE, IK_PATH, IK_FVAL, IK_LVAL,
-  IK_PARA, IK_SCROLL 
+  IK_PARA, IK_SCROLL, IK_RADIO
 };
 
 enum { DD_FONT, DD_LANG };
@@ -61,7 +63,7 @@ enum { DD_FONT, DD_LANG };
 enum {
   ID_NONE,
   ID_DEEP, ID_HEUR, ID_AGGR, ID_VERBOSE, ID_HIDE, ID_FORMAT, ID_MONITOR,
-  ID_DBX, ID_DBC,
+  ID_DBX, ID_DBC, ID_DBCOMMITS,
   ID_SSE2, ID_AVX2,
   ID_BUF_DEC, ID_BUF_INC, ID_FBUF_DEC, ID_FBUF_INC, ID_BUF_VAL, ID_FBUF_VAL,
   ID_PATH_MAIN, ID_PATH_EXTRA, ID_PATH_CUSTOM, ID_PATH_VT,
@@ -70,6 +72,7 @@ enum {
   ID_FDEF0, ID_FDEF1, ID_FDEF2, ID_FDEF3,
   ID_FVAL0, ID_FVAL1, ID_FVAL2, ID_FVAL3,
   ID_LANGVAL,
+  ID_THEME_SYS, ID_THEME_LIGHT, ID_THEME_DARK,
   ID_CTX_TOGGLE,
   ID_CHECK_UPDATE,
   ID_OPEN_VERSIONS,
@@ -96,6 +99,10 @@ typedef struct Opt {
   char dbpath[4][1024];   /* [3] = VirusTotal API key */
   int  dbfocus;
   int  dbdirty;
+  int  db_commits;
+  size_t dbcur;   
+  int  dbsel;     
+  int  caret_on;
   OptionsFont fonts[OPTIONS_FONT_ROLES];
   int  have_fonts, fontsdirty;
   int  have_ctx, ctxenabled, ctxactual, ctxdirty;
@@ -114,18 +121,20 @@ typedef struct Opt {
   char** lcodes; char** lnames;
   char lang_cur[32];
   int langdirty;
+  int theme_mode, themedirty;
   PlRect dd_r;
 } Opt;
 
 static Opt* s_opt;
 
 static const char* s_title[PG_COUNT] =
-{ "Scan", "Databases", "Optimization", "Fonts", "Language", "VirusTotal", "Context menu", "Update", "Version history", "About" };
+{ "Scan", "Databases", "Optimization", "Fonts", "Appearance", "Language", "VirusTotal", "Context menu", "Update", "Version history", "About" };
 static const char* s_sub[PG_COUNT] = {
   "How files are scanned and how results are shown",
   "Signature databases used by the scan engine",
   "Buffer sizes and CPU acceleration",
   "Interface fonts",
+  "Choose a light or dark theme",
   "Interface language",
   "API key for file reputation lookups",
   "Explorer integration",
@@ -152,6 +161,78 @@ static void redraw(Opt* o)
 {
   PlRect r = mkr(0, 0, o->W, o->H);
   pl_invalidate(o->w, &r);
+}
+
+static void apply_titlebar(Opt* o)
+{
+  const Theme* t = theme_cur();
+  if (o && o->win)
+    pl_window_set_caption(o->win, g_theme_mode == THEME_DARK, t->bg, t->text_primary);
+}
+
+static size_t u8_prev(const char* s, size_t i)
+{
+  if (i == 0) return 0;
+  --i;
+  while (i > 0 && ((unsigned char)s[i] & 0xC0) == 0x80) --i;
+  return i;
+}
+
+static size_t u8_next(const char* s, size_t i)
+{
+  size_t n = strlen(s);
+  if (i >= n) return n;
+  ++i;
+  while (i < n && ((unsigned char)s[i] & 0xC0) == 0x80) ++i;
+  return i;
+}
+
+static int u8_encode(uint32_t ch, char* d)
+{
+  if (ch < 0x80) { d[0] = (char)ch; return 1; }
+  if (ch < 0x800) {
+    d[0] = (char)(0xC0 | (ch >> 6)); d[1] = (char)(0x80 | (ch & 63)); return 2;
+  }
+  if (ch < 0x10000) {
+    d[0] = (char)(0xE0 | (ch >> 12)); d[1] = (char)(0x80 | ((ch >> 6) & 63));
+    d[2] = (char)(0x80 | (ch & 63)); return 3;
+  }
+  d[0] = (char)(0xF0 | (ch >> 18)); d[1] = (char)(0x80 | ((ch >> 12) & 63));
+  d[2] = (char)(0x80 | ((ch >> 6) & 63)); d[3] = (char)(0x80 | (ch & 63));
+  return 4;
+}
+
+static int ed_insert(Opt* o, const char* ins)
+{
+  char* s = o->dbpath[o->dbfocus];
+  size_t cap = o->dbfocus == 3 ? 120 : sizeof(o->dbpath[0]);
+  size_t m = strlen(ins), n;
+  if (o->dbsel) { s[0] = 0; o->dbcur = 0; o->dbsel = 0; }
+  n = strlen(s);
+  if (o->dbcur > n) o->dbcur = n;
+  if (n + m + 1 > cap) return 0;
+  memmove(s + o->dbcur + m, s + o->dbcur, n - o->dbcur + 1);
+  memcpy(s + o->dbcur, ins, m);
+  o->dbcur += m;
+  return 1;
+}
+
+static size_t caret_from_x(Opt* o, const char* s, int rel)
+{
+  size_t i = 0, n = strlen(s);
+  char tmp[1024];
+  int wprev = 0;
+  if (rel <= 0) return 0;
+  while (i < n) {
+    size_t nx = u8_next(s, i);
+    int w;
+    memcpy(tmp, s, nx); tmp[nx] = 0;
+    w = pl_text_width(o->font, tmp);
+    if (rel < (wprev + w) / 2) return i;
+    wprev = w;
+    i = nx;
+  }
+  return n;
 }
 
 static void update_ctxmsg(Opt* o)
@@ -320,24 +401,26 @@ static void add(Opt* o, int kind, int id, const char* text, int enabled,
   int l, int t, int r, int b);
 static void add_stepper(Opt* o, const char* label, int dec, int inc, int val,
   int x, int w, int y);
+static int (*g_pasteFn)(void* user, char* out, size_t cap);
 static void paste_append(char* s, size_t cap);
 
 static int* chk_ptr(Opt* o, int id)
 {
   switch (id) {
-  case ID_DEEP:    return &o->scan.deep;
-  case ID_HEUR:    return &o->scan.heuristic;
-  case ID_AGGR:    return &o->scan.aggressive;
-  case ID_VERBOSE: return &o->scan.verbose;
-  case ID_HIDE:    return &o->scan.hide_unknown;
-  case ID_FORMAT:  return &o->scan.format;
-  case ID_MONITOR: return &o->scan.monitor_downloads;
-  case ID_DBX:     return &o->scan.db_extra;
-  case ID_DBC:     return &o->scan.db_custom;
-  case ID_SSE2:    return &o->opt.use_sse2;
-  case ID_AVX2:    return &o->opt.use_avx2;
+  case ID_DEEP:       return &o->scan.deep;
+  case ID_HEUR:       return &o->scan.heuristic;
+  case ID_AGGR:       return &o->scan.aggressive;
+  case ID_VERBOSE:    return &o->scan.verbose;
+  case ID_HIDE:       return &o->scan.hide_unknown;
+  case ID_FORMAT:     return &o->scan.format;
+  case ID_MONITOR:    return &o->scan.monitor_downloads;
+  case ID_DBX:        return &o->scan.db_extra;
+  case ID_DBC:        return &o->scan.db_custom;
+  case ID_DBCOMMITS:  return &o->db_commits;
+  case ID_SSE2:       return &o->opt.use_sse2;
+  case ID_AVX2:       return &o->opt.use_avx2;
   case ID_CTX_TOGGLE: return &o->ctxenabled;
-  default:         return NULL;
+  default:            return NULL;
   }
 }
 
@@ -367,17 +450,19 @@ static void build_items(Opt* o)
     add(o, IK_HEAD, 0, "OPTIONAL DATABASES", 1, x, y, x + w, y + 20); y += 28;
     add(o, IK_CHECK, ID_DBX, "Extra database", 1, x, y, x + w, y + ROW_H); y += ROW_H;
     add(o, IK_CHECK, ID_DBC, "Custom database", 1, x, y, x + w, y + ROW_H); y += ROW_H;
-    add(o, IK_NOTE, 0, "The main database is always loaded.", 1, x, y, x + w, y + 22); y += 36;
+    add(o, IK_CHECK, ID_DBCOMMITS, "Update from GitHub commits", 1, x, y, x + w, y + ROW_H); y += ROW_H + 2;
+    add(o, IK_NOTE, 0, "The main database is always loaded.", 1, x, y, x + w, y + 22); y += 34;
     add(o, IK_HEAD, 0, "FOLDERS", 1, x, y, x + w, y + 20); y += 28;
     add(o, IK_TEXT, 0, "Main", 1, x, y, x + 70, y + 30);
     add(o, IK_PATH, ID_PATH_MAIN, "", 1, x + 80, y, x + w - 90, y + 30);
-    add(o, IK_BTN, ID_BROWSE_MAIN, "Browse", 1, x + w - 82, y, x + w, y + 30); y += 38;
+    add(o, IK_BTN, ID_BROWSE_MAIN, "Browse", 1, x + w - 82, y, x + w, y + 30); y += 36;
     add(o, IK_TEXT, 0, "Extra", 1, x, y, x + 70, y + 30);
     add(o, IK_PATH, ID_PATH_EXTRA, "", 1, x + 80, y, x + w - 90, y + 30);
-    add(o, IK_BTN, ID_BROWSE_EXTRA, "Browse", 1, x + w - 82, y, x + w, y + 30); y += 38;
+    add(o, IK_BTN, ID_BROWSE_EXTRA, "Browse", 1, x + w - 82, y, x + w, y + 30); y += 36;
     add(o, IK_TEXT, 0, "Custom", 1, x, y, x + 70, y + 30);
     add(o, IK_PATH, ID_PATH_CUSTOM, "", 1, x + 80, y, x + w - 90, y + 30);
-    add(o, IK_BTN, ID_BROWSE_CUSTOM, "Browse", 1, x + w - 82, y, x + w, y + 30);
+    add(o, IK_BTN, ID_BROWSE_CUSTOM, "Browse", 1, x + w - 82, y, x + w, y + 30); y += 40;
+    add(o, IK_NOTE, 0, "Folders must be writable. If the install folder is read-only, choose another.", 1, x, y, x + w, y + 22);
     break;
 
   case PG_OPT:
@@ -414,6 +499,13 @@ static void build_items(Opt* o)
     add(o, IK_NOTE, 0, "Fonts are applied when you press Apply or OK.", 1, x, y, x + w, y + 22);
     break;
   }
+  case PG_APPEARANCE:
+    add(o, IK_HEAD, 0, "THEME", 1, x, y, x + w, y + 20); y += 32;
+    add(o, IK_RADIO, ID_THEME_SYS, "Use system setting", 1, x, y, x + w, y + ROW_H); y += ROW_H;
+    add(o, IK_RADIO, ID_THEME_LIGHT, "Light", 1, x, y, x + w, y + ROW_H); y += ROW_H;
+    add(o, IK_RADIO, ID_THEME_DARK, "Dark", 1, x, y, x + w, y + ROW_H); y += ROW_H + 8;
+    add(o, IK_NOTE, 0, "The theme is applied when you press Apply or OK.", 1, x, y, x + w, y + 22);
+    break;
   case PG_LANG:
     add(o, IK_HEAD, 0, translate("INTERFACE LANGUAGE"), 1, x, y, x + w, y + 20); y += 32;
     add(o, IK_TEXT, 0, translate("Language"), 1, x, y, x + 150, y + 30);
@@ -482,10 +574,27 @@ static void build_items(Opt* o)
   add(o, IK_BTN, ID_CANCEL, translate("Cancel"), 1, o->W - 12 - 3 * 80 - 16, by, o->W - 12 - 2 * 80 - 16, by + 34);
 }
 
+static void set_page(Opt* o, int page)
+{
+  o->page = page;
+  o->about_scroll = 0;
+  o->dd_open = 0;
+  o->hov = -1;
+  o->dbfocus = -1;
+  build_items(o);
+  redraw(o);
+}
+
 static int apply_all(Opt* o)
 {
   int ok = 1, nodb = 0;
   o->msg[0] = 0;
+
+  if (config_db_required() && !o->dbpath[0][0]) {
+    set_page(o, PG_DB);
+    snprintf(o->msg, sizeof(o->msg), "%s", translate("The Main database folder is required."));
+    return 0;
+  }
 
   {
     CdieConfig cfg;
@@ -496,6 +605,8 @@ static int apply_all(Opt* o)
     snprintf(cfg.custom_db, sizeof(cfg.custom_db), "%s", o->dbpath[2]);
     snprintf(cfg.vt_key, sizeof(cfg.vt_key), "%s", o->dbpath[3]);
     cfg.has_prefs = 1;
+    cfg.theme_mode = o->theme_mode;
+    cfg.db_commits = o->db_commits;
     snprintf(cfg.language, sizeof(cfg.language), "%s", o->lang_cur);
     cfg.deep = o->scan.deep;           cfg.heuristic = o->scan.heuristic;
     cfg.verbose = o->scan.verbose;     cfg.aggressive = o->scan.aggressive;
@@ -547,6 +658,17 @@ static int apply_all(Opt* o)
       ok = 0;
     }
     else o->fontsdirty = 0;
+  }
+  if (o->themedirty && o->host.set_theme) {
+    if (o->host.set_theme(o->host.user, o->theme_mode)) {
+      o->themedirty = 0;
+      apply_titlebar(o);
+      redraw(o);
+    }
+    else {
+      snprintf(o->msg, sizeof(o->msg), "%s", translate("Could not apply the theme."));
+      ok = 0;
+    }
   }
   if (o->langdirty && o->host.set_language) {
     if (!o->host.set_language(o->host.user, o->lang_cur)) { 
@@ -613,17 +735,6 @@ static void layout(Opt* o)
   build_items(o);
 }
 
-static void set_page(Opt* o, int page)
-{
-  o->page = page;
-  o->about_scroll = 0;
-  o->dd_open = 0;
-  o->hov = -1;
-  o->dbfocus = -1;
-  build_items(o);
-  redraw(o);
-}
-
 static void lang_add(const char* code, const char* name, void* ud)
 {
   Opt* o = (Opt*)ud;
@@ -686,13 +797,41 @@ static void paint_item(Opt* o, PlCanvas* c, int i)
     if (hov && it->enabled)
       pl_round_rect(c, mkr(r.l - 6, r.t + 2, r.r, r.b - 2), CLR_SIDEBAR_SEL, CLR_SIDEBAR_SEL, 6);
     pl_round_rect(c, mkr(bx + 0, by, bx + 16, by + 16),
-      on ? CLR_ACCENT : CLR_BG, on ? CLR_ACCENT : CLR_BTN_GHOST_BD, 4);
+      on ? CLR_ACCENT : CLR_PANEL, on ? CLR_ACCENT : CLR_TEXT_SECONDARY, 4);
     if (on) {
-      pl_line(c, bx + 3, by + 8, bx + 6, by + 11, CLR_TEXT_PRIMARY);
-      pl_line(c, bx + 6, by + 11, bx + 12, by + 5, CLR_TEXT_PRIMARY);
+      /* on_accent is white in both themes, so the tick always contrasts */
+      pl_line(c, bx + 3, by + 8, bx + 6, by + 11, CLR_ON_ACCENT);
+      pl_line(c, bx + 6, by + 11, bx + 12, by + 5, CLR_ON_ACCENT);
+      pl_line(c, bx + 3, by + 9, bx + 6, by + 12, CLR_ON_ACCENT);
+      pl_line(c, bx + 6, by + 12, bx + 12, by + 6, CLR_ON_ACCENT);
     }
     trc = mkr(r.l + 26, r.t, r.r - 6, r.b);
     txt(c, o->font, it->enabled ? CLR_TEXT_PRIMARY : CLR_TEXT_SECONDARY, trc, 0, it->text);
+
+    if (it->id == ID_DBCOMMITS) {
+      const char* tag = translate("BETA");
+      int tw = pl_text_width(o->font, it->text);
+      int gw = pl_text_width(o->font, tag) + 12;
+      int gh = 16;
+      int gx = trc.l + tw + 8;
+      int gy = r.t + (h - gh) / 2;
+      if (gx + gw < r.r) {
+        pl_round_rect(c, mkr(gx, gy, gx + gw, gy + gh), CLR_BADGE_BG, CLR_BADGE, 8);
+        pl_text(c, o->font, mkr(gx, gy, gx + gw, gy + gh), tag, CLR_BADGE, PL_TEXT_CENTER);
+      }
+    }
+    break;
+  }
+  case IK_RADIO: {
+    int on = (o->theme_mode == it->id - ID_THEME_SYS);
+    int bx = r.l, by = r.t + (h - 16) / 2;
+    if (hov)
+      pl_round_rect(c, mkr(r.l - 6, r.t + 2, r.r, r.b - 2), CLR_SIDEBAR_SEL, CLR_SIDEBAR_SEL, 6);
+    pl_round_rect(c, mkr(bx, by, bx + 16, by + 16),
+      CLR_PANEL, on ? CLR_ACCENT : CLR_TEXT_SECONDARY, 8);
+    if (on)
+      pl_round_rect(c, mkr(bx + 4, by + 4, bx + 12, by + 12), CLR_ACCENT, CLR_ACCENT, 4);
+    txt(c, o->font, CLR_TEXT_PRIMARY, mkr(r.l + 26, r.t, r.r - 6, r.b), 0, it->text);
     break;
   }
 
@@ -710,9 +849,22 @@ static void paint_item(Opt* o, PlCanvas* c, int i)
     txt(c, o->font, o->dbpath[n][0] ? CLR_TEXT_PRIMARY : CLR_TEXT_SECONDARY,
       mkr(r.l + 12, r.t, r.r - 12, r.b), 0, p);
     if (foc) {
-      int cx = r.l + 12 + pl_text_width(o->font, o->dbpath[n]);
+      char tmp[1024];
+      size_t cur = o->dbcur, len = strlen(o->dbpath[n]);
+      int cx;
+      if (cur > len) cur = len;
+      memcpy(tmp, o->dbpath[n], cur); tmp[cur] = 0;
+      cx = r.l + 12 + pl_text_width(o->font, tmp);
       if (cx > r.r - 12) cx = r.r - 12;
-      pl_line(c, cx, r.t + 7, cx, r.b - 7, CLR_TEXT_PRIMARY);
+      if (o->dbsel && len > 0) {
+        int ex = r.l + 12 + pl_text_width(o->font, o->dbpath[n]);
+        if (ex > r.r - 12) ex = r.r - 12;
+        pl_round_rect(c, mkr(r.l + 12, r.t + 5, ex, r.b - 5),
+          CLR_SIDEBAR_SEL, CLR_SIDEBAR_SEL, 3);
+        txt(c, o->font, CLR_TEXT_PRIMARY, mkr(r.l + 12, r.t, r.r - 12, r.b), 0, o->dbpath[n]);
+      }
+      else if (o->caret_on)
+        pl_line(c, cx, r.t + 7, cx, r.b - 7, CLR_TEXT_PRIMARY);
     }
     break;
   }
@@ -775,7 +927,7 @@ static void paint_item(Opt* o, PlCanvas* c, int i)
   case IK_ACCENT:
     fill = hov ? CLR_ACCENT_HOVER : CLR_ACCENT;
     pl_round_rect(c, r, fill, fill, 8);
-    txt(c, o->font, CLR_TEXT_PRIMARY, r, 1, it->text);
+    txt(c, o->font, CLR_ON_ACCENT, r, 1, it->text);
     break;
 
   case IK_BTN:
@@ -813,7 +965,6 @@ static void load_fonts(Opt* o)
   font_add(translate("Default"), o);
   if (o->host.list_fonts) o->host.list_fonts(o->host.user, 0, font_add, o);
 }
-
 
 static int dd_count(Opt* o) { return o->dd_kind == DD_LANG ? o->nlang : o->nfnames; }
 
@@ -876,7 +1027,6 @@ static void open_dropdown(Opt* o, int kind, int anchor_id, int role)
   o->hov = -1;
   o->dd_open = 1;
 }
-
 
 static void pick_font(Opt* o, int idx)
 {
@@ -949,8 +1099,6 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
   txt(c, o->fontb, CLR_TEXT_PRIMARY, mkr(hd.l, hd.t, hd.l + 170, hd.b), 0, translate(s_title[o->page]));
   txt(c, o->font, CLR_TEXT_SECONDARY, mkr(hd.l + 180, hd.t, hd.r, hd.b), 2, translate(s_sub[o->page]));
 
-  for (i = 0; i < o->nit; ++i) paint_item(o, c, i);
-
   pl_fill(c, o->r_bar.l, o->r_bar.t, o->r_bar.r, o->r_bar.b, CLR_BG);
   pl_line(c, o->r_bar.l, o->r_bar.t, o->r_bar.r, o->r_bar.t, CLR_SEPARATOR);
   if (o->msg[0])
@@ -968,8 +1116,8 @@ static int hit_item(Opt* o, int x, int y)
   for (i = 0; i < o->nit; ++i) {
     Item* it = &o->it[i];
     if ((it->kind == IK_CHECK || it->kind == IK_BTN || it->kind == IK_ACCENT ||
-      it->kind == IK_PATH || it->kind == IK_FVAL || it->kind == IK_LVAL) &&
-      inr(&it->r, x, y)) return i;
+      it->kind == IK_PATH || it->kind == IK_FVAL || it->kind == IK_LVAL ||
+      it->kind == IK_RADIO) && inr(&it->r, x, y)) return i;
   }
   return -1;
 }
@@ -1061,7 +1209,11 @@ static void activate(Opt* o, int id)
     break;
   }
   default:
-    if (id == ID_LANGVAL) {
+    if (id >= ID_THEME_SYS && id <= ID_THEME_DARK) {
+      o->theme_mode = id - ID_THEME_SYS;
+      o->themedirty = 1;
+    }
+    else if (id == ID_LANGVAL) {
       open_dropdown(o, DD_LANG, ID_LANGVAL, 0);
     }
     else if (id >= ID_FVAL0 && id <= ID_FVAL3) {
@@ -1074,6 +1226,7 @@ static void activate(Opt* o, int id)
     else {
       v = chk_ptr(o, id);
       if (v) *v = !*v;
+      if (id == ID_DBCOMMITS) o->dbdirty = 1;
     }
     break;
   }
@@ -1117,7 +1270,14 @@ static void on_mouse_down(void* u, int x, int y)
   h = hit_item(o, x, y);
   if (h < 0 || o->it[h].kind != IK_PATH) o->dbfocus = -1;
   if (h >= 0 && o->it[h].enabled) {
+    int kind = o->it[h].kind;
+    int left = o->it[h].r.l;
     activate(o, o->it[h].id);
+    if (kind == IK_PATH && o->dbfocus >= 0) {
+      o->dbcur = caret_from_x(o, o->dbpath[o->dbfocus], x - (left + 12));
+      o->dbsel = 0;
+      o->caret_on = 1;
+    }
     redraw(o);
   }
 }
@@ -1181,7 +1341,14 @@ static void paste_append(char* s, size_t cap)
   }
   CloseClipboard();
 #else
-  (void)s; (void)cap;
+  {
+    char buf[512];
+    size_t m, n = strlen(s);
+    if (!g_pasteFn || !g_pasteFn(NULL, buf, sizeof(buf))) return;
+    m = strlen(buf);
+    while (m && (buf[m - 1] == '\r' || buf[m - 1] == '\n' || buf[m - 1] == ' ')) buf[--m] = 0;
+    if (n + m + 1 < cap) memcpy(s + n, buf, m + 1);
+  }
 #endif
 }
 
@@ -1195,7 +1362,7 @@ static void on_key(void* u, int key, uint32_t ch, int mods)
     if (key == PL_KEY_ESC) { o->dd_open = 0; redraw(o); }
     return;
   }
-  if (o->page == PG_ABOUT && ch == 3) {      /* Ctrl+C */
+  if (o->page == PG_ABOUT && (mods & PL_MOD_CTRL) && (ch == 'c' || ch == 'C')) {
     activate(o, ID_COPY_BOX);
     redraw(o);
     return;
@@ -1205,25 +1372,63 @@ static void on_key(void* u, int key, uint32_t ch, int mods)
   if ((o->page == PG_DB || o->page == PG_VT) && o->dbfocus >= 0) {
     char* s = o->dbpath[o->dbfocus];
     size_t n = strlen(s);
-    if (key == PL_KEY_ENTER) { o->dbfocus = -1; redraw(o); return; }
-    if (ch == 22 || ((ch == 'v' || ch == 'V' || key == 'V') && ctrl_down())) {   /* Ctrl+V */
-      paste_append(s, sizeof(o->dbpath[0]));
-      if (o->dbfocus < 3) o->dbdirty = 1;
-      redraw(o); return;
+    int changed = 0;
+    o->caret_on = 1;
+    if (o->dbcur > n) o->dbcur = n;
+
+    if (key == PL_KEY_ENTER) { o->dbfocus = -1; o->dbsel = 0; redraw(o); return; }
+
+    if (key == PL_KEY_CHAR && (mods & PL_MOD_CTRL)) {
+      if (ch == 'a') {
+        o->dbsel = n > 0; o->dbcur = n;
+      }
+      else if (ch == 'c') {
+        if (o->dbsel && o->host.copy_text) o->host.copy_text(o->host.user, s);
+      }
+      else if (ch == 'v') {
+        char tmp[512];
+        tmp[0] = 0;
+        paste_append(tmp, sizeof(tmp));
+        if (tmp[0] && ed_insert(o, tmp)) changed = 1;
+      }
+      if (changed && o->dbfocus < 3) o->dbdirty = 1;
+      redraw(o);
+      return;
     }
-    if (ch == 8) {
-      while (n > 0 && ((unsigned char)s[n - 1] & 0xC0) == 0x80) --n;
-      if (n > 0) s[n - 1] = 0;
-      if (o->dbfocus < 3) o->dbdirty = 1;
-      redraw(o); return;
+
+    switch (key) {
+    case PL_KEY_BACK:
+      if (o->dbsel) { s[0] = 0; o->dbcur = 0; o->dbsel = 0; changed = 1; }
+      else if (o->dbcur > 0) {
+        size_t p = u8_prev(s, o->dbcur);
+        memmove(s + p, s + o->dbcur, n - o->dbcur + 1);
+        o->dbcur = p; changed = 1;
+      }
+      break;
+    case PL_KEY_DEL:
+      if (o->dbsel) { s[0] = 0; o->dbcur = 0; o->dbsel = 0; changed = 1; }
+      else if (o->dbcur < n) {
+        size_t q = u8_next(s, o->dbcur);
+        memmove(s + o->dbcur, s + q, n - q + 1);
+        changed = 1;
+      }
+      break;
+    case PL_KEY_LEFT:  o->dbcur = o->dbsel ? 0 : u8_prev(s, o->dbcur); o->dbsel = 0; break;
+    case PL_KEY_RIGHT: o->dbcur = o->dbsel ? n : u8_next(s, o->dbcur); o->dbsel = 0; break;
+    case PL_KEY_HOME:  o->dbcur = 0; o->dbsel = 0; break;
+    case PL_KEY_END:   o->dbcur = n; o->dbsel = 0; break;
+    case PL_KEY_CHAR:
+      if (ch >= 32 && ch != 127) {
+        char b[5];
+        b[u8_encode(ch, b)] = 0;
+        if (ed_insert(o, b)) changed = 1;
+      }
+      break;
+    default:
+      return;
     }
-    if (ch >= 32 && ch != 127 && n + 4 < (o->dbfocus == 3 ? 120 : sizeof(o->dbpath[0]))) {
-      if (ch < 0x80) { s[n++] = (char)ch; }
-      else if (ch < 0x800) { s[n++] = (char)(0xC0 | (ch >> 6)); s[n++] = (char)(0x80 | (ch & 63)); }
-      else if (ch < 0x10000) { s[n++] = (char)(0xE0 | (ch >> 12)); s[n++] = (char)(0x80 | ((ch >> 6) & 63)); s[n++] = (char)(0x80 | (ch & 63)); }
-      else { s[n++] = (char)(0xF0 | (ch >> 18)); s[n++] = (char)(0x80 | ((ch >> 12) & 63)); s[n++] = (char)(0x80 | ((ch >> 6) & 63)); s[n++] = (char)(0x80 | (ch & 63)); }
-      s[n] = 0; if (o->dbfocus < 3) o->dbdirty = 1; redraw(o); return;
-    }
+    if (changed && o->dbfocus < 3) o->dbdirty = 1;
+    redraw(o);
     return;
   }
   if (key == PL_KEY_ENTER) { activate(o, ID_OK); redraw(o); return; }
@@ -1263,6 +1468,19 @@ static void on_destroy(void* u)
   free(o);
 }
 
+#ifdef _WIN32
+static VOID CALLBACK caret_timer(HWND hw, UINT msg, UINT_PTR id, DWORD t)
+{
+  Opt* o = s_opt;
+  (void)hw; (void)msg; (void)id; (void)t;
+  if (!o) return;
+  if ((o->page == PG_DB || o->page == PG_VT) && o->dbfocus >= 0) {
+    o->caret_on = !o->caret_on;
+    redraw(o);
+  }
+}
+#endif
+
 static const PlWidgetOps s_ops = {
   on_paint, on_mouse_move, on_mouse_leave, on_mouse_down,
   on_resize, on_hand, on_destroy,
@@ -1283,10 +1501,10 @@ static void on_win_close(void* u)
   pl_window_close(o->win);
 }
 
-int options_show(xxwidgets_app* app, xxwidgets_widget* owner,
+int options_show(xxwidgets_app* app, void* owner_native,
   const OptionsHost* host, int start_page)
 {
-  void* ow = owner ? xxwidgets_widget_native_handle(owner) : NULL;
+  void* ow = owner_native;
   Opt* o;
   PlWindow* win;
   int result, i;
@@ -1299,6 +1517,7 @@ int options_show(xxwidgets_app* app, xxwidgets_widget* owner,
   o->host = *host;
   o->W = 760; o->H = 540; o->hov = -1; o->navhov = -1;
   o->dbfocus = -1;
+  o->caret_on = 1;
   {
     CdieConfig kc;
     if (config_load(&kc)) snprintf(o->dbpath[3], sizeof(o->dbpath[3]), "%s", kc.vt_key);
@@ -1322,7 +1541,7 @@ int options_show(xxwidgets_app* app, xxwidgets_widget* owner,
     const char* be = gui_backend_extra_db_path();
     const char* bc = gui_backend_custom_db_path();
     int need = config_db_required();
-    config_load(&dc);   /* zeroes dc on failure, so the fields are safe to read */
+    config_load(&dc);
 
     snprintf(o->dbpath[0], sizeof(o->dbpath[0]), "%s",
       dc.main_db[0] ? dc.main_db : (!need && bm ? bm : ""));
@@ -1330,6 +1549,8 @@ int options_show(xxwidgets_app* app, xxwidgets_widget* owner,
       dc.extra_db[0] ? dc.extra_db : (!need && be ? be : ""));
     snprintf(o->dbpath[2], sizeof(o->dbpath[2]), "%s",
       dc.custom_db[0] ? dc.custom_db : (!need && bc ? bc : ""));
+    o->db_commits = dc.db_commits;
+    o->theme_mode = dc.theme_mode;
   }
 
   o->scan.deep = 1; o->scan.heuristic = 1; o->scan.verbose = 1;
@@ -1369,14 +1590,26 @@ int options_show(xxwidgets_app* app, xxwidgets_widget* owner,
   win = pl_window_create(ow, translate("Options"), 760, 540, 640, 500, on_win_size, on_win_close, o);
   if (!win) { on_destroy(o); return OPTIONS_RESULT_NONE; }
   o->win = win;
+  apply_titlebar(o);
   o->w = pl_widget_create(pl_window_client(win), &s_ops, o, 0, 0, 760, 520);
   if (!o->w) { pl_window_destroy(win); on_destroy(o); return OPTIONS_RESULT_NONE; }
   s_opt = o;
 
+#ifdef _WIN32
+  {
+    UINT bt = GetCaretBlinkTime();
+    if (bt == 0 || bt == INFINITE) bt = 530;
+    SetTimer((HWND)pl_window_client(win), 1, bt, caret_timer);
+  }
+#endif
+
   layout(o);
   pl_window_run_modal(win);
 
-  result = o->result;                    
+  result = o->result;
+#ifdef _WIN32
+  KillTimer((HWND)pl_window_client(win), 1);
+#endif
   pl_widget_destroy(o->w);
   pl_window_destroy(win);
   return result;

@@ -197,6 +197,8 @@ PlWidget *pl_widget_create(void *parent_native, const PlWidgetOps *ops, void *us
     return (__bridge PlWidget *)v;
 }
 
+
+
 void pl_widget_destroy(PlWidget *w)
 {
     if (w) [(__bridge NSView *)w removeFromSuperview];   /* dealloc runs ops.destroy */
@@ -444,7 +446,6 @@ PlWindow *pl_window_create(void *owner_native, const char *title, int w, int h, 
                                           defer:NO];
     [win setReleasedWhenClosed:NO];
     [win setTitle:title ? [NSString stringWithUTF8String:title] : @""];
-    [win setAppearance:[NSAppearance appearanceNamed:NSAppearanceNameDarkAqua]];
     if (min_w > 0 && min_h > 0) [win setContentMinSize:NSMakeSize(min_w, min_h)];
 
     pw.content = [[PlFlipView alloc] initWithFrame:NSMakeRect(0, 0, w, h)];
@@ -470,6 +471,16 @@ void *pl_window_client(PlWindow *win)
 {
     PlWin *pw = (__bridge PlWin *)win;
     return (__bridge void *)pw.content;
+}
+
+void pl_window_set_caption(PlWindow *win, int dark, PlColor bg, PlColor fg)
+{
+    PlWin *pw;
+    (void)bg; (void)fg;
+    if (!win) return;
+    pw = (__bridge PlWin *)win;
+    pw.window.appearance = [NSAppearance appearanceNamed:
+        dark ? NSAppearanceNameDarkAqua : NSAppearanceNameAqua];
 }
 
 void pl_window_run_modal(PlWindow *win)
