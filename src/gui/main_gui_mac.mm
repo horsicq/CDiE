@@ -102,6 +102,7 @@ static int g_minWindowWidth = 900;
 static int g_minWindowHeight = 540;
 static int g_prefsReady;
 static char g_lang[32];
+static int g_themeMode;
 
 static int g_bFlagDeep = 1, g_bFlagHeur = 1, g_bFlagVerbose = 1;
 static int g_bFlagAggr, g_bFlagHideUnknown, g_bFlagFormat;
@@ -149,6 +150,79 @@ static NSWindow *native_window(xxwidgets_widget *widget) {
 }
 
 static NSWindow *native_window_fwd(void) { return native_window(g_window); }
+
+static void invalidate_tree(NSView *v) {
+  NSView *s;
+  [v setNeedsDisplay:YES];
+  for (s in [v subviews])
+    invalidate_tree(s);
+}
+
+static void repaint_all(void) {
+  NSWindow *win = native_window_fwd();
+  if (win)
+    invalidate_tree([win contentView]);
+}
+
+static int system_theme_is_dark(void) {
+  NSString *s = [[NSUserDefaults standardUserDefaults] stringForKey:@"AppleInterfaceStyle"];
+  return (s && [s caseInsensitiveCompare:@"Dark"] == NSOrderedSame) ? 1 : 0;
+}
+
+static void sync_system_theme(void) {
+  NSWindow *win = native_window_fwd();
+  int dark;
+  PlColor bg;
+  if (!win)
+    return;
+  if (g_themeMode == 1)
+    dark = 0;
+  else if (g_themeMode == 2)
+    dark = 1;
+  else
+    dark = system_theme_is_dark();
+
+  win.appearance = [NSAppearance appearanceNamed:
+      dark ? NSAppearanceNameDarkAqua : NSAppearanceNameAqua];
+  theme_set(dark ? THEME_DARK : THEME_LIGHT);
+
+  bg = CLR_BG;
+  win.backgroundColor = [NSColor colorWithSRGBRed:((bg >> 16) & 255) / 255.0
+                                            green:((bg >> 8) & 255) / 255.0
+                                            blue:(bg & 255) / 255.0
+                                            alpha:1.0];
+  {
+    NSView *cv = [win contentView];
+    cv.wantsLayer = YES;
+    cv.layer.cornerRadius = 10.0;
+    cv.layer.masksToBounds = YES;
+  }
+  repaint_all();
+}
+
+static int opt_set_theme(void *u, int mode) {
+  (void)u;
+  if (mode < 0 || mode > 2)
+    return 0;
+  g_themeMode = mode;
+  sync_system_theme();
+  return 1;
+}
+
+static void install_theme_hook(void) {
+  [[NSDistributedNotificationCenter defaultCenter]
+      addObserverForName:@"AppleInterfaceThemeChangedNotification"
+                  object:nil
+                   queue:[NSOperationQueue mainQueue]
+              usingBlock:^(NSNotification *n) {
+                (void)n;
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 200 * NSEC_PER_MSEC),
+                               dispatch_get_main_queue(), ^{
+                                 if (g_themeMode == 0)
+                                   sync_system_theme();
+                               });
+              }];
+}
 
 static void *native(xxwidgets_widget *widget) {
   return xxwidgets_widget_native_handle(widget);
@@ -727,7 +801,8 @@ static void do_options_window(int page) {
   host.list_languages = opt_list_languages;
   host.get_language = opt_get_language;
   host.set_language = opt_set_language;
-  options_show(g_app, g_window, &host, page);
+  host.set_theme = opt_set_theme;
+  options_show(g_app, native(g_window), &host, page);
 }
 
 static void do_about(void) {
@@ -1163,8 +1238,11 @@ extern "C" int gui_run(void) {
     [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
     {
       CdieConfig lc;
-      if (config_load(&lc) && lc.language[0] && i18n_load(lc.language))
-        snprintf(g_lang, sizeof(g_lang), "%s", lc.language);
+      if (config_load(&lc)) {
+        g_themeMode = lc.theme_mode;
+        if (lc.language[0] && i18n_load(lc.language))
+          snprintf(g_lang, sizeof(g_lang), "%s", lc.language);
+      }
     }
 
     status = xxwidgets_app_create(&config, &g_app);
@@ -1192,18 +1270,19 @@ extern "C" int gui_run(void) {
     {
       NSWindow *win = native_window(g_window);
       if (win) {
-        win.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
-        win.backgroundColor = [NSColor colorWithSRGBRed:0.07 green:0.08 blue:0.10 alpha:1.0]; /* match CLR_BG */
         [win setContentSize:NSMakeSize(1150, 700)];
         [win center];
       }
     }
 
     xxwidgets_widget_set_visible(g_window, 0);
-    if (!create_controls()) {
+      if (!create_controls()) {
       result = 1;
       goto finish;
     }
+    g_theme_listener = repaint_all;
+    sync_system_theme();
+    install_theme_hook();
 
     tray_init(on_tray_exit, NULL);
     {

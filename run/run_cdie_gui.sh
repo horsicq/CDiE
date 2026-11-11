@@ -32,6 +32,7 @@ command -v pkg-config >/dev/null 2>&1 && pkg-config --exists $PKGS || {
 
 XXW_INC="$DEP/xxwidgets/include"
 XXF_INC="$DEP/xxfclib/include"
+CDIS_INC="$DEP/cdisasm/include"
 [ -f "$XXW_INC/xxwidgets/xxwidgets.h" ] || { echo "ERROR: missing $XXW_INC/xxwidgets/xxwidgets.h"; exit 1; }
 [ -f "$XXF_INC/xxfclib/die_engine/die_engine.h" ] || { echo "ERROR: missing die_engine.h under $XXF_INC"; exit 1; }
 
@@ -89,6 +90,7 @@ SOURCES=()
 while IFS= read -r f; do
     case "$f" in
         "$GUI"/*) continue ;;
+        "$SRC"/installer/*) continue ;;
         */utils_entry.c|*/main_console.c) continue ;;
     esac
     SOURCES+=("$f")
@@ -96,7 +98,7 @@ done < <(find "$SRC" -type f -name '*.c' | sort)
 
 while IFS= read -r f; do
     case "$f" in
-	*/main_gui.c|*/platform_win32.c|*/tray_win32.c) continue ;;
+	*/main_gui.c|*/platform_win32.c|*/tray_win32.c|*/versions.c) continue ;;
     esac
     SOURCES+=("$f")
 done < <(find "$GUI" -type f -name '*.c' | sort)
@@ -105,7 +107,7 @@ echo "[1/1] cdie_gui ($CC, ${#SOURCES[@]} sources)..."
 # shellcheck disable=SC2046
 "$CC" -O2 -Wall -DNDEBUG -DXXWIDGETS_STATIC -DXXFC_STATIC \
     $(pkg-config --cflags $PKGS) \
-    -I"$SRC" -I"$GUI" -I"$XXW_INC" -I"$XXF_INC" \
+    -I"$SRC" -I"$GUI" -I"$XXW_INC" -I"$XXF_INC" -I"$CDIS_INC" \
     "${SOURCES[@]}" \
     -o "$OUT/cdie_gui" \
     "$XXW_LIB" "$XXF_LIB" ${CDIS_LIB:+"$CDIS_LIB"} \

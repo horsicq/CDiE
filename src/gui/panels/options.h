@@ -93,10 +93,12 @@ typedef struct OptionsHost {
     void (*add)(const char* code, const char* name, void* ud), void* ud);
   const char* (*get_language)(void* user);
   int  (*set_language)(void* user, const char* code);
+  int (*set_theme)(void* user, int mode);
+  int (*paste_text)(void* user, char* out, size_t cap);
 } OptionsHost;
 
 
-int options_show(xxwidgets_app* app, xxwidgets_widget* owner,
+int options_show(xxwidgets_app* app, void* owner_native,
   const OptionsHost* host, int start_page);
 
 #ifdef __cplusplus

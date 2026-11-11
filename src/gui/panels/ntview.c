@@ -31,26 +31,6 @@
 #define NT_TEXT_W(f, s) pl_text_width((f), (s))
 #endif
 
-typedef uint32_t NtClr;
-#ifndef NT_RGB
-#define NT_RGB(r, g, b) ((NtClr)(((unsigned)(r) << 16) | ((unsigned)(g) << 8) | (unsigned)(b)))
-#endif
-
-#ifndef CLR_NT_ZERO
-#define CLR_NT_ZERO         NT_RGB(0x66, 0x6A, 0x8C)  
-#define CLR_NT_RAW          NT_RGB(0x7D, 0x83, 0xA6)  
-#define CLR_NT_ROW_ALT      NT_RGB(0x2C, 0x2E, 0x3D) 
-#define CLR_NT_ROW_SEL      NT_RGB(0x34, 0x38, 0x53)  
-#define CLR_NT_COLHDR       NT_RGB(0x23, 0x25, 0x32)  
-#define CLR_NT_COLHDR_LINE  NT_RGB(0x32, 0x35, 0x47)
-#define CLR_NT_GROUP_LINE   NT_RGB(0x35, 0x38, 0x49)
-#define CLR_NT_GREEN        NT_RGB(0x7F, 0xD6, 0xA4)  
-#define CLR_NT_AMBER        NT_RGB(0xE6, 0xC2, 0x7A)  
-#define CLR_NT_CHIP_BG      NT_RGB(0x30, 0x33, 0x4A)
-#define CLR_NT_CHIP_BORDER  NT_RGB(0x5B, 0x5F, 0x7B)
-#define CLR_NT_SB_THUMB     NT_RGB(0x45, 0x49, 0x66)
-#define CLR_NT_SB_HOT       NT_RGB(0x5B, 0x5F, 0x7B)
-#endif
 
 #define NT_MAX_ROWS 320
 #define NT_GROUPS   4
@@ -1184,7 +1164,7 @@ static int hit_group(const NtView* d, int my)
 }
 
 static void draw_split(PlCanvas* c, PlFont* f, int l, int top, int bot, int r,
-	const char* s, NtClr dim, NtClr hi, int all_dim)
+	const char* s, PlColor dim, PlColor hi, int all_dim)
 {
 	char pre[32];
 	size_t k = 0;
@@ -1250,7 +1230,7 @@ static void draw_chips(NtView* d, PlCanvas* c, int x, int y, int rh, int right,
 	}
 }
 
-static void sb_pill(PlCanvas* c, int l, int t, int r, int b, NtClr col)
+static void sb_pill(PlCanvas* c, int l, int t, int r, int b, PlColor col)
 {
 	static const int inset[4] = { 2, 1, 0, 0 };
 	int i;
@@ -1347,7 +1327,7 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 				draw_chips(d, c, COL_MEAN, y, rh, w - 16, r->note);
 			}
 			else if (r->note[0]) {
-				NtClr col = r->kind == M_ENUM ? CLR_NT_GREEN
+				PlColor col = r->kind == M_ENUM ? CLR_NT_GREEN
 					: r->kind == M_TIME ? CLR_NT_AMBER
 					: r->dim ? CLR_NT_ZERO
 					: CLR_TEXT_SECONDARY;

@@ -32,7 +32,7 @@ typedef struct {
   char db_version[32];
 	char language[32];
   char vt_key[128];
-
+  int theme_mode;
   int  has_prefs;
   int  deep, heuristic, verbose, aggressive, hide_unknown, format, monitor_downloads;
   int  db_extra, db_custom;
@@ -42,6 +42,8 @@ typedef struct {
   unsigned int font_size[CDIE_FONT_ROLES];
   int          font_bold[CDIE_FONT_ROLES];
   int          font_italic[CDIE_FONT_ROLES];
+
+  int db_commits;
 } CdieConfig;
 
 int config_set_db_version(const char* version);

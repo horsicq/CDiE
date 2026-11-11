@@ -321,6 +321,7 @@ int config_load(CdieConfig* cfg)
     else if (!strncmp(line, "db_version=", 11)) copy_field(cfg->db_version, sizeof(cfg->db_version), line + 11);
     else if (!strncmp(line, "language=", 9))   copy_field(cfg->language, sizeof(cfg->language), line + 9);
     else if (!strncmp(line, "vt_key=", 7))     copy_field(cfg->vt_key, sizeof(cfg->vt_key), line + 7);
+    else if (int_key(line, "theme", &cfg->theme_mode)) {}
     else if (int_key(line, "prefs", &cfg->has_prefs)) {}
     else if (int_key(line, "deep", &cfg->deep)) {}
     else if (int_key(line, "heuristic", &cfg->heuristic)) {}
@@ -331,6 +332,7 @@ int config_load(CdieConfig* cfg)
     else if (int_key(line, "monitor_downloads", &cfg->monitor_downloads)) {}
     else if (int_key(line, "db_extra", &cfg->db_extra)) {}
     else if (int_key(line, "db_custom", &cfg->db_custom)) {}
+    else if (int_key(line, "db_commits", &cfg->db_commits)) {}
     else if (int_key(line, "sse2", &cfg->use_sse2)) {}
     else if (int_key(line, "avx2", &cfg->use_avx2)) {}
     else if (!strncmp(line, "buffer=", 7))      cfg->buffer_size = strtoull(line + 7, NULL, 10);
@@ -364,7 +366,10 @@ int config_save(const CdieConfig* cfg)
   fprintf(f, "extra=%s\n", cfg->extra_db);
   fprintf(f, "custom=%s\n", cfg->custom_db);
   fprintf(f, "db_version=%s\n", ver);
+  fprintf(f, "db_commits=%d\n", cfg->db_commits);
 	fprintf(f, "language=%s\n", cfg->language);
+  fprintf(f, "\n[appearance]\n");
+  fprintf(f, "theme=%d\n", cfg->theme_mode);
   fprintf(f, "\n[virustotal]\n");
   fprintf(f, "vt_key=%s\n", cfg->vt_key);
   if (cfg->has_prefs) {

@@ -42,31 +42,6 @@
 #include "core/i18n.h"
 #include "theme/theme.h"
 
-#define SG_BG     CLR_BG
-#define SG_PANEL  CLR_PANEL_HEADER      /* card headers, left panel, find box */
-#define SG_CODE   CLR_PANEL_BODY        /* editor / output body               */
-#define SG_BAR    CLR_BG                /* bottom bar (same as bottombar.c)   */
-#define SG_BORDER CLR_PANEL_BORDER
-#define SG_SEP    CLR_SEPARATOR
-#define SG_TEXT   CLR_TEXT_PRIMARY
-#define SG_TEXT2  CLR_TEXT_SECONDARY
-#define SG_DIM    CLR_TEXT_CODE         /* line numbers, count, cue text      */
-#define SG_ACCENT CLR_ACCENT
-#define SG_SEL    CLR_SIDEBAR_SEL       /* tree selection + find match        */
-#define SG_BTN    CLR_BTN_GHOST
-#define SG_BTNB   CLR_BTN_GHOST_BD
-#define SG_CHIP   CLR_PANEL_HEADER
-#define SG_WHITE  CLR_TEXT_PRIMARY
-
-static const PlColor s_cls_col[] = {
-  CLR_TEXT_PRIMARY,        /* CL_TXT */
-  CLR_TEXT_SECONDARY,      /* CL_COM */
-  PL_RGB(158, 206, 106),   /* CL_STR */
-  PL_RGB(122, 162, 247),   /* CL_KEY */
-  PL_RGB(224, 175, 104),   /* CL_FN  */
-  PL_RGB(255, 158, 100),   /* CL_NUM */
-  PL_RGB(187, 154, 247)    /* CL_OBJ */
-};
 
 enum { CL_TXT, CL_COM, CL_STR, CL_KEY, CL_FN, CL_NUM, CL_OBJ };
 
@@ -868,10 +843,10 @@ static void classify(int n, int inblk)
 
 static void card(PlCanvas* c, PlRect r, int headH)
 {
-  pl_round_rect(c, r, SG_CODE, SG_BORDER, 12);
-  pl_round_rect(c, mkr(r.l + 1, r.t + 1, r.r - 1, r.t + headH + 12), SG_PANEL, SG_PANEL, 11);
-  pl_fill(c, r.l + 1, r.t + headH, r.r - 1, r.t + headH + 12, SG_CODE);
-  pl_line(c, r.l + 1, r.t + headH, r.r - 1, r.t + headH, SG_SEP);
+  pl_round_rect(c, r, CLR_PANEL_BODY, CLR_PANEL_BORDER, 12);
+  pl_round_rect(c, mkr(r.l + 1, r.t + 1, r.r - 1, r.t + headH + 12), CLR_PANEL_HEADER, CLR_PANEL_HEADER, 11);
+  pl_fill(c, r.l + 1, r.t + headH, r.r - 1, r.t + headH + 12, CLR_PANEL_BODY);
+  pl_line(c, r.l + 1, r.t + headH, r.r - 1, r.t + headH, CLR_SEPARATOR);
 }
 
 static void paint_btn(Sig* s, PlCanvas* c, int i)
@@ -887,13 +862,13 @@ static void paint_btn(Sig* s, PlCanvas* c, int i)
 
   switch (b->kind) {
   case K_ACCENT:
-    fill = hov ? CLR_ACCENT_HOVER : SG_ACCENT;
+    fill = hov ? CLR_ACCENT_HOVER : CLR_ACCENT;
     pl_round_rect(c, r, fill, fill, 8);
-    txt(c, s->font, SG_WHITE, tr, 1, b->text);
+    txt(c, s->font, CLR_TEXT_PRIMARY, tr, 1, b->text);
     break;
   case K_NORMAL: case K_DROP:
-    fill = !en ? SG_BTN : hov ? CLR_BTN_GHOST_HOVER : SG_BTN;
-    bd = SG_BTNB;
+    fill = !en ? CLR_BTN_GHOST : hov ? CLR_BTN_GHOST_HOVER : CLR_BTN_GHOST;
+    bd = CLR_BTN_GHOST_BD;
     fg = en ? CLR_TEXT_PRIMARY : CLR_TEXT_SECONDARY;
     pl_round_rect(c, r, fill, bd, 8);
     if (b->kind == K_DROP) {
@@ -906,23 +881,23 @@ static void paint_btn(Sig* s, PlCanvas* c, int i)
     else txt(c, s->font, fg, tr, 1, b->text);
     break;
   case K_CHIP:
-    pl_round_rect(c, r, hov ? CLR_BTN_GHOST : SG_CHIP, SG_BTNB, h / 2);
+    pl_round_rect(c, r, hov ? CLR_BTN_GHOST : CLR_PANEL_HEADER, CLR_BTN_GHOST_BD, h / 2);
     pl_ellipse(c, r.l + 12, r.t + h / 2 - 4, r.l + 20, r.t + h / 2 + 4,
-      on ? SG_ACCENT : SG_BTNB, on ? SG_ACCENT : SG_BTNB);
+      on ? CLR_ACCENT : CLR_BTN_GHOST_BD, on ? CLR_ACCENT : CLR_BTN_GHOST_BD);
     tr.l = r.l + 28;
     txt(c, s->font, CLR_TEXT_PRIMARY, tr, 0, b->text);
     break;
   case K_SWITCH: {
     int top = r.t + (h - 20) / 2, kx = r.l + (on ? 34 - 3 - 14 : 3);
-    pl_round_rect(c, mkr(r.l, top, r.l + 34, top + 20), on ? SG_ACCENT : SG_BTNB,
-      on ? SG_ACCENT : SG_BTNB, 10);
-    pl_ellipse(c, kx, top + 3, kx + 14, top + 17, SG_WHITE, SG_WHITE);
+    pl_round_rect(c, mkr(r.l, top, r.l + 34, top + 20), on ? CLR_ACCENT : CLR_BTN_GHOST_BD,
+      on ? CLR_ACCENT : CLR_BTN_GHOST_BD, 10);
+    pl_ellipse(c, kx, top + 3, kx + 14, top + 17, CLR_TEXT_PRIMARY, CLR_TEXT_PRIMARY);
     tr.l = r.l + 44;
-    txt(c, s->font, SG_TEXT, tr, 0, b->text);
+    txt(c, s->font, CLR_TEXT_PRIMARY, tr, 0, b->text);
     break;
   }
   case K_LINK:
-    txt(c, s->font, hov ? CLR_TEXT_PRIMARY : SG_TEXT2, tr, 2, b->text);
+    txt(c, s->font, hov ? CLR_TEXT_PRIMARY : CLR_TEXT_SECONDARY, tr, 2, b->text);
     break;
   }
   (void)w;
@@ -931,15 +906,15 @@ static void paint_btn(Sig* s, PlCanvas* c, int i)
 static void paint_edit(Sig* s, PlCanvas* c, Edit* e, PlRect tr, int focused, const char* cue)
 {
   if (e->len == 0) {
-    txt(c, s->font, SG_DIM, tr, 0, translate(cue));
+    txt(c, s->font, CLR_TEXT_CODE, tr, 0, translate(cue));
   }
-  else txt(c, s->font, SG_TEXT, tr, 0, e->s);
+  else txt(c, s->font, CLR_TEXT_PRIMARY, tr, 0, e->s);
   if (focused && s->caret_on) {
     char tmp[260];
     int x;
     memcpy(tmp, e->s, (size_t)e->caret); tmp[e->caret] = 0;
     x = tr.l + (e->caret ? pl_text_width(s->font, tmp) : 0);
-    if (x < tr.r) pl_line(c, x, tr.t + 3, x, tr.b - 3, SG_TEXT);
+    if (x < tr.r) pl_line(c, x, tr.t + 3, x, tr.b - 3, CLR_TEXT_PRIMARY);
   }
 }
 
@@ -955,18 +930,18 @@ static void paint_tree(Sig* s, PlCanvas* c)
     ni = s->vis[vi];
     n = node_at(s, ni);
     if (ni == s->tsel)
-      pl_round_rect(c, mkr(s->r_tree.l + 2, y, s->r_tree.r - 2, y + TROW), SG_SEL, SG_SEL, 6);
+      pl_round_rect(c, mkr(s->r_tree.l + 2, y, s->r_tree.r - 2, y + TROW), CLR_SIDEBAR_SEL, CLR_SIDEBAR_SEL, 6);
     x = s->r_tree.l + 10 + n->depth * 18;
     cy = y + TROW / 2;
-    col = ni == s->tsel ? SG_WHITE : n->isdir ? CLR_TEXT_PRIMARY : CLR_TEXT_PRIMARY;
+    col = ni == s->tsel ? CLR_TEXT_PRIMARY : n->isdir ? CLR_TEXT_PRIMARY : CLR_TEXT_PRIMARY;
     if (n->isdir) {
       if (n->open) {
-        pl_line(c, x - 4, cy - 2, x, cy + 2, SG_TEXT2);
-        pl_line(c, x, cy + 2, x + 4, cy - 2, SG_TEXT2);
+        pl_line(c, x - 4, cy - 2, x, cy + 2, CLR_TEXT_SECONDARY);
+        pl_line(c, x, cy + 2, x + 4, cy - 2, CLR_TEXT_SECONDARY);
       }
       else {
-        pl_line(c, x - 2, cy - 4, x + 2, cy, SG_TEXT2);
-        pl_line(c, x + 2, cy, x - 2, cy + 4, SG_TEXT2);
+        pl_line(c, x - 2, cy - 4, x + 2, cy, CLR_TEXT_SECONDARY);
+        pl_line(c, x + 2, cy, x - 2, cy + 4, CLR_TEXT_SECONDARY);
       }
     }
     tr = mkr(x + 12, y, s->r_tree.r - 6, y + TROW);
@@ -976,7 +951,7 @@ static void paint_tree(Sig* s, PlCanvas* c)
   if (s->nvis > rows) {
     int th = s->r_tree.b - s->r_tree.t, bh = imax(24, th * rows / s->nvis);
     int by = s->r_tree.t + (th - bh) * s->ttop / imax(1, s->nvis - rows);
-    pl_round_rect(c, mkr(s->r_tree.r - 5, by, s->r_tree.r - 2, by + bh), SG_BTNB, SG_BTNB, 1);
+    pl_round_rect(c, mkr(s->r_tree.r - 5, by, s->r_tree.r - 2, by + bh), CLR_BTN_GHOST_BD, CLR_BTN_GHOST_BD, 1);
   }
 }
 
@@ -985,7 +960,7 @@ static void paint_editor(Sig* s, PlCanvas* c)
   int rows = ed_rows(s), i, textx = s->r_ed.l + 12, right = s->r_ed.r - 10;
   int cl = s->nl ? find_line(s, s->caret) : 0;
 
-  pl_line(c, s->r_gut.r - 1, s->r_gut.t, s->r_gut.r - 1, s->r_gut.b, SG_SEP);
+  pl_line(c, s->r_gut.r - 1, s->r_gut.t, s->r_gut.r - 1, s->r_gut.b, CLR_SEPARATOR);
   if (!s->cur[0] || !s->buf) return;
 
   for (i = 0; i < rows; ++i) {
@@ -994,7 +969,7 @@ static void paint_editor(Sig* s, PlCanvas* c)
     if (line >= s->nl) break;
 
     snprintf(num, sizeof(num), "%d", line + 1);
-    txt(c, s->font, SG_DIM, mkr(s->r_gut.l, y, s->r_gut.r - 12, y + LH), 2, num);
+    txt(c, s->font, CLR_TEXT_CODE, mkr(s->r_gut.l, y, s->r_gut.r - 12, y + LH), 2, num);
 
     n = expand_line(s, line);
     classify(n, s->blk[line]);
@@ -1007,7 +982,7 @@ static void paint_editor(Sig* s, PlCanvas* c)
       int xa = textx + vx(s, line, vcol_of(s, line, s->ma)) - ox;
       int xb = textx + vx(s, line, vcol_of(s, line, s->mb)) - ox;
       xa = imax(xa, textx); xb = imin(xb, right);
-      if (xa < xb) pl_fill(c, xa, y, xb, y + LH, SG_SEL);
+      if (xa < xb) pl_fill(c, xa, y, xb, y + LH, CLR_SIDEBAR_SEL);
     }
 
     j = 0;
@@ -1022,7 +997,7 @@ static void paint_editor(Sig* s, PlCanvas* c)
         int len = s_xo[b] - s_xo[a];
         memcpy(tmp, s_xl + s_xo[a], (size_t)len);
         tmp[len] = 0;
-        pl_text(c, s->font, mkr(x, y, right, y + LH), tmp, s_cls_col[s_cls[j]], PL_TEXT_LEFT);
+        pl_text(c, s->font, mkr(x, y, right, y + LH), tmp, theme_syn(s_cls[j]), PL_TEXT_LEFT);
       }
       j = k;
     }
@@ -1030,13 +1005,13 @@ static void paint_editor(Sig* s, PlCanvas* c)
     if (s->focus == F_ED && line == cl && s->caret_on) {
       int vc = vcol_of(s, line, s->caret);
       int x = textx + vx(s, line, vc) - ox;
-      if (vc >= s->hs && x < right) pl_line(c, x, y + 2, x, y + LH - 2, SG_TEXT);
+      if (vc >= s->hs && x < right) pl_line(c, x, y + 2, x, y + LH - 2, CLR_TEXT_PRIMARY);
     }
   }
   if (s->nl > rows) {
     int th = s->r_ed.b - s->r_ed.t, bh = imax(24, th * rows / s->nl);
     int by = s->r_ed.t + (th - bh) * s->top / imax(1, s->nl - rows);
-    pl_round_rect(c, mkr(s->r_ed.r - 5, by, s->r_ed.r - 2, by + bh), SG_BTNB, SG_BTNB, 1);
+    pl_round_rect(c, mkr(s->r_ed.r - 5, by, s->r_ed.r - 2, by + bh), CLR_BTN_GHOST_BD, CLR_BTN_GHOST_BD, 1);
   }
 }
 
@@ -1076,30 +1051,30 @@ static void paint_banner(Sig* s, PlCanvas* c)
   int cy = (r.t + r.b) / 2, x = r.l + 16, ph = u->phase, bl = s->b[B_UPD].r.l - 16;
   char t[300];
   const char* title = "Signature database";
-  PlColor green = PL_RGB(123, 224, 165), red = PL_RGB(242, 154, 147);
-  PlColor dcol = SG_TEXT2;
+  PlColor green = CLR_STATUS_OK_FILL, red = CLR_STATUS_ERR_TEXT;
+  PlColor dcol = CLR_TEXT_SECONDARY;
 
-  pl_round_rect(c, r, SG_PANEL, SG_BORDER, 12);
+  pl_round_rect(c, r, CLR_PANEL_HEADER, CLR_PANEL_BORDER, 12);
 
   if (ph == UPD_RUNNING) {
     int bx = x + 214, bw = bl - 56 - bx, fw = bw * u->pct / 100;
     snprintf(t, sizeof(t), "%s...", translate(u->label[0] ? u->label : "Updating"));
-    txt(c, s->fontb, SG_TEXT, mkr(x, r.t, x + 204, r.b), 0, t);
+    txt(c, s->fontb, CLR_TEXT_PRIMARY, mkr(x, r.t, x + 204, r.b), 0, t);
     if (bw > 20) {
-      pl_round_rect(c, mkr(bx, cy - 4, bx + bw, cy + 4), SG_BTNB, SG_BTNB, 4);
-      if (fw > 8) pl_round_rect(c, mkr(bx, cy - 4, bx + fw, cy + 4), SG_ACCENT, SG_ACCENT, 4);
+      pl_round_rect(c, mkr(bx, cy - 4, bx + bw, cy + 4), CLR_BTN_GHOST_BD, CLR_BTN_GHOST_BD, 4);
+      if (fw > 8) pl_round_rect(c, mkr(bx, cy - 4, bx + fw, cy + 4), CLR_ACCENT, CLR_ACCENT, 4);
       snprintf(t, sizeof(t), "%d%%", u->pct);
-      txt(c, s->font, SG_TEXT, mkr(bx + bw + 6, r.t, bl, r.b), 2, t);
+      txt(c, s->font, CLR_TEXT_PRIMARY, mkr(bx + bw + 6, r.t, bl, r.b), 2, t);
     }
     return;
   }
 
   if (ph == UPD_UPTODATE || ph == UPD_DONE) {
-    pl_ellipse(c, x, cy - 11, x + 22, cy + 11, PL_RGB(46, 158, 106), PL_RGB(46, 158, 106));
-    pl_line(c, x + 6, cy, x + 10, cy + 4, SG_WHITE);
-    pl_line(c, x + 10, cy + 4, x + 16, cy - 4, SG_WHITE);
+    pl_ellipse(c, x, cy - 11, x + 22, cy + 11, CLR_STATUS_OK_FILL, CLR_STATUS_OK_FILL);
+    pl_line(c, x + 6, cy, x + 10, cy + 4, CLR_TEXT_PRIMARY);
+    pl_line(c, x + 10, cy + 4, x + 16, cy - 4, CLR_TEXT_PRIMARY);
     x += 34;
-    dcol = SG_TEXT2;
+    dcol = CLR_TEXT_SECONDARY;
     if (ph == UPD_DONE) {
       title = "Database updated";
       snprintf(t, sizeof(t), translate("Now at %s  \xC2\xB7  %d added, %d changed  \xC2\xB7  your db_custom was not changed"),
@@ -1111,7 +1086,7 @@ static void paint_banner(Sig* s, PlCanvas* c)
     }
   }
   else {
-    PlColor d = ph == UPD_ERROR ? red : ph == UPD_READY ? SG_ACCENT : SG_BTNB;
+    PlColor d = ph == UPD_ERROR ? red : ph == UPD_READY ? CLR_ACCENT : CLR_BTN_GHOST_BD;
     pl_ellipse(c, x, cy - 4, x + 9, cy + 5, d, d);
     x += 23;
     if (ph == UPD_READY)
@@ -1124,7 +1099,7 @@ static void paint_banner(Sig* s, PlCanvas* c)
   {
     const char* ttl = translate(title);
     int tw = pl_text_width(s->fontb, ttl);
-    txt(c, s->fontb, SG_TEXT, mkr(x, r.t, x + tw + 4, r.b), 0, ttl);
+    txt(c, s->fontb, CLR_TEXT_PRIMARY, mkr(x, r.t, x + tw + 4, r.b), 0, ttl);
     txt(c, s->font, ph == UPD_DONE ? green : dcol, mkr(x + tw + 16, r.t, bl, r.b), 0, t);
   }
 }
@@ -1180,23 +1155,23 @@ static void on_paint(void* u, PlCanvas* c, int w, int h) {
   layout(s);
   upd_poll(s);
   upd_sync_btn(s);
-  pl_fill(c, 0, 0, w, h, SG_BG);
+  pl_fill(c, 0, 0, w, h, CLR_BG);
 
-  pl_round_rect(c, s->r_left, SG_PANEL, SG_BORDER, 12);
-  pl_round_rect(c, s->r_filter, SG_BG, s->focus == F_FILTER ? SG_ACCENT : SG_BORDER, 8);
+  pl_round_rect(c, s->r_left, CLR_PANEL_HEADER, CLR_PANEL_BORDER, 12);
+  pl_round_rect(c, s->r_filter, CLR_BG, s->focus == F_FILTER ? CLR_ACCENT : CLR_PANEL_BORDER, 8);
   {
     int fx = s->r_filter.l, fy = s->r_filter.t;
-    pl_ellipse(c, fx + 12, fy + 10, fx + 22, fy + 20, SG_BG, SG_TEXT2);
-    pl_line(c, fx + 21, fy + 19, fx + 26, fy + 24, SG_TEXT2);
+    pl_ellipse(c, fx + 12, fy + 10, fx + 22, fy + 20, CLR_BG, CLR_TEXT_SECONDARY);
+    pl_line(c, fx + 21, fy + 19, fx + 26, fy + 24, CLR_TEXT_SECONDARY);
   }
   paint_edit(s, c, &s->filter,
     mkr(s->r_filter.l + 34, s->r_filter.t, s->r_filter.r - 56, s->r_filter.b),
     s->focus == F_FILTER, "Filter signatures");
   snprintf(t, sizeof(t), "%d", s->count);
-  txt(c, s->font, SG_DIM, mkr(s->r_filter.r - 60, s->r_filter.t, s->r_filter.r - 10, s->r_filter.b), 2, t);
+  txt(c, s->font, CLR_TEXT_CODE, mkr(s->r_filter.r - 60, s->r_filter.t, s->r_filter.r - 10, s->r_filter.b), 2, t);
   paint_tree(s, c);
 
-  pl_round_rect(c, s->r_findbox, SG_PANEL, s->focus == F_FIND ? SG_ACCENT : SG_BORDER, 8);
+  pl_round_rect(c, s->r_findbox, CLR_PANEL_HEADER, s->focus == F_FIND ? CLR_ACCENT : CLR_PANEL_BORDER, 8);
   paint_edit(s, c, &s->find,
     mkr(s->r_findbox.l + 12, s->r_findbox.t, s->r_findbox.r - 12, s->r_findbox.b),
     s->focus == F_FIND, "Find in script");
@@ -1206,7 +1181,7 @@ static void on_paint(void* u, PlCanvas* c, int w, int h) {
   name = name ? name + 1 : (s->cur[0] ? s->cur : translate("No file selected"));
   {
     int nx = s->r_edcard.l + 14, nw = pl_text_width(s->fontb, name);
-    txt(c, s->fontb, SG_TEXT, mkr(nx, s->r_edcard.t, nx + nw + 4, s->r_edcard.t + HEAD_ED), 0, name);
+    txt(c, s->fontb, CLR_TEXT_PRIMARY, mkr(nx, s->r_edcard.t, nx + nw + 4, s->r_edcard.t + HEAD_ED), 0, name);
     if (s->cur[0] && s->type[0]) {
       int bw = pl_text_width(s->font, s->type) + 18;
       PlRect badge = mkr(nx + nw + 12, s->r_edcard.t + 9, nx + nw + 12 + bw, s->r_edcard.t + HEAD_ED - 9);
@@ -1216,28 +1191,27 @@ static void on_paint(void* u, PlCanvas* c, int w, int h) {
     if (s->cur[0]) {
       snprintf(t, sizeof(t), translate("%d lines  \xC2\xB7  UTF-8"), s->nl);
       tr = mkr(s->r_edcard.r - 220, s->r_edcard.t, s->r_edcard.r - 14, s->r_edcard.t + HEAD_ED);
-      txt(c, s->font, SG_TEXT2, tr, 2, t);
+      txt(c, s->font, CLR_TEXT_SECONDARY, tr, 2, t);
     }
   }
   paint_editor(s, c);
 
-  pl_fill(c, s->r_bar.l, s->r_bar.t, s->r_bar.r, s->r_bar.b, SG_BAR);
-  pl_line(c, s->r_bar.l, s->r_bar.t, s->r_bar.r, s->r_bar.t, SG_SEP);
+  pl_fill(c, s->r_bar.l, s->r_bar.t, s->r_bar.r, s->r_bar.b, CLR_BG);
+  pl_line(c, s->r_bar.l, s->r_bar.t, s->r_bar.r, s->r_bar.t, CLR_SEPARATOR);
 
   paint_banner(s, c);
   for (i = 0; i < NB; ++i) paint_btn(s, c, i);
   if (s->upd.phase == UPD_RUNNING)
-    txt(c, s->font, SG_TEXT2, mkr(s->b[B_RO].r.r + 14, s->b[B_RO].r.t, s->r_findbox.l - 10, s->b[B_RO].r.b),
+    txt(c, s->font, CLR_TEXT_SECONDARY, mkr(s->b[B_RO].r.r + 14, s->b[B_RO].r.t, s->r_findbox.l - 10, s->b[B_RO].r.b),
       0, translate("Editing is locked while the database updates"));
 
   if (s->popup) {
     PlRect p = mkr(s->b[B_DROP].r.l, s->b[B_DROP].r.t - 38, s->b[B_DROP].r.r, s->b[B_DROP].r.t - 4);
-    pl_round_rect(c, p, SG_PANEL, SG_BORDER, 8);
-    pl_ellipse(c, p.l + 12, (p.t + p.b) / 2 - 3, p.l + 18, (p.t + p.b) / 2 + 3, SG_ACCENT, SG_ACCENT);
-    txt(c, s->font, SG_TEXT, mkr(p.l + 28, p.t, p.r - 8, p.b), 0, "detect");
+    pl_round_rect(c, p, CLR_PANEL_HEADER, CLR_PANEL_BORDER, 8);
+    pl_ellipse(c, p.l + 12, (p.t + p.b) / 2 - 3, p.l + 18, (p.t + p.b) / 2 + 3, CLR_ACCENT, CLR_ACCENT);
+    txt(c, s->font, CLR_TEXT_PRIMARY, mkr(p.l + 28, p.t, p.r - 8, p.b), 0, "detect");
   }
 }
-
 
 static void on_resize(void* u, int w, int h)
 {
