@@ -27,9 +27,9 @@
 #include "controls/palette.h"
 #include "core/i18n.h"
 
-#define PAL_W     440
-#define PAL_IN_H  44
-#define PAL_ROW_H 30
+#define PAL_W     th_scale(440)
+#define PAL_IN_H  th_scale(44)
+#define PAL_ROW_H th_scale(30)
 #define PAL_ROWS  8
 #define PAL_MAX   64
 
@@ -85,11 +85,11 @@ static void relayout(Palette* p)
 {
 	int rows = p->nfilt < PAL_ROWS ? p->nfilt : PAL_ROWS;
 	if (rows < 1) rows = 1;
-	p->W = p->aw - 20 < PAL_W ? p->aw - 20 : PAL_W;
-	if (p->W < 200) p->W = 200;
-	p->H = PAL_IN_H + 1 + rows * PAL_ROW_H + 8;
+	p->W = p->aw - th_scale(20) < PAL_W ? p->aw - th_scale(20) : PAL_W;
+	if (p->W < th_scale(200)) p->W = th_scale(200);
+	p->H = PAL_IN_H + 1 + rows * PAL_ROW_H + th_scale(8);
 	p->rx = p->ax + (p->aw - p->W) / 2;
-	p->ry = p->ay + 40;
+	p->ry = p->ay + th_scale(40);
 	pl_widget_set_rect(p->w, p->rx, p->ry, p->W, p->H);
 	pl_invalidate(p->w, NULL);
 }
@@ -123,27 +123,27 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 {
 	Palette* p = (Palette*)u;
 	PlRect frame = { 0, 0, w - 1, h - 1 };
-	PlRect in = { 16, 0, w - 16, PAL_IN_H };
+	PlRect in = { th_scale(16), 0, w - th_scale(16), PAL_IN_H };
 	int r;
 
 	pl_fill(c, 0, 0, w, h, CLR_PANEL_BODY);
 	pl_round_rect(c, frame, CLR_PANEL, CLR_ACCENT, 12);
 
 	if (p->query[0]) {
-		int cx = 16 + pl_text_width(p->mono, p->query);
-		if (cx > w - 16) cx = w - 16;
+		int cx = th_scale(16) + pl_text_width(p->mono, p->query);
+		if (cx > w - th_scale(16)) cx = w - th_scale(16);
 		pl_text(c, p->mono, in, p->query, CLR_TEXT_PRIMARY, PL_TEXT_ELLIPSIS);
-		pl_line(c, cx + 1, 13, cx + 1, PAL_IN_H - 13, CLR_TEXT_PRIMARY);
+		pl_line(c, cx + 1, th_scale(13), cx + 1, PAL_IN_H - th_scale(13), CLR_TEXT_PRIMARY);
 	}
 	else {
 		pl_text(c, p->ui, in, tr("Type to search views and actions..."),
 			CLR_TEXT_SECONDARY, PL_TEXT_LEFT);
-		pl_line(c, 16, 13, 16, PAL_IN_H - 13, CLR_TEXT_PRIMARY);
+		pl_line(c, th_scale(16), th_scale(13), th_scale(16), PAL_IN_H - th_scale(13), CLR_TEXT_PRIMARY);
 	}
 	pl_line(c, 1, PAL_IN_H, w - 2, PAL_IN_H, CLR_SEPARATOR);
 
 	if (p->nfilt == 0) {
-		PlRect nr = { 18, PAL_IN_H + 1, w - 18, PAL_IN_H + 1 + PAL_ROW_H };
+		PlRect nr = { th_scale(18), PAL_IN_H + 1, w - th_scale(18), PAL_IN_H + 1 + PAL_ROW_H };
 		pl_text(c, p->ui, nr, tr("No matches"), CLR_TEXT_SECONDARY, PL_TEXT_LEFT);
 		return;
 	}
@@ -151,9 +151,9 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 		int idx = p->top + r;
 		const Entry* e = &p->items[p->filt[idx]];
 		int y = PAL_IN_H + 1 + r * PAL_ROW_H;
-		PlRect row = { 6, y, w - 6, y + PAL_ROW_H };
-		PlRect lr = { 18, y, w - 100, y + PAL_ROW_H };
-		PlRect kr = { w - 90, y, w - 16, y + PAL_ROW_H };
+		PlRect row = { th_scale(6), y, w - th_scale(6), y + PAL_ROW_H };
+		PlRect lr = { th_scale(18), y, w - th_scale(100), y + PAL_ROW_H };
+		PlRect kr = { w - th_scale(90), y, w - th_scale(16), y + PAL_ROW_H };
 		if (idx == p->sel) pl_round_rect(c, row, CLR_SIDEBAR_SEL, CLR_SIDEBAR_SEL, 6);
 		pl_text(c, p->ui, lr, tr(e->label),
 			idx == p->sel ? CLR_TEXT_PRIMARY : CLR_TEXT_SECONDARY, PL_TEXT_ELLIPSIS);

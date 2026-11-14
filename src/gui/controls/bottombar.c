@@ -23,9 +23,12 @@
 #include "controls/bottombar.h"
 #include "theme/theme.h"
 #include "core/i18n.h"
+#include "global.h"
 
-#define BB_PAD 12
-#define BB_VERSION "cdie 4.0.0 (x64)"
+
+#define BB_PAD th_scale(12)
+
+#define BB_VERSION X_APPLICATIONNAME " " X_APPLICATIONVERSION " (" CDIE_ARCH ")"
 
 struct Bottombar {
   PlWidget* w;
@@ -56,7 +59,7 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 
   left.l = BB_PAD;
   left.t = 0;
-  left.r = right.l - 8;
+  left.r = right.l - th_scale(8);
   if (left.r < left.l) left.r = left.l;
   left.b = h;
 

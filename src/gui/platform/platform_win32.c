@@ -117,7 +117,7 @@ static LRESULT CALLBACK pl_proc(HWND hw, UINT m, WPARAM wp, LPARAM lp)
 
 	case WM_LBUTTONDOWN:
 		SetFocus(hw);
-		if (w && w->ops.mouse_up) SetCapture(hw);   /* only widgets that handle mouse_up */
+		if (w && w->ops.mouse_up) SetCapture(hw);   
 		if (w && w->ops.mouse_down)
 			w->ops.mouse_down(w->user, (short)LOWORD(lp), (short)HIWORD(lp));
 		return 0;
@@ -574,12 +574,12 @@ static void frame_corner(HDC dc, int x0, int y0, int rr, int cx, int cy,
 
 void pl_frame_corners(PlCanvas* c, int w, int h, int rr, PlColor bg, PlColor border)
 {
-	int W = w - 1, H = h - 1;                 /* same box the other views use */
+	int W = w - 1, H = h - 1;                
 	COLORREF cbg = to_cr(bg), cbd = to_cr(border);
 	if (W < 2 * rr || H < 2 * rr) return;
-	aa_fill(c->dc, W, 0, w, h, cbg);          /* outer 1px strip */
+	aa_fill(c->dc, W, 0, w, h, cbg);          
 	aa_fill(c->dc, 0, H, w, h, cbg);
-	aa_fill(c->dc, rr, 0, W - rr, 1, cbd);    /* straight border edges */
+	aa_fill(c->dc, rr, 0, W - rr, 1, cbd);   
 	aa_fill(c->dc, rr, H - 1, W - rr, H, cbd);
 	aa_fill(c->dc, 0, rr, 1, H - rr, cbd);
 	aa_fill(c->dc, W - 1, rr, W, H - rr, cbd);

@@ -40,8 +40,32 @@
 
 static ScanOptions g_options;
 static DBase g_db;
+static xx_pd_struct g_pd;
 static int g_bInited = 0;
 static int g_bMainLoaded = 0;
+static volatile int g_progress = -1;
+
+/* Runs on the scan thread after each progress update. */
+static bool gui_pd_observer(const xx_pd_struct* pd, void* pUserData)
+{
+	int i;
+	(void)pUserData;
+	for (i = 0; i < XX_PD_LEVELS; ++i) {
+		if (pd->records[i].is_busy && pd->records[i].total > 0) {
+			uint64_t c = pd->records[i].current;
+			uint64_t t = pd->records[i].total;
+			if (c > t) c = t;
+			g_progress = (int)(c * 100 / t);
+			break;
+		}
+	}
+	return false;   /* false = do not request stop */
+}
+
+int gui_backend_scan_progress(void)
+{
+	return g_progress;
+}
 
 /* Mirrors main_console.c's resolve_database_path with no explicit path: use
  * "<exe-dir>/<name>" when it exists, else the bare relative name. */
@@ -68,6 +92,7 @@ int gui_backend_init(void)
 	}
 
 	scan_options_init(&g_options);
+	xx_set_file_memory_limit((uint64_t)1 << 30);   /* 1 GiB: keep files up to this size in RAM */
 	xx_rt_memset(&g_db, 0, sizeof(g_db));
 
 	/* GUI defaults follow the Detect It Easy GUI: deep + heuristic + verbose on.
@@ -281,9 +306,17 @@ int gui_backend_scan_results_type(const char* pUtf8Path, int nTypeId,
 		return 0;
 	}
 
-	if (!die_engine_scan_file_type(pUtf8Path, &g_db, &g_options, (XFileType)nTypeId, &result)) {
-		scan_result_free(&result);
-		return 0;
+	xx_rt_memset(&g_pd, 0, sizeof(g_pd));
+	g_progress = -1;
+	{
+		xx_pd_observer prev = xx_pd_set_observer(&g_pd, gui_pd_observer, NULL);
+		int scanned = die_engine_scan_file_type_pd(pUtf8Path, &g_db, &g_options,
+			(XFileType)nTypeId, &result, &g_pd);
+		xx_pd_set_observer(prev.progress, prev.callback, prev.user_data);
+		if (!scanned) {
+			scan_result_free(&result);
+			return 0;
+		}
 	}
 
 	if (ppResultText != NULL) {

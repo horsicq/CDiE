@@ -41,14 +41,14 @@
 #define _strdup strdup
 #endif
 
-#define HEAD    44
+#define HEAD    th_scale(44)
 #undef NAV_H
-#define NAV_H   38
-#define ROW_H   34
+#define NAV_H   th_scale(38)
+#define ROW_H   th_scale(34)
 #define MAXIT   40
 #define NCH     22  
 
-#define DD_ROW 26
+#define DD_ROW th_scale(26)
 #define DD_MAXVIS 8
 
 
@@ -152,9 +152,9 @@ static int nav_yoff(Opt* o, int i)
   int pg = o->navpg[i];
   if (pg == PG_UPDATE || pg == PG_VERSIONS || pg == PG_ABOUT) {
     int below = o->nnav - 1 - i;
-    return (o->r_nav.b - o->r_nav.t) - 12 - (below + 1) * NAV_H;
+    return (o->r_nav.b - o->r_nav.t) - th_scale(12) - (below + 1) * NAV_H;
   }
-  return 12 + i * NAV_H;
+  return th_scale(12) + i * NAV_H;
 }
 
 static void redraw(Opt* o)
@@ -351,10 +351,10 @@ static int about_line_at(Opt* o, int x, int y, char* out, size_t cap)
   out[0] = 0;
   if (o->page != PG_ABOUT || in.r <= in.l ||
     x < in.l || x >= in.r || y < in.t || y >= in.b) return -1;
-  line = o->about_scroll + (y - in.t) / 18;
+  line = o->about_scroll + (y - in.t) / th_scale(18);
   s_pick = line;
   s_pick_buf[0] = 0;
-  lines = wrap_text(NULL, o->font, CLR_TEXT_SECONDARY, in, ABOUT_BOX, 18, 0, 0);
+  lines = wrap_text(NULL, o->font, CLR_TEXT_SECONDARY, in, ABOUT_BOX, th_scale(18), 0, 0);
   s_pick = -1;
   if (line >= lines) return -1;
   snprintf(out, cap, "%s", s_pick_buf);
@@ -363,9 +363,9 @@ static int about_line_at(Opt* o, int x, int y, char* out, size_t cap)
 
 static void card(PlCanvas* c, PlRect r, int headH)
 {
-  pl_round_rect(c, r, CLR_PANEL_BODY, CLR_PANEL_BORDER, 12);
-  pl_round_rect(c, mkr(r.l + 1, r.t + 1, r.r - 1, r.t + headH + 12), CLR_PANEL_HEADER, CLR_PANEL_HEADER, 11);
-  pl_fill(c, r.l + 1, r.t + headH, r.r - 1, r.t + headH + 12, CLR_PANEL_BODY);
+  pl_round_rect(c, r, CLR_PANEL_BODY, CLR_PANEL_BORDER, th_scale(12));
+  pl_round_rect(c, mkr(r.l + 1, r.t + 1, r.r - 1, r.t + headH + th_scale(12)), CLR_PANEL_HEADER, CLR_PANEL_HEADER, th_scale(11));
+  pl_fill(c, r.l + 1, r.t + headH, r.r - 1, r.t + headH + th_scale(12), CLR_PANEL_BODY);
   pl_line(c, r.l + 1, r.t + headH, r.r - 1, r.t + headH, CLR_SEPARATOR);
 }
 
@@ -426,54 +426,57 @@ static int* chk_ptr(Opt* o, int id)
 
 static void build_items(Opt* o)
 {
-  int x = o->r_card.l + 24;
-  int w = o->r_card.r - o->r_card.l - 48;
-  int y = o->r_card.t + HEAD + 16;
-  int by = o->H - 56 + 11;
+  int x = o->r_card.l + th_scale(24);
+  int w = o->r_card.r - o->r_card.l - th_scale(48);
+  int y = o->r_card.t + HEAD + th_scale(16);
+  int by = o->H - th_scale(56) + th_scale(11);
+  int bw = th_scale(80), bm = th_scale(12), bh = th_scale(34);
+  int s20 = th_scale(20), s22 = th_scale(22), s28 = th_scale(28), s30 = th_scale(30);
+  int s70 = th_scale(70), s80 = th_scale(80), s82 = th_scale(82), s90 = th_scale(90);
 
   o->nit = 0;
   switch (o->page) {
   case PG_SCAN:
-    add(o, IK_HEAD, 0, "SCAN BEHAVIOR", 1, x, y, x + w, y + 20); y += 28;
+    add(o, IK_HEAD, 0, "SCAN BEHAVIOR", 1, x, y, x + w, y + s20); y += s28;
     add(o, IK_CHECK, ID_DEEP, "Deep scan", 1, x, y, x + w, y + ROW_H); y += ROW_H;
     add(o, IK_CHECK, ID_HEUR, "Heuristic scan", 1, x, y, x + w, y + ROW_H); y += ROW_H;
-    add(o, IK_CHECK, ID_AGGR, "Aggressive scan", 1, x, y, x + w, y + ROW_H); y += ROW_H + 14;
-    add(o, IK_HEAD, 0, "RESULTS", 1, x, y, x + w, y + 20); y += 28;
+    add(o, IK_CHECK, ID_AGGR, "Aggressive scan", 1, x, y, x + w, y + ROW_H); y += ROW_H + th_scale(14);
+    add(o, IK_HEAD, 0, "RESULTS", 1, x, y, x + w, y + s20); y += s28;
     add(o, IK_CHECK, ID_VERBOSE, "Verbose output", 1, x, y, x + w, y + ROW_H); y += ROW_H;
     add(o, IK_CHECK, ID_HIDE, "Hide unknown", 1, x, y, x + w, y + ROW_H); y += ROW_H;
-    add(o, IK_CHECK, ID_FORMAT, "Format result", 1, x, y, x + w, y + ROW_H); y += ROW_H + 14;
-    add(o, IK_HEAD, 0, "WINDOW", 1, x, y, x + w, y + 20); y += 28;
+    add(o, IK_CHECK, ID_FORMAT, "Format result", 1, x, y, x + w, y + ROW_H); y += ROW_H + th_scale(14);
+    add(o, IK_HEAD, 0, "WINDOW", 1, x, y, x + w, y + s20); y += s28;
     add(o, IK_CHECK, ID_MONITOR, "Monitor downloads", 1, x, y, x + w, y + ROW_H);
     break;
 
   case PG_DB:
-    add(o, IK_HEAD, 0, "OPTIONAL DATABASES", 1, x, y, x + w, y + 20); y += 28;
+    add(o, IK_HEAD, 0, "OPTIONAL DATABASES", 1, x, y, x + w, y + s20); y += s28;
     add(o, IK_CHECK, ID_DBX, "Extra database", 1, x, y, x + w, y + ROW_H); y += ROW_H;
     add(o, IK_CHECK, ID_DBC, "Custom database", 1, x, y, x + w, y + ROW_H); y += ROW_H;
-    add(o, IK_CHECK, ID_DBCOMMITS, "Update from GitHub commits", 1, x, y, x + w, y + ROW_H); y += ROW_H + 2;
-    add(o, IK_NOTE, 0, "The main database is always loaded.", 1, x, y, x + w, y + 22); y += 34;
-    add(o, IK_HEAD, 0, "FOLDERS", 1, x, y, x + w, y + 20); y += 28;
-    add(o, IK_TEXT, 0, "Main", 1, x, y, x + 70, y + 30);
-    add(o, IK_PATH, ID_PATH_MAIN, "", 1, x + 80, y, x + w - 90, y + 30);
-    add(o, IK_BTN, ID_BROWSE_MAIN, "Browse", 1, x + w - 82, y, x + w, y + 30); y += 36;
-    add(o, IK_TEXT, 0, "Extra", 1, x, y, x + 70, y + 30);
-    add(o, IK_PATH, ID_PATH_EXTRA, "", 1, x + 80, y, x + w - 90, y + 30);
-    add(o, IK_BTN, ID_BROWSE_EXTRA, "Browse", 1, x + w - 82, y, x + w, y + 30); y += 36;
-    add(o, IK_TEXT, 0, "Custom", 1, x, y, x + 70, y + 30);
-    add(o, IK_PATH, ID_PATH_CUSTOM, "", 1, x + 80, y, x + w - 90, y + 30);
-    add(o, IK_BTN, ID_BROWSE_CUSTOM, "Browse", 1, x + w - 82, y, x + w, y + 30); y += 40;
-    add(o, IK_NOTE, 0, "Folders must be writable. If the install folder is read-only, choose another.", 1, x, y, x + w, y + 22);
+    add(o, IK_CHECK, ID_DBCOMMITS, "Update from GitHub commits", 1, x, y, x + w, y + ROW_H); y += ROW_H + th_scale(2);
+    add(o, IK_NOTE, 0, "The main database is always loaded.", 1, x, y, x + w, y + s22); y += th_scale(34);
+    add(o, IK_HEAD, 0, "FOLDERS", 1, x, y, x + w, y + s20); y += s28;
+    add(o, IK_TEXT, 0, "Main", 1, x, y, x + s70, y + s30);
+    add(o, IK_PATH, ID_PATH_MAIN, "", 1, x + s80, y, x + w - s90, y + s30);
+    add(o, IK_BTN, ID_BROWSE_MAIN, "Browse", 1, x + w - s82, y, x + w, y + s30); y += th_scale(36);
+    add(o, IK_TEXT, 0, "Extra", 1, x, y, x + s70, y + s30);
+    add(o, IK_PATH, ID_PATH_EXTRA, "", 1, x + s80, y, x + w - s90, y + s30);
+    add(o, IK_BTN, ID_BROWSE_EXTRA, "Browse", 1, x + w - s82, y, x + w, y + s30); y += th_scale(36);
+    add(o, IK_TEXT, 0, "Custom", 1, x, y, x + s70, y + s30);
+    add(o, IK_PATH, ID_PATH_CUSTOM, "", 1, x + s80, y, x + w - s90, y + s30);
+    add(o, IK_BTN, ID_BROWSE_CUSTOM, "Browse", 1, x + w - s82, y, x + w, y + s30); y += th_scale(40);
+    add(o, IK_NOTE, 0, "Folders must be writable. If the install folder is read-only, choose another.", 1, x, y, x + w, y + s22);
     break;
 
   case PG_OPT:
     if (!o->have_opt) {
-      add(o, IK_NOTE, 0, "Optimization settings are not available.", 1, x, y, x + w, y + 22);
+      add(o, IK_NOTE, 0, "Optimization settings are not available.", 1, x, y, x + w, y + s22);
       break;
     }
-    add(o, IK_HEAD, 0, "BUFFERS", 1, x, y, x + w, y + 20); y += 32;
-    add_stepper(o, "Buffer size", ID_BUF_DEC, ID_BUF_INC, ID_BUF_VAL, x, w, y); y += 42;
-    add_stepper(o, "File buffer size", ID_FBUF_DEC, ID_FBUF_INC, ID_FBUF_VAL, x, w, y); y += 54;
-    add(o, IK_HEAD, 0, "ACCELERATION", 1, x, y, x + w, y + 20); y += 28;
+    add(o, IK_HEAD, 0, "BUFFERS", 1, x, y, x + w, y + s20); y += th_scale(32);
+    add_stepper(o, "Buffer size", ID_BUF_DEC, ID_BUF_INC, ID_BUF_VAL, x, w, y); y += th_scale(42);
+    add_stepper(o, "File buffer size", ID_FBUF_DEC, ID_FBUF_INC, ID_FBUF_VAL, x, w, y); y += th_scale(54);
+    add(o, IK_HEAD, 0, "ACCELERATION", 1, x, y, x + w, y + s20); y += s28;
     add(o, IK_CHECK, ID_SSE2, o->opt.has_sse2 ? "SSE2" : "SSE2 (not supported on this system)",
       o->opt.has_sse2, x, y, x + w, y + ROW_H); y += ROW_H;
     add(o, IK_CHECK, ID_AVX2, o->opt.has_avx2 ? "AVX2" : "AVX2 (not supported on this system)",
@@ -485,93 +488,93 @@ static void build_items(Opt* o)
     { "Controls", "Table views", "Tree views", "Text edits" };
     int k;
     if (!o->have_fonts) {
-      add(o, IK_NOTE, 0, "Font settings are not available.", 1, x, y, x + w, y + 22);
+      add(o, IK_NOTE, 0, "Font settings are not available.", 1, x, y, x + w, y + s22);
       break;
     }
-    add(o, IK_HEAD, 0, "INTERFACE FONTS", 1, x, y, x + w, y + 20); y += 32;
+    add(o, IK_HEAD, 0, "INTERFACE FONTS", 1, x, y, x + w, y + s20); y += th_scale(32);
     for (k = 0; k < OPTIONS_FONT_ROLES; ++k) {
-      add(o, IK_TEXT, 0, rn[k], 1, x, y, x + 110, y + 30);
-      add(o, IK_FVAL, ID_FVAL0 + k, "", 1, x + 120, y, x + w - 88, y + 30);
-      add(o, IK_BTN, ID_FDEF0 + k, "Default", 1, x + w - 80, y, x + w, y + 30);
-      y += 42;
+      add(o, IK_TEXT, 0, rn[k], 1, x, y, x + th_scale(110), y + s30);
+      add(o, IK_FVAL, ID_FVAL0 + k, "", 1, x + th_scale(120), y, x + w - th_scale(88), y + s30);
+      add(o, IK_BTN, ID_FDEF0 + k, "Default", 1, x + w - s80, y, x + w, y + s30);
+      y += th_scale(42);
     }
-    y += 8;
-    add(o, IK_NOTE, 0, "Fonts are applied when you press Apply or OK.", 1, x, y, x + w, y + 22);
+    y += th_scale(8);
+    add(o, IK_NOTE, 0, "Fonts are applied when you press Apply or OK.", 1, x, y, x + w, y + s22);
     break;
   }
   case PG_APPEARANCE:
-    add(o, IK_HEAD, 0, "THEME", 1, x, y, x + w, y + 20); y += 32;
+    add(o, IK_HEAD, 0, "THEME", 1, x, y, x + w, y + s20); y += th_scale(32);
     add(o, IK_RADIO, ID_THEME_SYS, "Use system setting", 1, x, y, x + w, y + ROW_H); y += ROW_H;
     add(o, IK_RADIO, ID_THEME_LIGHT, "Light", 1, x, y, x + w, y + ROW_H); y += ROW_H;
-    add(o, IK_RADIO, ID_THEME_DARK, "Dark", 1, x, y, x + w, y + ROW_H); y += ROW_H + 8;
-    add(o, IK_NOTE, 0, "The theme is applied when you press Apply or OK.", 1, x, y, x + w, y + 22);
+    add(o, IK_RADIO, ID_THEME_DARK, "Dark", 1, x, y, x + w, y + ROW_H); y += ROW_H + th_scale(8);
+    add(o, IK_NOTE, 0, "The theme is applied when you press Apply or OK.", 1, x, y, x + w, y + s22);
     break;
   case PG_LANG:
-    add(o, IK_HEAD, 0, translate("INTERFACE LANGUAGE"), 1, x, y, x + w, y + 20); y += 32;
-    add(o, IK_TEXT, 0, translate("Language"), 1, x, y, x + 150, y + 30);
-    add(o, IK_LVAL, ID_LANGVAL, "", 1, x + 160, y, x + w, y + 30); y += 50;
-    add(o, IK_NOTE, 0, translate("Language files are loaded from the \"lang\" folder."), 1, x, y, x + w, y + 22);
+    add(o, IK_HEAD, 0, translate("INTERFACE LANGUAGE"), 1, x, y, x + w, y + s20); y += th_scale(32);
+    add(o, IK_TEXT, 0, translate("Language"), 1, x, y, x + th_scale(150), y + s30);
+    add(o, IK_LVAL, ID_LANGVAL, "", 1, x + th_scale(160), y, x + w, y + s30); y += th_scale(50);
+    add(o, IK_NOTE, 0, translate("Language files are loaded from the \"lang\" folder."), 1, x, y, x + w, y + s22);
     break;
 
   case PG_VT:
-    add(o, IK_HEAD, 0, "API KEY", 1, x, y, x + w, y + 20); y += 32;
-    add(o, IK_TEXT, 0, "API key", 1, x, y, x + 110, y + 30);
-    add(o, IK_PATH, ID_PATH_VT, "", 1, x + 120, y, x + w - 90, y + 30);
-    add(o, IK_BTN, ID_PASTE_VT, "Paste", 1, x + w - 82, y, x + w, y + 30); y += 46;
-    add(o, IK_NOTE, 0, "Free key: virustotal.com > profile > API key. Click the box and type or press Ctrl+V.", 1, x, y, x + w, y + 22); y += 26;
-    add(o, IK_NOTE, 0, "Only the SHA-256 hash is sent, never the file.", 1, x, y, x + w, y + 22);
+    add(o, IK_HEAD, 0, "API KEY", 1, x, y, x + w, y + s20); y += th_scale(32);
+    add(o, IK_TEXT, 0, "API key", 1, x, y, x + th_scale(110), y + s30);
+    add(o, IK_PATH, ID_PATH_VT, "", 1, x + th_scale(120), y, x + w - s90, y + s30);
+    add(o, IK_BTN, ID_PASTE_VT, "Paste", 1, x + w - s82, y, x + w, y + s30); y += th_scale(46);
+    add(o, IK_NOTE, 0, "Free key: virustotal.com > profile > API key. Click the box and type or press Ctrl+V.", 1, x, y, x + w, y + s22); y += th_scale(26);
+    add(o, IK_NOTE, 0, "Only the SHA-256 hash is sent, never the file.", 1, x, y, x + w, y + s22);
     break;
 
   case PG_CTX:
     add(o, IK_TEXT, 0, translate("Add or remove the \"Scan with cdie\" entry in the Explorer file menu."),
-      1, x, y, x + w, y + 24); y += 44;
+      1, x, y, x + w, y + th_scale(24)); y += th_scale(44);
     if (!o->have_ctx) {
-      add(o, IK_NOTE, 0, translate("Explorer integration is not available."), 1, x, y, x + w, y + 22);
+      add(o, IK_NOTE, 0, translate("Explorer integration is not available."), 1, x, y, x + w, y + s22);
       break;
     }
     add(o, IK_CHECK, ID_CTX_TOGGLE, translate("Show \"Scan with cdie\" in the Explorer menu"),
-      1, x, y, x + w, y + ROW_H); y += ROW_H + 8;
-    add(o, IK_NOTE, 0, o->ctxmsg, 1, x, y, x + w, y + 22);
+      1, x, y, x + w, y + ROW_H); y += ROW_H + th_scale(8);
+    add(o, IK_NOTE, 0, o->ctxmsg, 1, x, y, x + w, y + s22);
     break;
 
   case PG_UPDATE:
-    add(o, IK_HEAD, 0, translate("VERSION"), 1, x, y, x + w, y + 20); y += 28;
-    add(o, IK_TEXT, 0, o->verline, 1, x, y, x + w, y + 26); y += 44;
-    add(o, IK_BTN, ID_CHECK_UPDATE, translate("Check for updates"), 1, x, y, x + 170, y + 34); y += 46;
-    add(o, IK_NOTE, 0, o->updmsg, 1, x, y, x + w, y + 22);
+    add(o, IK_HEAD, 0, translate("VERSION"), 1, x, y, x + w, y + s20); y += s28;
+    add(o, IK_TEXT, 0, o->verline, 1, x, y, x + w, y + th_scale(26)); y += th_scale(44);
+    add(o, IK_BTN, ID_CHECK_UPDATE, translate("Check for updates"), 1, x, y, x + th_scale(170), y + bh); y += th_scale(46);
+    add(o, IK_NOTE, 0, o->updmsg, 1, x, y, x + w, y + s22);
     break;
 
   case PG_VERSIONS:
-    add(o, IK_HEAD, 0, "INSTALLED VERSION", 1, x, y, x + w, y + 20); y += 28;
-    add(o, IK_TEXT, 0, o->verline, 1, x, y, x + w, y + 26); y += 44;
-    add(o, IK_BTN, ID_OPEN_VERSIONS, "Version history", 1, x, y, x + 170, y + 34); y += 50;
-    add(o, IK_NOTE, 0, "Updates are delivered automatically by the Microsoft Store.", 1, x, y, x + w, y + 22); y += 24;
-    add(o, IK_NOTE, 0, "If a new version causes problems, you can go back to an earlier one here.", 1, x, y, x + w, y + 22);
+    add(o, IK_HEAD, 0, "INSTALLED VERSION", 1, x, y, x + w, y + s20); y += s28;
+    add(o, IK_TEXT, 0, o->verline, 1, x, y, x + w, y + th_scale(26)); y += th_scale(44);
+    add(o, IK_BTN, ID_OPEN_VERSIONS, "Version history", 1, x, y, x + th_scale(170), y + bh); y += th_scale(50);
+    add(o, IK_NOTE, 0, "Updates are delivered automatically by the Microsoft Store.", 1, x, y, x + w, y + s22); y += th_scale(24);
+    add(o, IK_NOTE, 0, "If a new version causes problems, you can go back to an earlier one here.", 1, x, y, x + w, y + s22);
     break;
 
   case PG_ABOUT: {
-    int bh;
-    add(o, IK_HEAD, 0, translate("DETECT IT EASY - CDIE"), 1, x, y, x + w, y + 20); y += 26;
-    add(o, IK_TEXT, 0, o->verline, 1, x, y, x + w, y + 22); y += 22;
-    add(o, IK_NOTE, 0, o->buildline, 1, x, y, x + w, y + 22); y += 22;
-    add(o, IK_NOTE, 0, o->copyline, 1, x, y, x + w, y + 22); y += 30;
-    add(o, IK_BTN, ID_OPEN_SITE, translate("Website"), 1, x, y, x + 84, y + 32);
-    add(o, IK_BTN, ID_OPEN_GITHUB, translate("GitHub"), 1, x + 92, y, x + 176, y + 32);
-    add(o, IK_BTN, ID_OPEN_RELEASES, translate("Releases"), 1, x + 184, y, x + 268, y + 32);
-    add(o, IK_BTN, ID_COPY_BOX, translate("Copy text"), 1, x + 276, y, x + 360, y + 32); y += 36;
-    add(o, IK_NOTE, 0, o->aboutmsg, 1, x, y, x + w, y + 20); y += 24;
-    bh = o->r_card.b - 16 - y;
-    if (bh < 60) bh = 60;
-    add(o, IK_SCROLL, 0, "", 1, x, y, x + w, y + bh);
+    int sh, bh32 = th_scale(32);
+    add(o, IK_HEAD, 0, translate("DETECT IT EASY - CDIE"), 1, x, y, x + w, y + s20); y += th_scale(26);
+    add(o, IK_TEXT, 0, o->verline, 1, x, y, x + w, y + s22); y += s22;
+    add(o, IK_NOTE, 0, o->buildline, 1, x, y, x + w, y + s22); y += s22;
+    add(o, IK_NOTE, 0, o->copyline, 1, x, y, x + w, y + s22); y += s30;
+    add(o, IK_BTN, ID_OPEN_SITE, translate("Website"), 1, x, y, x + th_scale(84), y + bh32);
+    add(o, IK_BTN, ID_OPEN_GITHUB, translate("GitHub"), 1, x + th_scale(92), y, x + th_scale(176), y + bh32);
+    add(o, IK_BTN, ID_OPEN_RELEASES, translate("Releases"), 1, x + th_scale(184), y, x + th_scale(268), y + bh32);
+    add(o, IK_BTN, ID_COPY_BOX, translate("Copy text"), 1, x + th_scale(276), y, x + th_scale(360), y + bh32); y += th_scale(36);
+    add(o, IK_NOTE, 0, o->aboutmsg, 1, x, y, x + w, y + s20); y += th_scale(24);
+    sh = o->r_card.b - th_scale(16) - y;
+    if (sh < th_scale(60)) sh = th_scale(60);
+    add(o, IK_SCROLL, 0, "", 1, x, y, x + w, y + sh);
     break;
   }
 
   default: break;
   }
 
-  add(o, IK_ACCENT, ID_OK, translate("OK"), 1, o->W - 12 - 80, by, o->W - 12, by + 34);
-  add(o, IK_BTN, ID_APPLY, translate("Apply"), 1, o->W - 12 - 80 - 8 - 80, by, o->W - 12 - 80 - 8, by + 34);
-  add(o, IK_BTN, ID_CANCEL, translate("Cancel"), 1, o->W - 12 - 3 * 80 - 16, by, o->W - 12 - 2 * 80 - 16, by + 34);
+  add(o, IK_ACCENT, ID_OK, translate("OK"), 1, o->W - bm - bw, by, o->W - bm, by + bh);
+  add(o, IK_BTN, ID_APPLY, translate("Apply"), 1, o->W - bm - bw - th_scale(8) - bw, by, o->W - bm - bw - th_scale(8), by + bh);
+  add(o, IK_BTN, ID_CANCEL, translate("Cancel"), 1, o->W - bm - 3 * bw - th_scale(16), by, o->W - bm - 2 * bw - th_scale(16), by + bh);
 }
 
 static void set_page(Opt* o, int page)
@@ -718,19 +721,19 @@ static void add(Opt* o, int kind, int id, const char* text, int enabled,
 
 static void add_stepper(Opt* o, const char* label, int dec, int inc, int val, int x, int w, int y)
 {
-  add(o, IK_TEXT, 0, label, 1, x, y, x + 170, y + 30);
-  add(o, IK_BTN, dec, "<", 1, x + 180, y, x + 212, y + 30);
-  add(o, IK_VALUE, val, "", 1, x + 220, y, x + 220 + 190, y + 30);
-  add(o, IK_BTN, inc, ">", 1, x + 220 + 198, y, x + 220 + 230, y + 30);
+  add(o, IK_TEXT, 0, label, 1, x, y, x + th_scale(170), y + th_scale(30));
+  add(o, IK_BTN, dec, "<", 1, x + th_scale(180), y, x + th_scale(212), y + th_scale(30));
+  add(o, IK_VALUE, val, "", 1, x + th_scale(220), y, x + th_scale(220) + th_scale(190), y + th_scale(30));
+  add(o, IK_BTN, inc, ">", 1, x + th_scale(220) + th_scale(198), y, x + th_scale(220) + th_scale(230), y + th_scale(30));
   (void)w;
 }
 
 static void layout(Opt* o)
 {
-  const int m = 12, navw = 190, barH = 56;
+  const int m = th_scale(12), navw = th_scale(190), barH = th_scale(56);
   int bot = o->H - barH - m;
   o->r_nav = mkr(m, m, m + navw, bot);
-  o->r_card = mkr(m + navw + 12, m, o->W - m, bot);
+  o->r_card = mkr(m + navw + th_scale(12), m, o->W - m, bot);
   o->r_bar = mkr(0, o->H - barH, o->W, o->H);
   build_items(o);
 }
@@ -793,88 +796,94 @@ static void paint_item(Opt* o, PlCanvas* c, int i)
   case IK_CHECK: {
     int* v = chk_ptr(o, it->id);
     int on = v && *v && it->enabled;
-    int bx = r.l, by = r.t + (h - 16) / 2;
+    int sq = th_scale(16);
+    int bx = r.l, by = r.t + (h - sq) / 2;
     if (hov && it->enabled)
-      pl_round_rect(c, mkr(r.l - 6, r.t + 2, r.r, r.b - 2), CLR_SIDEBAR_SEL, CLR_SIDEBAR_SEL, 6);
-    pl_round_rect(c, mkr(bx + 0, by, bx + 16, by + 16),
-      on ? CLR_ACCENT : CLR_PANEL, on ? CLR_ACCENT : CLR_TEXT_SECONDARY, 4);
+      pl_round_rect(c, mkr(r.l - th_scale(6), r.t + th_scale(2), r.r, r.b - th_scale(2)),
+        CLR_SIDEBAR_SEL, CLR_SIDEBAR_SEL, th_scale(6));
+    pl_round_rect(c, mkr(bx, by, bx + sq, by + sq),
+      on ? CLR_ACCENT : CLR_PANEL, on ? CLR_ACCENT : CLR_TEXT_SECONDARY, th_scale(4));
     if (on) {
-      /* on_accent is white in both themes, so the tick always contrasts */
-      pl_line(c, bx + 3, by + 8, bx + 6, by + 11, CLR_ON_ACCENT);
-      pl_line(c, bx + 6, by + 11, bx + 12, by + 5, CLR_ON_ACCENT);
-      pl_line(c, bx + 3, by + 9, bx + 6, by + 12, CLR_ON_ACCENT);
-      pl_line(c, bx + 6, by + 12, bx + 12, by + 6, CLR_ON_ACCENT);
+      pl_line(c, bx + th_scale(3), by + th_scale(8), bx + th_scale(6), by + th_scale(11), CLR_ON_ACCENT);
+      pl_line(c, bx + th_scale(6), by + th_scale(11), bx + th_scale(12), by + th_scale(5), CLR_ON_ACCENT);
+      pl_line(c, bx + th_scale(3), by + th_scale(9), bx + th_scale(6), by + th_scale(12), CLR_ON_ACCENT);
+      pl_line(c, bx + th_scale(6), by + th_scale(12), bx + th_scale(12), by + th_scale(6), CLR_ON_ACCENT);
     }
-    trc = mkr(r.l + 26, r.t, r.r - 6, r.b);
+    trc = mkr(r.l + th_scale(26), r.t, r.r - th_scale(6), r.b);
     txt(c, o->font, it->enabled ? CLR_TEXT_PRIMARY : CLR_TEXT_SECONDARY, trc, 0, it->text);
 
     if (it->id == ID_DBCOMMITS) {
       const char* tag = translate("BETA");
       int tw = pl_text_width(o->font, it->text);
-      int gw = pl_text_width(o->font, tag) + 12;
-      int gh = 16;
-      int gx = trc.l + tw + 8;
+      int gw = pl_text_width(o->font, tag) + th_scale(12);
+      int gh = th_scale(16);
+      int gx = trc.l + tw + th_scale(8);
       int gy = r.t + (h - gh) / 2;
       if (gx + gw < r.r) {
-        pl_round_rect(c, mkr(gx, gy, gx + gw, gy + gh), CLR_BADGE_BG, CLR_BADGE, 8);
+        pl_round_rect(c, mkr(gx, gy, gx + gw, gy + gh), CLR_BADGE_BG, CLR_BADGE, th_scale(8));
         pl_text(c, o->font, mkr(gx, gy, gx + gw, gy + gh), tag, CLR_BADGE, PL_TEXT_CENTER);
       }
     }
     break;
   }
+
   case IK_RADIO: {
     int on = (o->theme_mode == it->id - ID_THEME_SYS);
-    int bx = r.l, by = r.t + (h - 16) / 2;
+    int sq = th_scale(16);
+    int bx = r.l, by = r.t + (h - sq) / 2;
     if (hov)
-      pl_round_rect(c, mkr(r.l - 6, r.t + 2, r.r, r.b - 2), CLR_SIDEBAR_SEL, CLR_SIDEBAR_SEL, 6);
-    pl_round_rect(c, mkr(bx, by, bx + 16, by + 16),
-      CLR_PANEL, on ? CLR_ACCENT : CLR_TEXT_SECONDARY, 8);
+      pl_round_rect(c, mkr(r.l - th_scale(6), r.t + th_scale(2), r.r, r.b - th_scale(2)),
+        CLR_SIDEBAR_SEL, CLR_SIDEBAR_SEL, th_scale(6));
+    pl_round_rect(c, mkr(bx, by, bx + sq, by + sq),
+      CLR_PANEL, on ? CLR_ACCENT : CLR_TEXT_SECONDARY, th_scale(8));
     if (on)
-      pl_round_rect(c, mkr(bx + 4, by + 4, bx + 12, by + 12), CLR_ACCENT, CLR_ACCENT, 4);
-    txt(c, o->font, CLR_TEXT_PRIMARY, mkr(r.l + 26, r.t, r.r - 6, r.b), 0, it->text);
+      pl_round_rect(c, mkr(bx + th_scale(4), by + th_scale(4), bx + th_scale(12), by + th_scale(12)),
+        CLR_ACCENT, CLR_ACCENT, th_scale(4));
+    txt(c, o->font, CLR_TEXT_PRIMARY, mkr(r.l + th_scale(26), r.t, r.r - th_scale(6), r.b), 0, it->text);
     break;
   }
 
   case IK_VALUE:
-    pl_round_rect(c, r, CLR_PANEL_HEADER, CLR_PANEL_BORDER, 8);
+    pl_round_rect(c, r, CLR_PANEL_HEADER, CLR_PANEL_BORDER, th_scale(8));
     size_label(it->id == ID_BUF_VAL ? o->opt.buffer_size : o->opt.file_buffer_size, buf, sizeof(buf));
-    txt(c, o->font, CLR_TEXT_PRIMARY, mkr(r.l + 12, r.t, r.r - 12, r.b), 1, buf);
+    txt(c, o->font, CLR_TEXT_PRIMARY, mkr(r.l + th_scale(12), r.t, r.r - th_scale(12), r.b), 1, buf);
     break;
 
   case IK_PATH: {
     int n = it->id - ID_PATH_MAIN;
     int foc = (o->dbfocus == n);
+    int pd = th_scale(12);
     const char* p = o->dbpath[n][0] ? o->dbpath[n] : (foc ? "" : translate("(not set)"));
-    pl_round_rect(c, r, CLR_PANEL_HEADER, foc ? CLR_ACCENT : CLR_PANEL_BORDER, 8);
+    pl_round_rect(c, r, CLR_PANEL_HEADER, foc ? CLR_ACCENT : CLR_PANEL_BORDER, th_scale(8));
     txt(c, o->font, o->dbpath[n][0] ? CLR_TEXT_PRIMARY : CLR_TEXT_SECONDARY,
-      mkr(r.l + 12, r.t, r.r - 12, r.b), 0, p);
+      mkr(r.l + pd, r.t, r.r - pd, r.b), 0, p);
     if (foc) {
       char tmp[1024];
       size_t cur = o->dbcur, len = strlen(o->dbpath[n]);
       int cx;
       if (cur > len) cur = len;
       memcpy(tmp, o->dbpath[n], cur); tmp[cur] = 0;
-      cx = r.l + 12 + pl_text_width(o->font, tmp);
-      if (cx > r.r - 12) cx = r.r - 12;
+      cx = r.l + pd + pl_text_width(o->font, tmp);
+      if (cx > r.r - pd) cx = r.r - pd;
       if (o->dbsel && len > 0) {
-        int ex = r.l + 12 + pl_text_width(o->font, o->dbpath[n]);
-        if (ex > r.r - 12) ex = r.r - 12;
-        pl_round_rect(c, mkr(r.l + 12, r.t + 5, ex, r.b - 5),
-          CLR_SIDEBAR_SEL, CLR_SIDEBAR_SEL, 3);
-        txt(c, o->font, CLR_TEXT_PRIMARY, mkr(r.l + 12, r.t, r.r - 12, r.b), 0, o->dbpath[n]);
+        int ex = r.l + pd + pl_text_width(o->font, o->dbpath[n]);
+        if (ex > r.r - pd) ex = r.r - pd;
+        pl_round_rect(c, mkr(r.l + pd, r.t + th_scale(5), ex, r.b - th_scale(5)),
+          CLR_SIDEBAR_SEL, CLR_SIDEBAR_SEL, th_scale(3));
+        txt(c, o->font, CLR_TEXT_PRIMARY, mkr(r.l + pd, r.t, r.r - pd, r.b), 0, o->dbpath[n]);
       }
       else if (o->caret_on)
-        pl_line(c, cx, r.t + 7, cx, r.b - 7, CLR_TEXT_PRIMARY);
+        pl_line(c, cx, r.t + th_scale(7), cx, r.b - th_scale(7), CLR_TEXT_PRIMARY);
     }
     break;
   }
 
   case IK_FVAL: {
     const OptionsFont* f = &o->fonts[it->id - ID_FVAL0];
-    int cx = r.r - 18, cy = (r.t + r.b) / 2;
-    pl_round_rect(c, r, CLR_PANEL_HEADER, hov ? CLR_ACCENT : CLR_PANEL_BORDER, 8);
-    pl_line(c, cx - 4, cy - 2, cx, cy + 2, CLR_TEXT_SECONDARY);
-    pl_line(c, cx, cy + 2, cx + 4, cy - 2, CLR_TEXT_SECONDARY);
+    int cx = r.r - th_scale(18), cy = (r.t + r.b) / 2;
+    pl_round_rect(c, r, CLR_PANEL_HEADER, hov ? CLR_ACCENT : CLR_PANEL_BORDER, th_scale(8));
+    pl_line(c, cx - th_scale(4), cy - th_scale(2), cx, cy + th_scale(2), CLR_TEXT_SECONDARY);
+    pl_line(c, cx, cy + th_scale(2), cx + th_scale(4), cy - th_scale(2), CLR_TEXT_SECONDARY);
     if (f->point_size)
       snprintf(buf, sizeof(buf), "%.40s, %u pt%s%s",
         f->family[0] ? f->family : "Default", f->point_size,
@@ -883,57 +892,57 @@ static void paint_item(Opt* o, PlCanvas* c, int i)
       snprintf(buf, sizeof(buf), "%.40s%s%s",
         f->family[0] ? f->family : "Default",
         f->bold ? ", Bold" : "", f->italic ? ", Italic" : "");
-    txt(c, o->font, CLR_TEXT_PRIMARY, mkr(r.l + 12, r.t, r.r - 30, r.b), 0, buf);
+    txt(c, o->font, CLR_TEXT_PRIMARY, mkr(r.l + th_scale(12), r.t, r.r - th_scale(30), r.b), 0, buf);
     break;
   }
 
   case IK_LVAL: {
-    int cx = r.r - 18, cy = (r.t + r.b) / 2;
-    pl_round_rect(c, r, CLR_PANEL_HEADER, hov ? CLR_ACCENT : CLR_PANEL_BORDER, 8);
-    pl_line(c, cx - 4, cy - 2, cx, cy + 2, CLR_TEXT_SECONDARY);
-    pl_line(c, cx, cy + 2, cx + 4, cy - 2, CLR_TEXT_SECONDARY);
+    int cx = r.r - th_scale(18), cy = (r.t + r.b) / 2;
+    pl_round_rect(c, r, CLR_PANEL_HEADER, hov ? CLR_ACCENT : CLR_PANEL_BORDER, th_scale(8));
+    pl_line(c, cx - th_scale(4), cy - th_scale(2), cx, cy + th_scale(2), CLR_TEXT_SECONDARY);
+    pl_line(c, cx, cy + th_scale(2), cx + th_scale(4), cy - th_scale(2), CLR_TEXT_SECONDARY);
     load_languages(o);
-    txt(c, o->font, CLR_TEXT_PRIMARY, mkr(r.l + 12, r.t, r.r - 30, r.b), 0, lang_name(o));
+    txt(c, o->font, CLR_TEXT_PRIMARY, mkr(r.l + th_scale(12), r.t, r.r - th_scale(30), r.b), 0, lang_name(o));
     break;
   }
 
   case IK_PARA:
-    wrap_text(c, o->font, CLR_TEXT_PRIMARY, r, it->text, 18, 0, 1);
+    wrap_text(c, o->font, CLR_TEXT_PRIMARY, r, it->text, th_scale(18), 0, 1);
     break;
 
   case IK_SCROLL: {
-    PlRect in = mkr(r.l + 12, r.t + 8, r.r - 20, r.b - 8);
-    int lh = 18, vis = (in.b - in.t) / lh, total;
-    pl_round_rect(c, r, CLR_PANEL_HEADER, CLR_PANEL_BORDER, 8);
+    PlRect in = mkr(r.l + th_scale(12), r.t + th_scale(8), r.r - th_scale(20), r.b - th_scale(8));
+    int lh = th_scale(18), vis = (in.b - in.t) / lh, total;
+    pl_round_rect(c, r, CLR_PANEL_HEADER, CLR_PANEL_BORDER, th_scale(8));
     o->about_in = in;
     if (o->about_sel >= o->about_scroll && o->about_sel < o->about_scroll + vis) {
       int sy = in.t + (o->about_sel - o->about_scroll) * lh;
-      pl_round_rect(c, mkr(in.l - 4, sy, in.r + 4, sy + lh),
-        CLR_SIDEBAR_SEL, CLR_SIDEBAR_SEL, 4);
+      pl_round_rect(c, mkr(in.l - th_scale(4), sy, in.r + th_scale(4), sy + lh),
+        CLR_SIDEBAR_SEL, CLR_SIDEBAR_SEL, th_scale(4));
     }
     total = wrap_text(c, o->font, CLR_TEXT_SECONDARY, in, ABOUT_BOX, lh, o->about_scroll, 1);
     o->about_lines = total;
     o->about_vis = vis;
     if (total > vis) {
-      int track = r.b - r.t - 16;
-      int th = imax(18, track * vis / total);
-      int ty = r.t + 8 + (track - th) * o->about_scroll / (total - vis);
-      pl_round_rect(c, mkr(r.r - 11, ty, r.r - 7, ty + th),
-        CLR_BTN_GHOST_BD, CLR_BTN_GHOST_BD, 2);
+      int track = r.b - r.t - th_scale(16);
+      int th = imax(th_scale(18), track * vis / total);
+      int ty = r.t + th_scale(8) + (track - th) * o->about_scroll / (total - vis);
+      pl_round_rect(c, mkr(r.r - th_scale(11), ty, r.r - th_scale(7), ty + th),
+        CLR_BTN_GHOST_BD, CLR_BTN_GHOST_BD, th_scale(2));
     }
     break;
   }
 
   case IK_ACCENT:
     fill = hov ? CLR_ACCENT_HOVER : CLR_ACCENT;
-    pl_round_rect(c, r, fill, fill, 8);
+    pl_round_rect(c, r, fill, fill, th_scale(8));
     txt(c, o->font, CLR_ON_ACCENT, r, 1, it->text);
     break;
 
   case IK_BTN:
     fill = hov ? CLR_BTN_GHOST_HOVER : CLR_BTN_GHOST;
     fg = CLR_TEXT_PRIMARY;
-    pl_round_rect(c, r, fill, CLR_BTN_GHOST_BD, 8);
+    pl_round_rect(c, r, fill, CLR_BTN_GHOST_BD, th_scale(8));
     txt(c, o->font, fg, r, 1, it->text);
     break;
 
@@ -998,8 +1007,8 @@ static int dd_hit(Opt* o, int x, int y)
 {
   int idx;
   if (!inr(&o->dd_r, x, y)) return -1;
-  idx = o->dd_scroll + (y - o->dd_r.t - 4) / DD_ROW;
-  if (y < o->dd_r.t + 4 || idx >= dd_count(o) ||
+  idx = o->dd_scroll + (y - o->dd_r.t - th_scale(4)) / DD_ROW;
+  if (y < o->dd_r.t + th_scale(4) || idx >= dd_count(o) ||
     idx >= o->dd_scroll + dd_visible(o)) return -1;
   return idx;
 }
@@ -1015,10 +1024,10 @@ static void open_dropdown(Opt* o, int kind, int anchor_id, int role)
   if (kind == DD_LANG) load_languages(o); else load_fonts(o);
   if (dd_count(o) <= 0) return;
   vis = dd_visible(o);
-  h = vis * DD_ROW + 8;
-  o->dd_r = mkr(b.l, b.b + 2, b.r, b.b + 2 + h);
-  if (o->dd_r.b > o->H - 4)
-    o->dd_r = mkr(b.l, b.t - 2 - h, b.r, b.t - 2);
+  h = vis * DD_ROW + th_scale(8);
+  o->dd_r = mkr(b.l, b.b + th_scale(2), b.r, b.b + th_scale(2) + h);
+  if (o->dd_r.b > o->H - th_scale(4))
+    o->dd_r = mkr(b.l, b.t - th_scale(2) - h, b.r, b.t - th_scale(2));
   for (i = 0; i < dd_count(o); ++i)
     if (dd_is_current(o, i)) { cur = i; break; }
   o->dd_scroll = cur > 2 ? cur - 2 : 0;
@@ -1051,22 +1060,23 @@ static void paint_dropdown(Opt* o, PlCanvas* c)
   int vis = dd_visible(o), i;
   int sb = dd_count(o) > vis;
 
-  pl_round_rect(c, r, CLR_PANEL_BODY, CLR_PANEL_BORDER, 8);
+  pl_round_rect(c, r, CLR_PANEL_BODY, CLR_PANEL_BORDER, th_scale(8));
   for (i = 0; i < vis; ++i) {
     int idx = o->dd_scroll + i;
-    PlRect ir = mkr(r.l + 4, r.t + 4 + i * DD_ROW,
-      r.r - (sb ? 12 : 4), r.t + 4 + (i + 1) * DD_ROW);
-    int sel = dd_is_current(o, idx);    if (idx == o->dd_hov)
-      pl_round_rect(c, ir, CLR_SIDEBAR_SEL, CLR_SIDEBAR_SEL, 6);
+    PlRect ir = mkr(r.l + th_scale(4), r.t + th_scale(4) + i * DD_ROW,
+      r.r - th_scale(sb ? 12 : 4), r.t + th_scale(4) + (i + 1) * DD_ROW);
+    int sel = dd_is_current(o, idx);
+    if (idx == o->dd_hov)
+      pl_round_rect(c, ir, CLR_SIDEBAR_SEL, CLR_SIDEBAR_SEL, th_scale(6));
     txt(c, o->font, sel ? CLR_ACCENT : CLR_TEXT_PRIMARY,
-      mkr(ir.l + 10, ir.t, ir.r - 6, ir.b), 0, dd_label(o, idx));
+      mkr(ir.l + th_scale(10), ir.t, ir.r - th_scale(6), ir.b), 0, dd_label(o, idx));
   }
   if (sb) {
     int track = vis * DD_ROW;
-    int th = imax(18, track * vis / dd_count(o));
-    int ty = r.t + 4 + (track - th) * o->dd_scroll / (dd_count(o) - vis);
-    pl_round_rect(c, mkr(r.r - 9, ty, r.r - 5, ty + th),
-      CLR_BTN_GHOST_BD, CLR_BTN_GHOST_BD, 2);
+    int th = imax(th_scale(18), track * vis / dd_count(o));
+    int ty = r.t + th_scale(4) + (track - th) * o->dd_scroll / (dd_count(o) - vis);
+    pl_round_rect(c, mkr(r.r - th_scale(9), ty, r.r - th_scale(5), ty + th),
+      CLR_BTN_GHOST_BD, CLR_BTN_GHOST_BD, th_scale(2));
   }
 }
 
@@ -1079,31 +1089,31 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
   o->W = w; o->H = h;
   pl_fill(c, 0, 0, w, h, CLR_BG);
 
-  pl_round_rect(c, o->r_nav, CLR_PANEL_HEADER, CLR_PANEL_BORDER, 12);
+  pl_round_rect(c, o->r_nav, CLR_PANEL_HEADER, CLR_PANEL_BORDER, th_scale(12));
   for (i = 0; i < o->nnav; ++i) {
     int yoff = nav_yoff(o, i);
 
-    PlRect nr = mkr(o->r_nav.l + 8, o->r_nav.t + yoff,
-      o->r_nav.r - 8, o->r_nav.t + yoff + NAV_H - 2);
+    PlRect nr = mkr(o->r_nav.l + th_scale(8), o->r_nav.t + yoff,
+      o->r_nav.r - th_scale(8), o->r_nav.t + yoff + NAV_H - th_scale(2));
     int pg = o->navpg[i];
     if (pg == o->page)
-      pl_round_rect(c, nr, CLR_SIDEBAR_SEL, CLR_SIDEBAR_SEL, 6);
+      pl_round_rect(c, nr, CLR_SIDEBAR_SEL, CLR_SIDEBAR_SEL, th_scale(6));
     else if (i == o->navhov)
-      pl_round_rect(c, nr, CLR_BTN_GHOST_HOVER, CLR_BTN_GHOST_HOVER, 6);
+      pl_round_rect(c, nr, CLR_BTN_GHOST_HOVER, CLR_BTN_GHOST_HOVER, th_scale(6));
     txt(c, o->font, pg == o->page ? CLR_TEXT_PRIMARY : CLR_TEXT_SECONDARY,
-      mkr(nr.l + 14, nr.t, nr.r - 8, nr.b), 0, translate(s_title[pg]));
+      mkr(nr.l + th_scale(14), nr.t, nr.r - th_scale(8), nr.b), 0, translate(s_title[pg]));
   }
 
   card(c, o->r_card, HEAD);
-  hd = mkr(o->r_card.l + 20, o->r_card.t, o->r_card.r - 20, o->r_card.t + HEAD);
-  txt(c, o->fontb, CLR_TEXT_PRIMARY, mkr(hd.l, hd.t, hd.l + 170, hd.b), 0, translate(s_title[o->page]));
-  txt(c, o->font, CLR_TEXT_SECONDARY, mkr(hd.l + 180, hd.t, hd.r, hd.b), 2, translate(s_sub[o->page]));
+  hd = mkr(o->r_card.l + th_scale(20), o->r_card.t, o->r_card.r - th_scale(20), o->r_card.t + HEAD);
+  txt(c, o->fontb, CLR_TEXT_PRIMARY, mkr(hd.l, hd.t, hd.l + th_scale(170), hd.b), 0, translate(s_title[o->page]));
+  txt(c, o->font, CLR_TEXT_SECONDARY, mkr(hd.l + th_scale(180), hd.t, hd.r, hd.b), 2, translate(s_sub[o->page]));
 
   pl_fill(c, o->r_bar.l, o->r_bar.t, o->r_bar.r, o->r_bar.b, CLR_BG);
   pl_line(c, o->r_bar.l, o->r_bar.t, o->r_bar.r, o->r_bar.t, CLR_SEPARATOR);
   if (o->msg[0])
     txt(c, o->font, CLR_TEXT_SECONDARY,
-      mkr(16, o->r_bar.t, o->W - 3 * 80 - 40, o->r_bar.b), 0, o->msg);
+      mkr(th_scale(16), o->r_bar.t, o->W - 3 * th_scale(80) - th_scale(40), o->r_bar.b), 0, o->msg);
 
   for (i = 0; i < o->nit; ++i) paint_item(o, c, i);
 
@@ -1128,8 +1138,8 @@ static int hit_nav(Opt* o, int x, int y)
   for (i = 0; i < o->nnav; ++i) {
     int yoff = nav_yoff(o, i);
 
-    PlRect nr = mkr(o->r_nav.l + 8, o->r_nav.t + yoff,
-      o->r_nav.r - 8, o->r_nav.t + yoff + NAV_H - 2);
+    PlRect nr = mkr(o->r_nav.l + th_scale(8), o->r_nav.t + yoff,
+      o->r_nav.r - th_scale(8), o->r_nav.t + yoff + NAV_H - th_scale(2));
     if (inr(&nr, x, y)) return i;
   }
   return -1;
@@ -1274,7 +1284,7 @@ static void on_mouse_down(void* u, int x, int y)
     int left = o->it[h].r.l;
     activate(o, o->it[h].id);
     if (kind == IK_PATH && o->dbfocus >= 0) {
-      o->dbcur = caret_from_x(o, o->dbpath[o->dbfocus], x - (left + 12));
+      o->dbcur = caret_from_x(o, o->dbpath[o->dbfocus], x - (left + th_scale(12)));
       o->dbsel = 0;
       o->caret_on = 1;
     }
@@ -1515,7 +1525,7 @@ int options_show(xxwidgets_app* app, void* owner_native,
   if (!o) return OPTIONS_RESULT_NONE;
 
   o->host = *host;
-  o->W = 760; o->H = 540; o->hov = -1; o->navhov = -1;
+  o->W = th_scale(760); o->H = th_scale(540); o->hov = -1; o->navhov = -1;
   o->dbfocus = -1;
   o->caret_on = 1;
   {
@@ -1587,11 +1597,11 @@ int options_show(xxwidgets_app* app, void* owner_native,
   o->fontb = pl_font_create(10, 1);
   if (!o->font || !o->fontb) { on_destroy(o); return OPTIONS_RESULT_NONE; }
 
-  win = pl_window_create(ow, translate("Options"), 760, 540, 640, 500, on_win_size, on_win_close, o);
+  win = pl_window_create(ow, translate("Options"), th_scale(760), th_scale(540), th_scale(640), th_scale(500), on_win_size, on_win_close, o);
   if (!win) { on_destroy(o); return OPTIONS_RESULT_NONE; }
   o->win = win;
   apply_titlebar(o);
-  o->w = pl_widget_create(pl_window_client(win), &s_ops, o, 0, 0, 760, 520);
+  o->w = pl_widget_create(pl_window_client(win), &s_ops, o, 0, 0, th_scale(760), th_scale(520));
   if (!o->w) { pl_window_destroy(win); on_destroy(o); return OPTIONS_RESULT_NONE; }
   s_opt = o;
 

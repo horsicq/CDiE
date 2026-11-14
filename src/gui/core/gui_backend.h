@@ -118,8 +118,12 @@ int gui_backend_scan_results_type(const char *pUtf8Path, int nTypeId,
     gui_backend_result_fn pResultFn, void *pUserData,
     char **ppResultText, char **ppTypeName);
 
+/* Progress of the scan running on another thread: 0..100, or -1 when the
+ * engine has not reported a total yet. Safe to call from the UI thread. */
+int gui_backend_scan_progress(void);
+
 /* Frees a string handed back by gui_backend_scan (uses the engine allocator,
- * which on the CRT-free build is not the Win32 heap the frontend uses). */
+* which on the CRT-free build is not the Win32 heap the frontend uses). */
 void gui_backend_free(void *pPtr);
 
 /* Releases the databases and options. */

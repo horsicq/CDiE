@@ -76,12 +76,12 @@
 #define NS_UTIL   "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd"
 #define NS_WUAUTH "http://schemas.microsoft.com/msus/2014/10/WindowsUpdateAuthorization"
 
-#define MARGIN   12
-#define HEAD_H   84
-#define BAR_H    56
-#define TBL_HEAD 34
-#define ROW_H    36
-#define BTN_H    34
+#define MARGIN   th_scale(12)
+#define HEAD_H   th_scale(84)
+#define BAR_H    th_scale(56)
+#define TBL_HEAD th_scale(34)
+#define ROW_H    th_scale(36)
+#define BTN_H    th_scale(34)
 
 #define DEVICE_ATTRIBUTES \
   "BranchReadinessLevel=CB;CurrentBranch=rs_prerelease;OEMModel=Virtual Machine;" \
@@ -1344,16 +1344,16 @@ static void layout(Vers* o)
   static const int ids[B_COUNT] = { B_REFRESH, B_DOWNLOAD, B_INSTALL, B_CLOSE };
 
   o->r_head = mkr(MARGIN, MARGIN, o->W - MARGIN, MARGIN + HEAD_H);
-  o->r_list = mkr(MARGIN, o->r_head.b + 10, o->W - MARGIN, o->H - BAR_H - MARGIN);
+  o->r_list = mkr(MARGIN, o->r_head.b + th_scale(10), o->W - MARGIN, o->H - BAR_H - MARGIN);
   o->r_bar = mkr(0, o->H - BAR_H, o->W, o->H);
 
   for (i = B_COUNT - 1; i >= 0; --i) {
     o->btn[i].id = ids[i];
     o->btn[i].accent = (i == B_INSTALL);
-    o->btn[i].r = mkr(x - wd[i], by, x, by + BTN_H);
-    x -= wd[i] + 8;
+    o->btn[i].r = mkr(x - th_scale(wd[i]), by, x, by + BTN_H);
+    x -= th_scale(wd[i]) + th_scale(8);
   }
-  o->vis = imax(1, (o->r_list.b - o->r_list.t - TBL_HEAD - 8) / ROW_H);
+  o->vis = imax(1, (o->r_list.b - o->r_list.t - TBL_HEAD - th_scale(8)) / ROW_H);
 }
 
 static int btn_enabled(Vers* o, int id)
@@ -1377,8 +1377,8 @@ static const char* btn_text(Vers* o, int id)
 static int row_at(Vers* o, int x, int y)
 {
   int idx;
-  if (!inr(&o->r_list, x, y) || y < o->r_list.t + TBL_HEAD + 4) return -1;
-  idx = o->scroll + (y - o->r_list.t - TBL_HEAD - 4) / ROW_H;
+  if (!inr(&o->r_list, x, y) || y < o->r_list.t + TBL_HEAD + th_scale(4)) return -1;
+  idx = o->scroll + (y - o->r_list.t - TBL_HEAD - th_scale(4)) / ROW_H;
   if (idx < 0 || idx >= o->npkgs || idx >= o->scroll + o->vis) return -1;
   return idx;
 }
@@ -1402,31 +1402,31 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
   pl_fill(c, 0, 0, w, h, CLR_BG);
 
   r = o->r_head;
-  pl_round_rect(c, r, CLR_PANEL_HEADER, CLR_PANEL_BORDER, 12);
-  txt_l(c, o->fontb, CLR_TEXT_PRIMARY, mkr(r.l + 20, r.t + 10, r.r - 20, r.t + 32), translate("Version history"));
+  pl_round_rect(c, r, CLR_PANEL_HEADER, CLR_PANEL_BORDER, th_scale(12));
+  txt_l(c, o->fontb, CLR_TEXT_PRIMARY, mkr(r.l + th_scale(20), r.t + th_scale(10), r.r - th_scale(20), r.t + th_scale(32)), translate("Version history"));
   if (o->title[0])
     snprintf(buf, sizeof(buf), "%s  -  %s", o->title, o->publisher);
   else
     snprintf(buf, sizeof(buf), "%s", translate("Microsoft Store"));
-  txt_l(c, o->font, CLR_TEXT_SECONDARY, mkr(r.l + 20, r.t + 32, r.r - 20, r.t + 52), buf);
+  txt_l(c, o->font, CLR_TEXT_SECONDARY, mkr(r.l + th_scale(20), r.t + th_scale(32), r.r - th_scale(20), r.t + th_scale(52)), buf);
   if (o->current[0])
     snprintf(buf, sizeof(buf), translate("You are running %s. Pick a version, then choose Install selected and click Reinstall in App Installer."), o->current);
   else
     snprintf(buf, sizeof(buf), "%s", translate("Pick a version, then choose Install selected and click Reinstall in App Installer."));
-  txt_l(c, o->font, CLR_TEXT_CODE, mkr(r.l + 20, r.t + 54, r.r - 20, r.t + 74), buf);
+  txt_l(c, o->font, CLR_TEXT_CODE, mkr(r.l + th_scale(20), r.t + th_scale(54), r.r - th_scale(20), r.t + th_scale(74)), buf);
 
   r = o->r_list;
-  pl_round_rect(c, r, CLR_PANEL_BODY, CLR_PANEL_BORDER, 12);
-  pl_round_rect(c, mkr(r.l + 1, r.t + 1, r.r - 1, r.t + TBL_HEAD + 12), CLR_PANEL_HEADER, CLR_PANEL_HEADER, 11);
-  pl_fill(c, r.l + 1, r.t + TBL_HEAD, r.r - 1, r.t + TBL_HEAD + 12, CLR_PANEL_BODY);
+  pl_round_rect(c, r, CLR_PANEL_BODY, CLR_PANEL_BORDER, th_scale(12));
+  pl_round_rect(c, mkr(r.l + 1, r.t + 1, r.r - 1, r.t + TBL_HEAD + th_scale(12)), CLR_PANEL_HEADER, CLR_PANEL_HEADER, th_scale(11));
+  pl_fill(c, r.l + 1, r.t + TBL_HEAD, r.r - 1, r.t + TBL_HEAD + th_scale(12), CLR_PANEL_BODY);
   pl_line(c, r.l + 1, r.t + TBL_HEAD, r.r - 1, r.t + TBL_HEAD, CLR_SEPARATOR);
 
   hd = mkr(r.l, r.t, r.r, r.t + TBL_HEAD);
-  cx0 = r.l + 24;
-  txt_l(c, o->fontb, CLR_TEXT_SECONDARY, mkr(cx0, hd.t, cx0 + 220, hd.b), translate("VERSION"));
-  txt_l(c, o->fontb, CLR_TEXT_SECONDARY, mkr(cx0 + 240, hd.t, cx0 + 340, hd.b), translate("ARCHITECTURE"));
-  txt_l(c, o->fontb, CLR_TEXT_SECONDARY, mkr(cx0 + 380, hd.t, cx0 + 500, hd.b), translate("TYPE"));
-  txt_r(c, o->fontb, CLR_TEXT_SECONDARY, mkr(r.r - 160, hd.t, r.r - 30, hd.b), translate("SIZE"));
+  cx0 = r.l + th_scale(24);
+  txt_l(c, o->fontb, CLR_TEXT_SECONDARY, mkr(cx0, hd.t, cx0 + th_scale(220), hd.b), translate("VERSION"));
+  txt_l(c, o->fontb, CLR_TEXT_SECONDARY, mkr(cx0 + th_scale(240), hd.t, cx0 + th_scale(340), hd.b), translate("ARCHITECTURE"));
+  txt_l(c, o->fontb, CLR_TEXT_SECONDARY, mkr(cx0 + th_scale(380), hd.t, cx0 + th_scale(500), hd.b), translate("TYPE"));
+  txt_r(c, o->fontb, CLR_TEXT_SECONDARY, mkr(r.r - th_scale(160), hd.t, r.r - th_scale(30), hd.b), translate("SIZE"));
 
   if (o->state != ST_READY || o->npkgs == 0) {
     const char* msg = o->state == ST_LOADING ? (s_step ? s_step : translate("Contacting Microsoft Store..."))
@@ -1434,68 +1434,68 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
       : o->state == ST_INIT ? translate("Loading...")
       : translate("No versions found.");
     txt_c(c, o->font, o->state == ST_ERROR ? CLR_TEXT_PRIMARY : CLR_TEXT_SECONDARY,
-      mkr(r.l + 20, r.t + TBL_HEAD, r.r - 20, r.b), msg);
+      mkr(r.l + th_scale(20), r.t + TBL_HEAD, r.r - th_scale(20), r.b), msg);
   }
   else {
     for (i = 0; i < o->vis && o->scroll + i < o->npkgs; ++i) {
       int idx = o->scroll + i;
       const Pkg* p = &o->pkgs[idx];
-      int y = r.t + TBL_HEAD + 4 + i * ROW_H;
-      PlRect rr = mkr(r.l + 8, y, r.r - 16, y + ROW_H - 2);
+      int y = r.t + TBL_HEAD + th_scale(4) + i * ROW_H;
+      PlRect rr = mkr(r.l + th_scale(8), y, r.r - th_scale(16), y + ROW_H - th_scale(2));
       char sz[40];
       if (idx == o->sel) {
         PlColor tint = mix_color(CLR_ACCENT, CLR_PANEL_BODY, CLR_ROW_SEL_MIX_PCT);
-        pl_round_rect(c, rr, tint, tint, 6);
-        pl_round_rect(c, mkr(rr.l, rr.t + 9, rr.l + 3, rr.b - 9),   
+        pl_round_rect(c, rr, tint, tint, th_scale(6));
+        pl_round_rect(c, mkr(rr.l, rr.t + th_scale(9), rr.l + th_scale(3), rr.b - th_scale(9)),
           CLR_ACCENT, CLR_ACCENT, 1);
       }
       else if (idx == o->hov_row) {
         PlColor hov = mix_color(CLR_ACCENT, CLR_PANEL_BODY, CLR_ROW_HOVER_MIX_PCT);
-        pl_round_rect(c, rr, hov, hov, 6);
+        pl_round_rect(c, rr, hov, hov, th_scale(6));
       }
 
-      txt_l(c, o->font, CLR_TEXT_PRIMARY, mkr(cx0, y, cx0 + 200, y + ROW_H - 2), p->version);
+      txt_l(c, o->font, CLR_TEXT_PRIMARY, mkr(cx0, y, cx0 + th_scale(200), y + ROW_H - th_scale(2)), p->version);
       if (idx == 0) {
         int tw = pl_text_width(o->font, p->version);
-        PlRect br = mkr(cx0 + tw + 12, y + 8, cx0 + tw + 12 + 56, y + ROW_H - 10);
-        pl_round_rect(c, br, CLR_PANEL_HEADER, CLR_ACCENT, 8);
+        PlRect br = mkr(cx0 + tw + th_scale(12), y + th_scale(8), cx0 + tw + th_scale(12) + th_scale(56), y + ROW_H - th_scale(10));
+        pl_round_rect(c, br, CLR_PANEL_HEADER, CLR_ACCENT, th_scale(8));
         txt_c(c, o->font, CLR_ACCENT, br, translate("Latest"));
       }
-      txt_l(c, o->font, CLR_TEXT_SECONDARY, mkr(cx0 + 240, y, cx0 + 370, y + ROW_H - 2), p->arch);
-      txt_l(c, o->font, CLR_TEXT_SECONDARY, mkr(cx0 + 380, y, cx0 + 520, y + ROW_H - 2), type_label(p->ext));
+      txt_l(c, o->font, CLR_TEXT_SECONDARY, mkr(cx0 + th_scale(240), y, cx0 + th_scale(370), y + ROW_H - th_scale(2)), p->arch);
+      txt_l(c, o->font, CLR_TEXT_SECONDARY, mkr(cx0 + th_scale(380), y, cx0 + th_scale(520), y + ROW_H - th_scale(2)), type_label(p->ext));
       fmt_size(p->size, sz, sizeof(sz));
       txt_r(c, o->font, CLR_TEXT_SECONDARY, mkr(r.r - 160, y, r.r - 30, y + ROW_H - 2), sz);
     }
     if (o->npkgs > o->vis) {
       int track = o->vis * ROW_H;
-      int th = imax(18, track * o->vis / o->npkgs);
-      int ty = r.t + TBL_HEAD + 4 + (track - th) * o->scroll / (o->npkgs - o->vis);
-      pl_round_rect(c, mkr(r.r - 11, ty, r.r - 7, ty + th), CLR_BTN_GHOST_BD, CLR_BTN_GHOST_BD, 2);
+      int th = imax(th_scale(18), track * o->vis / o->npkgs);
+      int ty = r.t + TBL_HEAD + th_scale(4) + (track - th) * o->scroll / (o->npkgs - o->vis);
+      pl_round_rect(c, mkr(r.r - th_scale(11), ty, r.r - th_scale(7), ty + th), CLR_BTN_GHOST_BD, CLR_BTN_GHOST_BD, th_scale(2));
     }
   }
 
   pl_fill(c, o->r_bar.l, o->r_bar.t, o->r_bar.r, o->r_bar.b, CLR_BG);
   pl_line(c, o->r_bar.l, o->r_bar.t, o->r_bar.r, o->r_bar.t, CLR_SEPARATOR);
-  left = o->btn[0].r.l - 16;
+  left = o->btn[0].r.l - th_scale(16);
   if (o->state != ST_ERROR || o->busy)
-    txt_l(c, o->font, CLR_TEXT_SECONDARY, mkr(16, o->r_bar.t + 8, left, o->r_bar.t + 30),
+    txt_l(c, o->font, CLR_TEXT_SECONDARY, mkr(th_scale(16), o->r_bar.t + th_scale(8), left, o->r_bar.t + th_scale(30)),
       (o->busy && o->job == JOB_LIST && s_step) ? s_step : o->status);
   else
-    txt_l(c, o->font, CLR_TEXT_SECONDARY, mkr(16, o->r_bar.t + 8, left, o->r_bar.t + 30), translate("Could not load the version list."));
+    txt_l(c, o->font, CLR_TEXT_SECONDARY, mkr(th_scale(16), o->r_bar.t + th_scale(8), left, o->r_bar.t + th_scale(30)), translate("Could not load the version list."));
 
   if (o->busy) {
-    PlRect tr = mkr(16, o->r_bar.t + 38, left, o->r_bar.t + 44);
+    PlRect tr = mkr(th_scale(16), o->r_bar.t + th_scale(38), left, o->r_bar.t + th_scale(44));
     long done = (long)s_done_kb, total = (long)s_total_kb;
-    pl_round_rect(c, tr, CLR_PANEL_BORDER, CLR_PANEL_BORDER, 3);
+    pl_round_rect(c, tr, CLR_PANEL_BORDER, CLR_PANEL_BORDER, th_scale(3));
     if (o->job == JOB_DOWNLOAD && total > 0) {
       int fw = (int)((double)(tr.r - tr.l) * (double)(done < total ? done : total) / (double)total);
-      if (fw > 4) pl_round_rect(c, mkr(tr.l, tr.t, tr.l + fw, tr.b), CLR_ACCENT, CLR_ACCENT, 3);
+      if (fw > th_scale(4)) pl_round_rect(c, mkr(tr.l, tr.t, tr.l + fw, tr.b), CLR_ACCENT, CLR_ACCENT, th_scale(3));
     }
     else {
       int span = tr.r - tr.l, seg = span / 4;
       int pos = (int)((GetTickCount() / 8) % (DWORD)(span + seg)) - seg;
       int a = tr.l + (pos < 0 ? 0 : pos), b = tr.l + (pos + seg > span ? span : pos + seg);
-      if (b - a > 4) pl_round_rect(c, mkr(a, tr.t, b, tr.b), CLR_ACCENT, CLR_ACCENT, 3);
+      if (b - a > th_scale(4)) pl_round_rect(c, mkr(a, tr.t, b, tr.b), CLR_ACCENT, CLR_ACCENT, th_scale(3));
     }
   }
 
@@ -1504,7 +1504,7 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
     int en = btn_enabled(o, b->id);
     int hov = (o->hov_btn == i) && en;
     PlColor fill = b->accent ? (hov ? CLR_ACCENT_HOVER : CLR_ACCENT) : (hov ? CLR_BTN_GHOST_HOVER : CLR_BTN_GHOST);
-    pl_round_rect(c, b->r, fill, b->accent ? fill : CLR_BTN_GHOST_BD, 8);
+    pl_round_rect(c, b->r, fill, b->accent ? fill : CLR_BTN_GHOST_BD, th_scale(8));
     txt_c(c, o->font, en ? CLR_TEXT_PRIMARY : CLR_TEXT_SECONDARY, b->r, btn_text(o, b->id));
   }
 }

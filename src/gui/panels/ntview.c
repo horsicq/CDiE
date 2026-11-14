@@ -34,24 +34,24 @@
 
 #define NT_MAX_ROWS 320
 #define NT_GROUPS   4
-#define ROW_H       26
-#define HDR_H       32
-#define COLH_H      24
-#define CHIP_H      16
+#define ROW_H       th_scale(26)
+#define HDR_H       th_scale(32)
+#define COLH_H      th_scale(24)
+#define CHIP_H      th_scale(16)
 #define NONE        0xFFFF
-#define SB_W        3      
-#define SB_GAP      3      
-#define SB_HIT      14     
-#define SB_MIN      24    
-#define SB_PAD      8     
+#define SB_W        th_scale(3)
+#define SB_GAP      th_scale(3)
+#define SB_HIT      th_scale(14)
+#define SB_MIN      th_scale(24)
+#define SB_PAD      th_scale(8)
 #define WHEEL_STEP  (ROW_H * 3)
 
-#define COL_OFF     16
-#define COL_SIZE    108
-#define COL_NAME    148
-#define COL_VAL     328
-#define COL_RAW     480
-#define COL_MEAN    616
+#define COL_OFF     th_scale(16)
+#define COL_SIZE    th_scale(108)
+#define COL_NAME    th_scale(148)
+#define COL_VAL     th_scale(328)
+#define COL_RAW     th_scale(480)
+#define COL_MEAN    th_scale(616)
 
 enum { M_NONE = 0, M_ENUM, M_TIME, M_FLAGS };
 

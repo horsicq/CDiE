@@ -52,13 +52,25 @@
 #include "core/config.h"
 #include "core/tray.h"
 #include "core/i18n.h"
-
+#include "core/virustotal.h"
+#ifndef _WIN32
+#include <pthread.h>
+#endif
 
 #define PLAT_PATH_MAX 4096
 
 #define DL_MAX          8
-#define DL_MAX_AGE      14400   /* ticks of 250 ms = 1 hour */
+#define DL_MAX_AGE      14400 
 #define DL_DEDUP_MS     15000
+#define VT_MAX_JOBS 2         
+
+typedef struct {
+  char path[PLAT_PATH_MAX];
+  char hash[65];
+  char head[1024];
+  VtResult res;
+  int hashed, ok;
+} VtJob;
 
 typedef struct { char path[PLAT_PATH_MAX]; uint64_t size; int stable, age; } DlPending;
 typedef struct { char text[200]; int count; } quick_scan;
@@ -71,7 +83,9 @@ static DlPending   g_dl[DL_MAX];
 static int         g_dlCount;
 static char        g_dlDone[PLAT_PATH_MAX];
 static uint64_t    g_dlDoneTick;
+static int g_vtBusy;
 
+static void dlp_post_vt(VtJob* j);
 const DlWatchHost* dlwatch_host(void) { return &g_host; }
 int  dlwatch_running(void) { return dlp_running(); }
 void dlwatch_init(const DlWatchHost* host) { g_host = *host; }
@@ -171,6 +185,67 @@ static void quick_cb(const char* type, const char* name, const char* version,
     (info && info[0]) ? "]" : "");
 }
 
+static void vt_main_done(VtJob* j)  
+{
+  char text[1200];
+  g_vtBusy--;
+  if (g_on) {
+    snprintf(text, sizeof(text), "%s", j->head);
+    if (j->hashed && j->ok && j->res.found &&
+      (j->res.malicious > 0 || j->res.suspicious > 0)) {
+      int total = j->res.malicious + j->res.suspicious + j->res.harmless + j->res.undetected;
+      size_t used = strlen(text);
+      snprintf(text + used, sizeof(text) - used, "\nVirusTotal: %d / %d %s (%d %s)",
+        j->res.malicious, total, translate("flagged"),
+        j->res.suspicious, translate("suspicious"));
+    }
+    tray_notify(translate("New download scanned"), text);
+  }
+  free(j);
+}
+
+#ifdef _WIN32
+static DWORD WINAPI vt_thread(LPVOID p)
+#else
+static void* vt_thread(void* p)
+#endif
+{
+  VtJob* j = (VtJob*)p;
+  j->hashed = vt_sha256_file(j->path, j->hash);
+  if (j->hashed) j->ok = vt_lookup(j->hash, &j->res);
+  dlp_post_vt(j);
+#ifdef _WIN32
+  return 0;
+#else
+  return NULL;
+#endif
+}
+
+static int vt_start(const char* path, const char* head)
+{
+  VtJob* j;
+  if (g_vtBusy >= VT_MAX_JOBS || !vt_api_available()) return 0;
+  j = (VtJob*)calloc(1, sizeof(*j));
+  if (!j) return 0;
+  snprintf(j->path, sizeof(j->path), "%s", path);
+  snprintf(j->head, sizeof(j->head), "%s", head);
+#ifdef _WIN32
+  {
+    HANDLE h = CreateThread(NULL, 0, vt_thread, j, 0, NULL);
+    if (!h) { free(j); return 0; }
+    CloseHandle(h);
+  }
+#else
+  {
+    pthread_t t;
+    if (pthread_create(&t, NULL, vt_thread, j) != 0) { free(j); return 0; }
+    pthread_detach(t);
+  }
+#endif
+  g_vtBusy++;
+  return 1;
+}
+
 static void on_download_found(const char* path)
 {
   first_type ft = { 0, 0 };
@@ -195,7 +270,8 @@ static void on_download_found(const char* path)
   scan_ms = (unsigned)(dlp_tick_ms() - t0);
   snprintf(text, sizeof(text), translate("%s\n%s (%u ms)"), base_name(path),
     q.count ? q.text : translate("No packer or protector found"), scan_ms);
-  tray_notify(translate("New download scanned"), text);
+  if (!vt_start(path, text))                      
+    tray_notify(translate("New download scanned"), text);
 
   keep = (char*)malloc(strlen(path) + 1);
   if (keep) {
@@ -281,7 +357,7 @@ void dlwatch_on_event(int complete, const char* path)
 {
   uint64_t s;
   if (!g_on || !path) return;
-  if (!dlp_file_size(path, &s)) return;        /* gone, or a directory */
+  if (!dlp_file_size(path, &s)) return;        
   if (complete) dl_complete(path);
   else          dl_queue(path);
 }
@@ -352,6 +428,13 @@ static int u2w(const char* u, WCHAR* out, int cap)
 }
 
 uint64_t dlp_tick_ms(void) { return GetTickCount64(); }
+
+#define WM_DLWATCH_VT (WM_APP + 3)
+static void dlp_post_vt(VtJob* j)
+{
+  if (!PostMessageW(g_wnd, WM_DLWATCH_VT, 0, (LPARAM)j)) free(j);
+}
+
 int dlp_running(void) { return g_thread != NULL; }
 
 int dlp_file_size(const char* path, uint64_t* size)
@@ -497,6 +580,11 @@ int dlwatch_handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, LRESULT* r
     *result = 0;
     return 1;
   }
+  if (msg == WM_DLWATCH_VT) {
+    vt_main_done((VtJob*)lp);
+    *result = 0;
+    return 1;
+  }
   if (msg == WM_TIMER && wp == IDT_DLSTABLE) {
     dlwatch_on_timer();
     *result = 0;
@@ -520,6 +608,11 @@ uint64_t dlp_tick_ms(void)
 }
 
 int dlp_running(void) { return g_stream != NULL; }
+
+static void dlp_post_vt(VtJob* j)
+{
+  dispatch_async(dispatch_get_main_queue(), ^ { vt_main_done(j); });
+}
 
 int dlp_file_size(const char* path, uint64_t* size)
 {
@@ -631,6 +724,9 @@ uint64_t dlp_tick_ms(void)
 }
 
 int dlp_running(void) { return g_running; }
+
+static gboolean vt_idle(gpointer d) { vt_main_done((VtJob*)d); return G_SOURCE_REMOVE; }
+static void dlp_post_vt(VtJob* j) { g_idle_add(vt_idle, j); }
 
 int dlp_file_size(const char* path, uint64_t* size)
 {
