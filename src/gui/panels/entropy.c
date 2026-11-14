@@ -32,9 +32,9 @@
 #define EV_CURVE_MAX  320
 #define EV_REG_MAX    96
 #define EV_CHUNK      (64 * 1024)
-#define ROW_H         22
-#define HDR_H         24
-#define EV_PAD        18
+#define ROW_H         th_scale(22)
+#define HDR_H         th_scale(24)
+#define EV_PAD        th_scale(18)
 
 #define EV_L  PL_TEXT_ELLIPSIS
 #define EV_C  PL_TEXT_CENTER
@@ -44,7 +44,13 @@
 
 enum { B_ENT, B_BYTES, B_GRID, B_RANGE, B_CLEAR, B_RELOAD, B_COPY, B_COUNT };
 
-static const int CX[5] = { 10, 110, 210, 380, 540 };
+static int CX[5] = { 10, 110, 210, 380, 540 };
+static void cx_init(void)
+{
+	static const int base[5] = { 10, 110, 210, 380, 540 };
+	int i;
+	for (i = 0; i < 5; ++i) CX[i] = th_scale(base[i]);
+}
 
 typedef struct {
 	uint64_t off, size;
@@ -320,32 +326,33 @@ static void ev_layout(EntropyView* d, int w, int h)
 	int avail, tableH, maxH;
 	int L = EV_PAD, R = w - EV_PAD, T0 = EV_PAD;
 
-	d->rb[B_ENT] = mk(L, T0 + 62, L + 84, T0 + 90);
-	d->rb[B_BYTES] = mk(L + 90, T0 + 62, L + 174, T0 + 90);
-	d->rb[B_GRID] = mk(L + 188, T0 + 62, L + 252, T0 + 90);
-	d->rb[B_RANGE] = mk(L + 258, T0 + 62, L + 338, T0 + 90);
-	d->rb[B_RELOAD] = mk(R - 80, T0 + 62, R, T0 + 90);
-	d->rb[B_COPY] = mk(R - 186, T0 + 62, R - 86, T0 + 90);
-	d->rb[B_CLEAR] = mk(R - 262, T0 + 62, R - 192, T0 + 90);
+	cx_init();
+	d->rb[B_ENT] = mk(L, T0 + th_scale(62), L + th_scale(84), T0 + th_scale(90));
+	d->rb[B_BYTES] = mk(L + th_scale(90), T0 + th_scale(62), L + th_scale(174), T0 + th_scale(90));
+	d->rb[B_GRID] = mk(L + th_scale(188), T0 + th_scale(62), L + th_scale(252), T0 + th_scale(90));
+	d->rb[B_RANGE] = mk(L + th_scale(258), T0 + th_scale(62), L + th_scale(338), T0 + th_scale(90));
+	d->rb[B_RELOAD] = mk(R - th_scale(80), T0 + th_scale(62), R, T0 + th_scale(90));
+	d->rb[B_COPY] = mk(R - th_scale(186), T0 + th_scale(62), R - th_scale(86), T0 + th_scale(90));
+	d->rb[B_CLEAR] = mk(R - th_scale(262), T0 + th_scale(62), R - th_scale(192), T0 + th_scale(90));
 
-	avail = h - (T0 + 100) - 28 - EV_PAD;
+	avail = h - (T0 + th_scale(100)) - th_scale(28) - EV_PAD;
 	tableH = HDR_H + ROW_H * d->nreg + 2;
 	maxH = avail * 40 / 100;
 	if (tableH > maxH) tableH = maxH;
 	if (tableH < HDR_H + ROW_H * 3 + 2) tableH = HDR_H + ROW_H * 3 + 2;
-	d->rTable = mk(L, T0 + 100, R, T0 + 100 + tableH);
+	d->rTable = mk(L, T0 + th_scale(100), R, T0 + th_scale(100) + tableH);
 	d->vis = (tableH - HDR_H - 2) / ROW_H;
 	if (d->vis < 1) d->vis = 1;
 	if (d->scroll > d->nreg - d->vis) d->scroll = d->nreg - d->vis;
 	if (d->scroll < 0) d->scroll = 0;
 
-	d->rChart = mk(L, T0 + 100 + tableH + 8, R, h - 28 - EV_PAD);
-	if (d->rChart.b < d->rChart.t + 100) d->rChart.b = d->rChart.t + 100;
+	d->rChart = mk(L, T0 + th_scale(100) + tableH + th_scale(8), R, h - th_scale(28) - EV_PAD);
+	if (d->rChart.b < d->rChart.t + th_scale(100)) d->rChart.b = d->rChart.t + th_scale(100);
 }
 
 static void ev_plot(const EntropyView* d, PlRect* p)
 {
-	*p = mk(d->rChart.l + 44, d->rChart.t + 10, d->rChart.r - 14, d->rChart.b - 26);
+	*p = mk(d->rChart.l + th_scale(44), d->rChart.t + th_scale(10), d->rChart.r - th_scale(14), d->rChart.b - th_scale(26));
 }
 
 static uint64_t ev_x2off(const EntropyView* d, const PlRect* p, int x)

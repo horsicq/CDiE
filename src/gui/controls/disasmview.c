@@ -27,12 +27,12 @@
 #include "theme/theme.h"
 #include "controls/disasmview.h"
 
-#define ROW_H      20
-#define HEAD_H     30
-#define HEAD_TOP   8
-#define HEAD_GAP   4
-#define PAD        16
-#define SB_W       6
+#define ROW_H      th_scale(20)
+#define HEAD_H     th_scale(30)
+#define HEAD_TOP   th_scale(8)
+#define HEAD_GAP   th_scale(4)
+#define PAD        th_scale(16)
+#define SB_W       th_scale(6)
 #define MAX_ROWS   256
 #define MAX_HIST   32
 #define SHOW_BYTES 8
@@ -156,12 +156,12 @@ static void layout(DisasmView* dv)
   dv->x_addr = PAD;
   dv->x_bytes = dv->x_addr + (dv->addr_digits + 3) * dv->cw;
   dv->x_ins = dv->x_bytes + (SHOW_BYTES * 3 + 3) * dv->cw;
-  dv->x_end = dv->W - PAD - SB_W - 4;
+  dv->x_end = dv->W - PAD - SB_W - th_scale(4);
   dv->y0 = HEAD_H + HEAD_GAP;
-  dv->vis_rows = (dv->H - dv->y0 - 4) / ROW_H;
+  dv->vis_rows = (dv->H - dv->y0 - th_scale(4)) / ROW_H;
   if (dv->vis_rows < 1) dv->vis_rows = 1;
   if (dv->vis_rows > MAX_ROWS) dv->vis_rows = MAX_ROWS;
-  dv->r_sb = mkr(dv->W - SB_W - 4, dv->y0, dv->W - 4, dv->H - 4);
+  dv->r_sb = mkr(dv->W - SB_W - th_scale(4), dv->y0, dv->W - th_scale(4), dv->H - th_scale(4));
 }
 
 static void paint_header(DisasmView* dv, PlCanvas* c)
@@ -176,7 +176,7 @@ static void paint_rows(DisasmView* dv, PlCanvas* c)
 {
   int r;
   if (!dv->open) {
-    pl_text(c, dv->ui, mkr(dv->x_addr, dv->y0 + 8, dv->x_end, dv->y0 + 8 + ROW_H),
+    pl_text(c, dv->ui, mkr(dv->x_addr, dv->y0 + th_scale(8), dv->x_end, dv->y0 + th_scale(8) + ROW_H),
       "Scan an x86 or x64 PE file to see its disassembly.", CLR_TEXT_SECONDARY, PL_TEXT_LEFT);
     return;
   }
@@ -225,11 +225,11 @@ static void paint_scroll(DisasmView* dv, PlCanvas* c)
   if (range < 2) return;
   track = dv->r_sb.b - dv->r_sb.t;
   th = (int)((double)track * (double)(dv->vis_rows * 4) / (double)range);
-  if (th < 24) th = 24;
+  if (th < th_scale(24)) th = th_scale(24);
   if (th > track) th = track;
   frac = (double)(dv->top - dv->lo) / (double)range;
   ty = dv->r_sb.t + (int)((track - th) * frac);
-  pl_round_rect(c, mkr(dv->W - 6, ty, dv->W - 3, ty + th), CLR_BTN_GHOST_BD, CLR_BTN_GHOST_BD, 1);
+  pl_round_rect(c, mkr(dv->W - th_scale(6), ty, dv->W - th_scale(3), ty + th), CLR_BTN_GHOST_BD, CLR_BTN_GHOST_BD, 1);
 }
 
 static void on_paint(void* u, PlCanvas* c, int w, int h)
@@ -293,7 +293,7 @@ static void on_mouse_down(void* u, int x, int y)
   int r;
   if (!dv->open) return;
   dv->dragging = 0;
-  if (x >= dv->r_sb.l - 4 && y >= dv->r_sb.t && y < dv->r_sb.b) {
+  if (x >= dv->r_sb.l - th_scale(4) && y >= dv->r_sb.t && y < dv->r_sb.b) {
     dv->dragging = 1;
     scroll_to_y(dv, y);
     return;

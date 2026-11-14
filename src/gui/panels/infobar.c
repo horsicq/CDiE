@@ -47,9 +47,9 @@ static void card_rect(const Infobar* d, int i, int count, PlRect* out)
   if (count <= 0) count = 1;
   card_w = (d->width - 2 * pad) / count;
   out->l = pad + i * card_w;
-  out->t = 8;
+  out->t = th_scale(8);
   out->r = out->l + card_w;
-  out->b = d->height - 8;
+  out->b = d->height - th_scale(8);
 }
 
 static void on_paint(void* u, PlCanvas* c, int w, int h)
@@ -76,22 +76,22 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
     if (i > 0)
       pl_line(c, card.l, card.t + 1, card.l, card.b - 1, CLR_PANEL_BORDER);
 
-    dot.l = card.l + 13; dot.t = card.t + 8;
-    dot.r = card.l + 19; dot.b = card.t + 14;
+    dot.l = card.l + th_scale(13); dot.t = card.t + th_scale(8);
+    dot.r = card.l + th_scale(19); dot.b = card.t + th_scale(14);
     pl_round_rect(c, dot, CLR_ACCENT, CLR_ACCENT, 3);
 
-    lbl.l = card.l + 25; lbl.t = card.t + 6;
-    lbl.r = card.r - 8;  lbl.b = card.t + 20;
+    lbl.l = card.l + th_scale(25); lbl.t = card.t + th_scale(6);
+    lbl.r = card.r - th_scale(8);  lbl.b = card.t + th_scale(20);
     pl_text(c, d->fontLabel, lbl, d->cards[i].label,
       CLR_TEXT_SECONDARY, TXT_LEFT);
 
-    val.l = card.l + 12; val.t = card.t + 20;
-    val.r = card.r - 8;  val.b = card.t + 42;
+    val.l = card.l + th_scale(12); val.t = card.t + th_scale(20);
+    val.r = card.r - th_scale(8);  val.b = card.t + th_scale(42);
     pl_text(c, d->fontValue, val, d->cards[i].value,
       CLR_TEXT_PRIMARY, TXT_LEFT);
 
-    sub.l = card.l + 12; sub.t = card.t + 40;
-    sub.r = card.r - 8;  sub.b = card.b - 6;
+    sub.l = card.l + th_scale(12); sub.t = card.t + th_scale(40);
+    sub.r = card.r - th_scale(8);  sub.b = card.b - th_scale(6);
     pl_text(c, d->fontSub, sub, d->cards[i].subvalue,
       CLR_TEXT_SECONDARY, TXT_LEFT);
   }

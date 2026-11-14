@@ -41,12 +41,12 @@
 #define SCAN_LIMIT   (64u * 1024u * 1024u)/* only the first 64 MiB scanned  */
 #define MAX_STRINGS  1000000
 
-#define HEAD   34
-#define ROW_H  22
-#define BAR_H  56
-#define COL_OFF   14
-#define COL_TYPE  130
-#define COL_TXT   210
+#define HEAD   th_scale(34)
+#define ROW_H  th_scale(22)
+#define BAR_H  th_scale(56)
+#define COL_OFF   th_scale(14)
+#define COL_TYPE  th_scale(130)
+#define COL_TXT   th_scale(210)
 
 enum { T_ASCII, T_UTF16 };
 enum { F_FILTER, F_LIST };
@@ -430,12 +430,12 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 
 static void layout(Dlg* d)
 {
-  const int m = 12, bh = 34;
+  const int m = th_scale(12), bh = th_scale(34);
   int W = d->W, H = d->H, bot = H - BAR_H - m;
 
   d->r_filter = mkr(m, m, W - m, m + bh);
-  d->r_card = mkr(m, d->r_filter.b + 12, W - m, bot);
-  d->r_list = mkr(d->r_card.l + 1, d->r_card.t + HEAD + 4, d->r_card.r - 1, d->r_card.b - 6);
+  d->r_card = mkr(m, d->r_filter.b + th_scale(12), W - m, bot);
+  d->r_list = mkr(d->r_card.l + 1, d->r_card.t + HEAD + th_scale(4), d->r_card.r - 1, d->r_card.b - th_scale(6));
   d->r_bar = mkr(0, H - BAR_H, W, H);
   d->r_close = mkr(0, 0, 0, 0);   /* no close button when embedded */
 }

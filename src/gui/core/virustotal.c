@@ -609,25 +609,25 @@ static void put_text(PlCanvas* c, PlFont* f, int x, int y, int w, int h,
 static void draw_card(PlCanvas* c, int x, int y, int w, int h)
 {
 	PlRect r = { x, y, x + w, y + h };
-	pl_round_rect(c, r, CLR_SEARCH_BG, CLR_PANEL_BORDER, 8);
+	pl_round_rect(c, r, CLR_SEARCH_BG, CLR_PANEL_BORDER, th_scale(8));
 }
 
 static void draw_button(VtView* v, PlCanvas* c, PlRect r, const char* label,
 	int primary, int hovered)
 {
-	PlRect tr = { r.l + 16, r.t, r.r - 8, r.b };
+	PlRect tr = { r.l + th_scale(16), r.t, r.r - th_scale(8), r.b };
 	PlColor fill = primary ? CLR_ACCENT : CLR_SEARCH_BG;
 	PlColor border = (primary || hovered) ? CLR_ACCENT : CLR_PANEL_BORDER;
-	pl_round_rect(c, r, fill, border, 6);
+	pl_round_rect(c, r, fill, border, th_scale(6));
 	pl_text(c, v->fText, tr, label, primary ? VT_WHITE : CLR_TEXT_PRIMARY, PL_TEXT_LEFT);
 }
 
 static void draw_pill(VtView* v, PlCanvas* c, int x, int y, const char* label, PlColor col)
 {
-	int w = (int)strlen(label) * 8 + 24;
-	PlRect r = { x, y, x + w, y + 22 };
-	PlRect tr = { x + 12, y, x + w, y + 22 };
-	pl_round_rect(c, r, col, col, 11);
+	int w = (int)strlen(label) * th_scale(8) + th_scale(24);
+	PlRect r = { x, y, x + w, y + th_scale(22) };
+	PlRect tr = { x + th_scale(12), y, x + w, y + th_scale(22) };
+	pl_round_rect(c, r, col, col, th_scale(11));
 	pl_text(c, v->fText, tr, label, VT_WHITE, PL_TEXT_LEFT);
 }
 
@@ -635,9 +635,9 @@ static void draw_legend(VtView* v, PlCanvas* c, int x, int y, PlColor col,
 	const char* label, int n)
 {
 	char line[96];
-	pl_fill(c, x, y + 5, x + 10, y + 15, col);
+	pl_fill(c, x, y + th_scale(5), x + th_scale(10), y + th_scale(15), col);
 	snprintf(line, sizeof(line), "%s  %d", label, n);
-	put_text(c, v->fText, x + 18, y, 200, 20, line, CLR_TEXT_PRIMARY);
+	put_text(c, v->fText, x + th_scale(18), y, th_scale(200), th_scale(20), line, CLR_TEXT_PRIMARY);
 }
 
 /* rounded, segmented bar */
@@ -664,17 +664,17 @@ static void draw_bar(PlCanvas* c, int x, int y, int w, int h, const VtResult* r)
 static int draw_message(VtView* v, PlCanvas* c, int x, int y, int w,
 	const char* l1, PlColor c1, const char* l2)
 {
-	int h = l2 ? 68 : 46;
+	int h = th_scale(l2 ? 68 : 46);
 	draw_card(c, x, y, w, h);
-	put_text(c, v->fText, x + 16, y + 12, w - 32, 20, l1, c1);
-	if (l2) put_text(c, v->fText, x + 16, y + 36, w - 32, 20, l2, CLR_TEXT_SECONDARY);
+	put_text(c, v->fText, x + th_scale(16), y + th_scale(12), w - th_scale(32), th_scale(20), l1, c1);
+	if (l2) put_text(c, v->fText, x + th_scale(16), y + th_scale(36), w - th_scale(32), th_scale(20), l2, CLR_TEXT_SECONDARY);
 	return h;
 }
 
 static void on_paint(void* u, PlCanvas* c, int w, int h)
 {
 	VtView* v = (VtView*)u;
-	int x = 24, y = 20, tw = w - 2 * x;
+	int x = th_scale(24), y = th_scale(20), tw = w - 2 * x;
 	char line[320];
 	PlRect btn, frame;
 
@@ -682,16 +682,16 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 	v->has_main = v->has_browser = v->has_copy = 0;
 	pl_fill(c, 0, 0, w, h, CLR_BG);
 	frame.l = 0; frame.t = 0; frame.r = w - 1; frame.b = h - 1;
-	pl_round_rect(c, frame, CLR_PANEL_BODY, CLR_PANEL_BORDER, 12);
-	if (tw < 40) return;
+	pl_round_rect(c, frame, CLR_PANEL_BODY, CLR_PANEL_BORDER, th_scale(12));
+	if (tw < th_scale(40)) return;
 
-	put_text(c, v->fTitle, x, y, tw, 24, translate("VirusTotal"), CLR_TEXT_PRIMARY);
-	y += 24;
-	put_text(c, v->fText, x, y, tw, 20,
+	put_text(c, v->fTitle, x, y, tw, th_scale(24), translate("VirusTotal"), CLR_TEXT_PRIMARY);
+	y += th_scale(24);
+	put_text(c, v->fText, x, y, tw, th_scale(20),
 		translate("File reputation check"), CLR_TEXT_SECONDARY);
-	y += 30;
+	y += th_scale(30);
 	pl_fill(c, x, y, x + tw, y + 1, CLR_PANEL_BORDER);
-	y += 16;
+	y += th_scale(16);
 
 	if (v->state == VTS_NOFILE) {
 		draw_message(v, c, x, y, tw,
@@ -702,22 +702,22 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 
 	{
 		const char* name = v->path, * p;
-		int ch = v->hash[0] ? 62 : 40;
+		int ch = th_scale(v->hash[0] ? 62 : 40);
 		for (p = v->path; *p; ++p) if (*p == '\\' || *p == '/') name = p + 1;
 		draw_card(c, x, y, tw, ch);
-		put_text(c, v->fText, x + 16, y + 10, tw - 32, 20, name, CLR_TEXT_PRIMARY);
+		put_text(c, v->fText, x + th_scale(16), y + th_scale(10), tw - th_scale(32), th_scale(20), name, CLR_TEXT_PRIMARY);
 		if (v->hash[0]) {
 			snprintf(line, sizeof(line), "SHA-256  %s", v->hash);
-			put_text(c, v->fText, x + 16, y + 34, tw - 32, 20, line, CLR_TEXT_SECONDARY);
+			put_text(c, v->fText, x + th_scale(16), y + th_scale(34), tw - th_scale(32), th_scale(20), line, CLR_TEXT_SECONDARY);
 		}
-		y += ch + 16;
+		y += ch + th_scale(16);
 	}
 
 	if (v->state == VTS_READY) {
 		y += draw_message(v, c, x, y, tw,
 			translate("Ready to check."), CLR_TEXT_PRIMARY,
-			translate("Only the SHA-256 hash is sent to VirusTotal, not the file.")) + 20;
-		btn.l = x; btn.t = y; btn.r = x + 200; btn.b = y + 34;
+			translate("Only the SHA-256 hash is sent to VirusTotal, not the file.")) + th_scale(20);
+		btn.l = x; btn.t = y; btn.r = x + th_scale(200); btn.b = y + th_scale(34);
 		draw_button(v, c, btn, translate("Check on VirusTotal"), 1, v->hover == 1);
 		v->btn_main = btn; v->has_main = 1;
 		return;
@@ -738,44 +738,44 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 			: (r->suspicious > 0 ? translate("SUSPICIOUS") : translate("CLEAN"));
 		int half = tw / 2;
 
-		draw_card(c, x, y, tw, 168);
+		draw_card(c, x, y, tw, th_scale(168));
 		snprintf(line, sizeof(line), "%d / %d", r->malicious, total);
-		put_text(c, v->fBig, x + 16, y + 12, 150, 40, line, col);
-		draw_pill(v, c, x + 170, y + 20, verdict, col);
-		put_text(c, v->fText, x + 16, y + 54, tw - 32, 20,
+		put_text(c, v->fBig, x + th_scale(16), y + th_scale(12), th_scale(150), th_scale(40), line, col);
+		draw_pill(v, c, x + th_scale(170), y + th_scale(20), verdict, col);
+		put_text(c, v->fText, x + th_scale(16), y + th_scale(54), tw - th_scale(32), th_scale(20),
 			translate("security vendors flagged this file as malicious"), CLR_TEXT_SECONDARY);
-		draw_bar(c, x + 16, y + 84, tw - 32, 10, r);
-		draw_legend(v, c, x + 16, y + 108, VT_RED, translate("Malicious"), r->malicious);
-		draw_legend(v, c, x + 16 + half, y + 108, VT_AMBER, translate("Suspicious"), r->suspicious);
-		draw_legend(v, c, x + 16, y + 134, VT_GREEN, translate("Harmless"), r->harmless);
-		draw_legend(v, c, x + 16 + half, y + 134, VT_GREY, translate("Undetected"), r->undetected);
-		y += 168 + 20;
+		draw_bar(c, x + th_scale(16), y + th_scale(84), tw - th_scale(32), th_scale(10), r);
+		draw_legend(v, c, x + th_scale(16), y + th_scale(108), VT_RED, translate("Malicious"), r->malicious);
+		draw_legend(v, c, x + th_scale(16) + half, y + th_scale(108), VT_AMBER, translate("Suspicious"), r->suspicious);
+		draw_legend(v, c, x + th_scale(16), y + th_scale(134), VT_GREEN, translate("Harmless"), r->harmless);
+		draw_legend(v, c, x + th_scale(16) + half, y + th_scale(134), VT_GREY, translate("Undetected"), r->undetected);
+		y += th_scale(168) + th_scale(20);
 	}
 	else if (v->state == VTS_NOTFOUND) {
 		y += draw_message(v, c, x, y, tw,
 			translate("VirusTotal has no record of this file yet."), CLR_TEXT_PRIMARY,
-			translate("It may be new or rare. This is not a verdict either way.")) + 20;
+			translate("It may be new or rare. This is not a verdict either way.")) + th_scale(20);
 	}
 	else if (v->state == VTS_NOKEY) {
 		y += draw_message(v, c, x, y, tw,
 			translate("No API key set, so results cannot be shown here."), CLR_TEXT_PRIMARY,
-			translate("Add your key in Options > VirusTotal.")) + 20;
+			translate("Add your key in Options > VirusTotal.")) + th_scale(20);
 	}
 	else if (v->state == VTS_ERROR) {
-		y += draw_message(v, c, x, y, tw, v->err, VT_RED, NULL) + 20;
+		y += draw_message(v, c, x, y, tw, v->err, VT_RED, NULL) + th_scale(20);
 	}
 
-	btn.l = x; btn.t = y; btn.r = x + 120; btn.b = y + 34;
+	btn.l = x; btn.t = y; btn.r = x + th_scale(120); btn.b = y + th_scale(34);
 	draw_button(v, c, btn, translate("Re-check"), 0, v->hover == 1);
 	v->btn_main = btn; v->has_main = 1;
 
 	if (v->hash[0]) {
-		btn.l = btn.r + 10; btn.r = btn.l + 170;
+		btn.l = btn.r + th_scale(10); btn.r = btn.l + th_scale(170);
 		draw_button(v, c, btn, translate("Open in browser"), 0, v->hover == 2);
 		v->btn_browser = btn; v->has_browser = 1;
 
 		if (v->copy_cb) {
-			btn.l = btn.r + 10; btn.r = btn.l + 150;
+			btn.l = btn.r + th_scale(10); btn.r = btn.l + th_scale(150);
 			draw_button(v, c, btn, translate("Copy SHA-256"), 0, v->hover == 3);
 			v->btn_copy = btn; v->has_copy = 1;
 		}

@@ -44,10 +44,10 @@ struct Header {
 
 static void browse_rect(const Header* d, PlRect* r)
 {
-  r->r = d->width - 14;
-  r->l = r->r - 46;
-  r->t = (d->height - 30) / 2;
-  r->b = r->t + 30;
+  r->r = d->width - th_scale(14);
+  r->l = r->r - th_scale(46);
+  r->t = (d->height - th_scale(30)) / 2;
+  r->b = r->t + th_scale(30);
 }
 
 static int in_browse(const Header* d, int x, int y)
@@ -66,23 +66,23 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
   pl_fill(c, 0, 0, w, h, CLR_BG);
 
   if (d->has_file) {
-    PlRect crumb = { CONTENT_PAD, 10, w - 70, 28 };
-    PlRect name = { CONTENT_PAD, 30, w - 70, h - 6 };
+    PlRect crumb = { CONTENT_PAD, th_scale(10), w - th_scale(70), th_scale(28) };
+    PlRect name = { CONTENT_PAD, th_scale(30), w - th_scale(70), h - th_scale(6) };
     pl_text(c, d->fontCrumb, crumb, d->folder,
       CLR_TEXT_SECONDARY, TXT_LEFT);
     pl_text(c, d->fontFilename, name, d->filename,
       CLR_TEXT_PRIMARY, TXT_LEFT);
     if (d->timestr[0]) {
       int nw = pl_text_width(d->fontFilename, d->filename);
-      int tx = CONTENT_PAD + nw + 12;
-      PlRect tr = { tx, 30, w - 70, h - 6 };
-      if (tx < w - 70 - 40)
+      int tx = CONTENT_PAD + nw + th_scale(12);
+      PlRect tr = { tx, th_scale(30), w - th_scale(70), h - th_scale(6) };
+      if (tx < w - th_scale(70) - th_scale(40))
         pl_text(c, d->fontCrumb, tr, d->timestr,
           CLR_TEXT_SECONDARY, TXT_LEFT);
     }
   }
   else {
-    PlRect r = { CONTENT_PAD, 0, w - 70, h };
+    PlRect r = { CONTENT_PAD, 0, w - th_scale(70), h };
     pl_text(c, d->fontCrumb, r,
       translate("Drop a file here, or click " BULLETS " to open"),
       CLR_TEXT_SECONDARY, TXT_LEFT);

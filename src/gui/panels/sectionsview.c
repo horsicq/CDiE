@@ -455,23 +455,23 @@ static void put_text(PlCanvas* c, PlFont* f, int x, int y, int w, int h,
 static void draw_card(PlCanvas* c, int x, int y, int w, int h)
 {
 	PlRect r = { x, y, x + w, y + h };
-	pl_round_rect(c, r, CLR_PANEL, CLR_PANEL_BORDER, 8);
+	pl_round_rect(c, r, CLR_PANEL, CLR_PANEL_BORDER, th_scale(8));
 }
 
 static void draw_button(SecView* v, PlCanvas* c, PlRect r, const char* label, int hovered)
 {
-	PlRect tr = { r.l + 14, r.t, r.r - 8, r.b };
-	pl_round_rect(c, r, CLR_BG, hovered ? CLR_ACCENT : CLR_PANEL_BORDER, 6);
+	PlRect tr = { r.l + th_scale(14), r.t, r.r - th_scale(8), r.b };
+	pl_round_rect(c, r, CLR_BG, hovered ? CLR_ACCENT : CLR_PANEL_BORDER, th_scale(6));
 	pl_text(c, v->fText, tr, label, CLR_TEXT_PRIMARY, PL_TEXT_LEFT);
 }
 
 static int draw_message(SecView* v, PlCanvas* c, int x, int y, int w,
 	const char* l1, PlColor c1, const char* l2)
 {
-	int h = l2 ? 68 : 46;
+	int h = th_scale(l2 ? 68 : 46);
 	draw_card(c, x, y, w, h);
-	put_text(c, v->fText, x + 16, y + 12, w - 32, 20, l1, c1);
-	if (l2) put_text(c, v->fText, x + 16, y + 36, w - 32, 20, l2, CLR_TEXT_SECONDARY);
+	put_text(c, v->fText, x + th_scale(16), y + th_scale(12), w - th_scale(32), th_scale(20), l1, c1);
+	if (l2) put_text(c, v->fText, x + th_scale(16), y + th_scale(36), w - th_scale(32), th_scale(20), l2, CLR_TEXT_SECONDARY);
 	return h;
 }
 
@@ -484,12 +484,12 @@ static void draw_access(SecView* v, PlCanvas* c, int x, int y, const SecInfo* s)
 	on[2] = (s->chars & 0x20000000u) != 0;
 	bad = on[1] && on[2];
 	for (k = 0; k < 3; ++k) {
-		PlRect r = { x + k * 23, y, x + k * 23 + 20, y + 20 };
-		PlRect tr = { r.l + 6, r.t, r.r, r.b };
+		PlRect r = { x + k * th_scale(23), y, x + k * th_scale(23) + th_scale(20), y + th_scale(20) };
+		PlRect tr = { r.l + th_scale(6), r.t, r.r, r.b };
 		PlColor fill = !on[k] ? CLR_BG
 			: bad ? CLR_DANGER
 			: (k == 1 ? CLR_WARNING : (k == 2 ? CLR_ACCENT : CLR_SUCCESS));
-		pl_round_rect(c, r, fill, on[k] ? fill : CLR_PANEL_BORDER, 4);
+		pl_round_rect(c, r, fill, on[k] ? fill : CLR_PANEL_BORDER, th_scale(4));
 		pl_text(c, v->fText, tr, letters[k], on[k] ? CLR_ON_COLOR : CLR_TEXT_SECONDARY, PL_TEXT_LEFT);
 	}
 }
@@ -497,7 +497,7 @@ static void draw_access(SecView* v, PlCanvas* c, int x, int y, const SecInfo* s)
 static void on_paint(void* u, PlCanvas* c, int w, int h)
 {
 	SecView* v = (SecView*)u;
-	int x = 30, y, tw = w - 2 * x, i, maxs;
+	int x = th_scale(30), y, tw = w - 2 * x, i, maxs;
 	char line[256];
 
 	v->width = w; v->height = h;
@@ -508,22 +508,22 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 	if (maxs < 0) maxs = 0;
 	if (v->scroll > maxs) v->scroll = maxs;
 	if (v->scroll < 0) v->scroll = 0;
-	y = 14 - v->scroll;
+	y = th_scale(14) - v->scroll;
 	pl_fill(c, 0, 0, w, h, CLR_BG);
 	{
 		PlRect frame = { 0, 0, w - 1, h - 1 };
-		pl_round_rect(c, frame, CLR_PANEL_BODY, CLR_PANEL_BORDER, 12);
+		pl_round_rect(c, frame, CLR_PANEL_BODY, CLR_PANEL_BORDER, th_scale(12));
 	}
-	if (tw < 40) return;
+	if (tw < th_scale(40)) return;
 
-	put_text(c, v->fTitle, x, y, tw, 24, translate("Sections"), CLR_TEXT_PRIMARY);
-	y += 24;
+	put_text(c, v->fTitle, x, y, tw, th_scale(24), translate("Sections"), CLR_TEXT_PRIMARY);
+	y += th_scale(24);
 	if (v->state == SS_OK) snprintf(line, sizeof(line), "%s  -  %s", base_name(v->path), v->arch);
 	else snprintf(line, sizeof(line), "%s", translate("PE section table"));
-	put_text(c, v->fText, x, y, tw, 20, line, CLR_TEXT_SECONDARY);
-	y += 30;
+	put_text(c, v->fText, x, y, tw, th_scale(20), line, CLR_TEXT_SECONDARY);
+	y += th_scale(30);
 	pl_fill(c, x, y, x + tw, y + 1, CLR_PANEL_BORDER);
-	y += 16;
+	y += th_scale(16);
 
 	if (v->state == SS_NOFILE) {
 		draw_message(v, c, x, y, tw,
@@ -538,7 +538,7 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 
 	{
 		uint64_t tr = 0, tv = 0;
-		int warn = 0, gap = 12, cw = (tw - 3 * gap) / 4, k;
+		int warn = 0, gap = th_scale(12), cw = (tw - 3 * gap) / 4, k;
 		char vals[4][32], tmp[96];
 		const char* labels[4];
 		PlColor vcol[4];
@@ -561,15 +561,15 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 
 		for (k = 0; k < 4; ++k) {
 			int cx = x + k * (cw + gap);
-			draw_card(c, cx, y, cw, 58);
-			put_text(c, v->fTitle, cx + 14, y + 8, cw - 28, 24, vals[k], vcol[k]);
-			put_text(c, v->fText, cx + 14, y + 34, cw - 28, 20, labels[k], CLR_TEXT_SECONDARY);
+			draw_card(c, cx, y, cw, th_scale(58));
+			put_text(c, v->fTitle, cx + th_scale(14), y + th_scale(8), cw - th_scale(28), th_scale(24), vals[k], vcol[k]);
+			put_text(c, v->fText, cx + th_scale(14), y + th_scale(34), cw - th_scale(28), th_scale(20), labels[k], CLR_TEXT_SECONDARY);
 		}
-		y += 58 + 16;
+		y += th_scale(58) + th_scale(16);
 	}
 
 	{
-		int n = v->count, gap = 3, rgap = 4, rowh = 28, bx = x + 16, bw = tw - 32;
+		int n = v->count, gap = th_scale(3), rgap = th_scale(4), rowh = th_scale(28), bx = x + th_scale(16), bw = tw - th_scale(32);
 		int minw[SEC_MAX], wd[SEC_MAX], rowof[SEC_MAX];
 		uint64_t vs[SEC_MAX];
 		int k, s, e, rows = 0, barh, ch, cx = bx, ay;
@@ -577,7 +577,7 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 
 		for (k = 0; k < n; ++k) {
 			vs[k] = v->sec[k].vsize ? v->sec[k].vsize : 1;
-			minw[k] = (int)strlen(v->sec[k].name) * 7 + 16;   /* name always fits */
+			minw[k] = (int)strlen(v->sec[k].name) * th_scale(7) + th_scale(16);
 			if (minw[k] > bw) minw[k] = bw;
 		}
 
@@ -609,27 +609,27 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 		}
 
 		barh = rows * rowh + (rows - 1) * rgap;
-		ch = 32 + barh + 34;
+		ch = th_scale(32) + barh + th_scale(34);
 		draw_card(c, x, y, tw, ch);
-		put_text(c, v->fText, x + 16, y + 8, tw - 32, 20,
+		put_text(c, v->fText, x + th_scale(16), y + th_scale(8), tw - th_scale(32), th_scale(20),
 			translate("Image layout"), CLR_TEXT_SECONDARY);
 
 		for (k = 0; k < n; ++k) {
 			PlRect r, tr;
-			PlColor fc = CLR_SEC_PAL_0 + (k % CLR_SEC_PAL_COUNT);
-			int ry = y + 32 + rowof[k] * (rowh + rgap);
+			PlColor fc = theme_sec_pal(k);
+			int ry = y + th_scale(32) + rowof[k] * (rowh + rgap);
 			if (k == 0 || rowof[k] != rowof[k - 1]) cx = bx;
 			r.l = cx; r.t = ry; r.r = cx + wd[k]; r.b = ry + rowh;
 			pl_round_rect(c, r, fc,
-				(k == v->sel || k == v->hover_seg) ? CLR_TEXT_PRIMARY : fc, 5);
-			tr.l = r.l + 6; tr.t = r.t; tr.r = r.r - 2; tr.b = r.b;
+				(k == v->sel || k == v->hover_seg) ? CLR_TEXT_PRIMARY : fc, th_scale(5));
+			tr.l = r.l + th_scale(6); tr.t = r.t; tr.r = r.r - th_scale(2); tr.b = r.b;
 			pl_text(c, v->fText, tr, v->sec[k].name, CLR_ON_COLOR, PL_TEXT_LEFT);
 			v->seg_rc[k] = r;
 			cx += wd[k] + gap;
 		}
 		v->nseg = n;
 
-		ay = y + 32 + barh + 8;
+		ay = y + th_scale(32) + barh + th_scale(8); 
 		{
 			uint64_t lo = ~0ull, hi = 0;
 			for (k = 0; k < n; ++k) {
@@ -639,38 +639,38 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 			}
 			if (lo == ~0ull) lo = 0;
 			snprintf(line, sizeof(line), "0x%08X", (unsigned)lo);
-			put_text(c, v->fText, bx, ay, 120, 20, line, CLR_TEXT_SECONDARY);
+			put_text(c, v->fText, bx, ay, th_scale(120), th_scale(20), line, CLR_TEXT_SECONDARY);
 			snprintf(line, sizeof(line), "0x%08X", (unsigned)hi);
 		}
-		put_text(c, v->fText, bx + bw - 90, ay, 100, 20, line, CLR_TEXT_SECONDARY);
+		put_text(c, v->fText, bx + bw - th_scale(90), ay, th_scale(100), th_scale(20), line, CLR_TEXT_SECONDARY);
 		{
 			int ci = v->hover_seg >= 0 ? v->hover_seg : v->sel;
 			if (ci >= 0 && ci < n) {
 				char sz[32];
 				fmt_size(sz, sizeof(sz), v->sec[ci].vsize);
 				snprintf(line, sizeof(line), "%s  -  %s", v->sec[ci].name, sz);
-				put_text(c, v->fText, bx + bw / 2 - (int)strlen(line) * 3, ay,
-					bw / 2, 20, line, CLR_TEXT_PRIMARY);
+				put_text(c, v->fText, bx + bw / 2 - (int)strlen(line) * th_scale(3), ay,
+					bw / 2, th_scale(20), line, CLR_TEXT_PRIMARY);
 			}
 		}
-		y += ch + 16;
+		y += ch + th_scale(16);
 	}
 
 	{
-		int rh = 30, hh = 28, th, k;
+		int rh = th_scale(30), hh = th_scale(28), th, k;
 		int cx[6];
 		static const int pct[6] = { 0, 20, 33, 46, 59, 70 };
 
 		th = hh + v->count * rh;           
 		draw_card(c, x, y, tw, th);
 
-		for (k = 0; k < 6; ++k) cx[k] = x + 16 + (tw - 32) * pct[k] / 100;
-		put_text(c, v->fText, cx[0], y + 4, 120, 20, translate("Name"), CLR_TEXT_SECONDARY);
-		put_text(c, v->fText, cx[1], y + 4, 120, 20, translate("Address"), CLR_TEXT_SECONDARY);
-		put_text(c, v->fText, cx[2], y + 4, 120, 20, translate("Virtual size"), CLR_TEXT_SECONDARY);
-		put_text(c, v->fText, cx[3], y + 4, 120, 20, translate("Raw size"), CLR_TEXT_SECONDARY);
-		put_text(c, v->fText, cx[4], y + 4, 80, 20, translate("Access"), CLR_TEXT_SECONDARY);
-		put_text(c, v->fText, cx[5], y + 4, 160, 20, translate("Warnings"), CLR_TEXT_SECONDARY);
+		for (k = 0; k < 6; ++k) cx[k] = x + th_scale(16) + (tw - th_scale(32)) * pct[k] / 100;
+		put_text(c, v->fText, cx[0], y + th_scale(4), th_scale(120), th_scale(20), translate("Name"), CLR_TEXT_SECONDARY);
+		put_text(c, v->fText, cx[1], y + th_scale(4), th_scale(120), th_scale(20), translate("Address"), CLR_TEXT_SECONDARY);
+		put_text(c, v->fText, cx[2], y + th_scale(4), th_scale(120), th_scale(20), translate("Virtual size"), CLR_TEXT_SECONDARY);
+		put_text(c, v->fText, cx[3], y + th_scale(4), th_scale(120), th_scale(20), translate("Raw size"), CLR_TEXT_SECONDARY);
+		put_text(c, v->fText, cx[4], y + th_scale(4), th_scale(80), th_scale(20), translate("Access"), CLR_TEXT_SECONDARY);
+		put_text(c, v->fText, cx[5], y + th_scale(4), th_scale(160), th_scale(20), translate("Warnings"), CLR_TEXT_SECONDARY);
 		pl_fill(c, x + 1, y + hh - 1, x + tw - 1, y + hh, CLR_PANEL_BORDER);
 
 		for (k = 0; k < v->count; ++k) {
@@ -681,45 +681,45 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 			int nf = build_flags(s, fl, sizeof(fl));
 
 			if (k == v->sel || k == v->hover_row) pl_fill(c, rr.l, rr.t, rr.r, rr.b, CLR_SIDEBAR_SEL);
-			if (k == v->sel) pl_fill(c, rr.l, rr.t, rr.l + 3, rr.b, CLR_ACCENT);
+			if (k == v->sel) pl_fill(c, rr.l, rr.t, rr.l + th_scale(3), rr.b, CLR_ACCENT);
 
-			pl_fill(c, cx[0], ry + 10, cx[0] + 10, ry + 20, CLR_SEC_PAL_0 + (k % CLR_SEC_PAL_COUNT));
-			put_text(c, v->fText, cx[0] + 18, ry + 5, 100, 20, s->name, CLR_TEXT_PRIMARY);
+			pl_fill(c, cx[0], ry + th_scale(10), cx[0] + th_scale(10), ry + th_scale(20), CLR_SEC_PAL_0 + (k % CLR_SEC_PAL_COUNT));
+			put_text(c, v->fText, cx[0] + th_scale(18), ry + th_scale(5), th_scale(100), th_scale(20), s->name, CLR_TEXT_PRIMARY);
 			snprintf(line, sizeof(line), "0x%08X", (unsigned)s->va);
-			put_text(c, v->fText, cx[1], ry + 5, 110, 20, line, CLR_TEXT_PRIMARY);
+			put_text(c, v->fText, cx[1], ry + th_scale(5), th_scale(110), th_scale(20), line, CLR_TEXT_PRIMARY);
 			snprintf(line, sizeof(line), "0x%08X", (unsigned)s->vsize);
-			put_text(c, v->fText, cx[2], ry + 5, 110, 20, line, CLR_TEXT_PRIMARY);
+			put_text(c, v->fText, cx[2], ry + th_scale(5), th_scale(110), th_scale(20), line, CLR_TEXT_PRIMARY);
 			snprintf(line, sizeof(line), "0x%08X", (unsigned)s->rawsize);
-			put_text(c, v->fText, cx[3], ry + 5, 110, 20, line, CLR_TEXT_PRIMARY);
-			draw_access(v, c, cx[4], ry + 5, s);
-			if (nf) put_text(c, v->fText, cx[5], ry + 5, x + tw - 16 - cx[5], 20, fl, CLR_DANGER);
-			else put_text(c, v->fText, cx[5], ry + 5, 40, 20, "-", CLR_TEXT_SECONDARY);
+			put_text(c, v->fText, cx[3], ry + th_scale(5), th_scale(110), th_scale(20), line, CLR_TEXT_PRIMARY);
+			draw_access(v, c, cx[4], ry + th_scale(5), s);
+			if (nf) put_text(c, v->fText, cx[5], ry + th_scale(5), x + tw - th_scale(16) - cx[5], th_scale(20), fl, CLR_DANGER);
+			else put_text(c, v->fText, cx[5], ry + th_scale(5), th_scale(40), th_scale(20), "-", CLR_TEXT_SECONDARY);
 
 			v->row_rc[k] = rr;
 		}
 		v->nrow = v->count;
-		y += th + 16;
+		y += th + th_scale(16);
 	}
 
 	if (v->sel >= 0 && v->sel < v->count) {
 		const SecInfo* s = &v->sec[v->sel];
-		int colw = (tw - 32) / 5, k;
+		int colw = (tw - th_scale(32)) / 5, k;
 		char fl[96], val[48];
 		int nf = build_flags(s, fl, sizeof(fl));
 
-		draw_card(c, x, y, tw, 128);
-		put_text(c, v->fTitle, x + 16, y + 10, 200, 24, s->name, CLR_TEXT_PRIMARY);
+		draw_card(c, x, y, tw, th_scale(128));
+		put_text(c, v->fTitle, x + th_scale(16), y + th_scale(10), th_scale(200), th_scale(24), s->name, CLR_TEXT_PRIMARY);
 
 		if (v->entropy_cb) {
-			PlRect b = { x + tw - 16 - 180, y + 8, x + tw - 16, y + 36 };
+			PlRect b = { x + tw - th_scale(16) - th_scale(180), y + th_scale(8), x + tw - th_scale(16), y + th_scale(36) };
 			draw_button(v, c, b, translate("View in Entropy tab"), v->hover_btn);
 			v->btn_entropy = b; v->has_entropy = 1;
 		}
 
 		for (k = 0; k < 5; ++k) {
 			static const char* keys[5] = { "Address", "Virtual size", "Raw size", "Entropy", "Access" };
-			int cx = x + 16 + k * colw;
-			put_text(c, v->fText, cx, y + 42, colw, 20, translate(keys[k]), CLR_TEXT_SECONDARY);
+			int cx = x + th_scale(16) + k * colw;
+			put_text(c, v->fText, cx, y + th_scale(42), colw, th_scale(20), translate(keys[k]), CLR_TEXT_SECONDARY);
 			switch (k) {
 			case 0: snprintf(val, sizeof(val), "0x%08X", (unsigned)s->va); break;
 			case 1: fmt_size(val, sizeof(val), s->vsize); break;
@@ -727,30 +727,30 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 			case 3: snprintf(val, sizeof(val), "%.2f / 8.00", s->entropy); break;
 			default: val[0] = 0; break;
 			}
-			if (k == 4) draw_access(v, c, cx, y + 62, s);
-			else put_text(c, v->fText, cx, y + 62, colw, 20, val, CLR_TEXT_PRIMARY);
+			if (k == 4) draw_access(v, c, cx, y + th_scale(62), s);
+			else put_text(c, v->fText, cx, y + th_scale(62), colw, th_scale(20), val, CLR_TEXT_PRIMARY);
 		}
-		put_text(c, v->fText, x + 16, y + 90, tw - 32, 20, describe(s->name), CLR_TEXT_SECONDARY);
-		if (nf) put_text(c, v->fText, x + 16, y + 106, tw - 32, 20, fl, CLR_DANGER);
+		put_text(c, v->fText, x + th_scale(16), y + th_scale(90), tw - th_scale(32), th_scale(20), describe(s->name), CLR_TEXT_SECONDARY);
+		if (nf) put_text(c, v->fText, x + th_scale(16), y + th_scale(106), tw - th_scale(32), th_scale(20), fl, CLR_DANGER);
 	}
 
-	v->content_h = y + v->scroll + 128 + 16;       
+	v->content_h = y + v->scroll + th_scale(128) + th_scale(16);
 	if (v->content_h > h) {
 		int maxs2 = v->content_h - h;
-		int pad = 10, trkh = h - 2 * pad;          
+		int pad = th_scale(10), trkh = h - 2 * pad;
 		int tl = trkh * h / v->content_h, pos;
 		PlRect trk, thb;
-		if (tl < 24) tl = 24;
+		if (tl < th_scale(24)) tl = th_scale(24);
 		if (tl > trkh) tl = trkh;
 		if (v->scroll > maxs2) { v->scroll = maxs2; pl_invalidate(v->w, NULL); }
 		pos = pad + (trkh - tl) * v->scroll / maxs2;
-		trk.l = w - 16; trk.t = pad; trk.r = w; trk.b = h - pad;
-		thb.l = w - 6; thb.t = pos; thb.r = w - 3; thb.b = pos + tl;
+		trk.l = w - th_scale(16); trk.t = pad; trk.r = w; trk.b = h - pad;
+		thb.l = w - th_scale(6); thb.t = pos; thb.r = w - th_scale(3); thb.b = pos + tl;
 		pl_round_rect(c, thb, CLR_BTN_GHOST_BD, CLR_BTN_GHOST_BD, 1);
 		v->sb_track = trk; v->sb_thumb = thb; v->has_sb = 1;
 	}
 
-	pl_frame_corners(c, w, h, 12, CLR_BG, CLR_PANEL_BORDER);
+	pl_frame_corners(c, w, h, th_scale(12), CLR_BG, CLR_PANEL_BORDER);
 }
 
 static int in_rect(PlRect r, int x, int y)
@@ -846,7 +846,7 @@ static void on_wheel(void* u, int x, int y, int delta, int mods)
 	SecView* v = (SecView*)u;
 	(void)x; (void)y; (void)mods;
 	if (!delta) return;
-	secview_scroll(v, delta > 0 ? -60 : 60);     
+	secview_scroll(v, delta > 0 ? -th_scale(60) : th_scale(60));
 }
 
 static int on_hand(void* u, int x, int y)

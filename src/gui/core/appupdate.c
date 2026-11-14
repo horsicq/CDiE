@@ -936,10 +936,10 @@ void appupd_cancel(void)
 	atom_set(&s_cancel, 1);
 }
 
-#define DLG_W 480
-#define DLG_H 330
-#define BTN_W 110
-#define BTN_H 34
+#define DLG_W th_scale(480)
+#define DLG_H th_scale(330)
+#define BTN_W th_scale(110)
+#define BTN_H th_scale(34)
 
 #ifdef _WIN32
 #define UPD_DONE_BUTTON 0     
@@ -1061,9 +1061,9 @@ static void request_close(Dlg* d)
 
 static void buttons(const Dlg* d, PlRect* b1, PlRect* b2)
 {
-	int by = d->H - 20 - BTN_H;
-	*b2 = mkr(d->W - 20 - BTN_W, by, d->W - 20, by + BTN_H);
-	*b1 = mkr(b2->l - 10 - BTN_W, by, b2->l - 10, by + BTN_H);
+	int by = d->H - th_scale(20) - BTN_H;
+	*b2 = mkr(d->W - th_scale(20) - BTN_W, by, d->W - th_scale(20), by + BTN_H);
+	*b1 = mkr(b2->l - th_scale(10) - BTN_W, by, b2->l - th_scale(10), by + BTN_H);
 }
 
 static void kb_label(unsigned long kb, char* out, size_t cap)
@@ -1077,7 +1077,7 @@ static void kb_label(unsigned long kb, char* out, size_t cap)
 
 static void text_line(PlCanvas* c, PlFont* f, PlColor col, int x, int y, int r, const char* t)
 {
-	pl_text(c, f, mkr(x, y, r, y + 22), t, col, PL_TEXT_ELLIPSIS);
+	pl_text(c, f, mkr(x, y, r, y + th_scale(22)), t, col, PL_TEXT_ELLIPSIS);
 }
 
 static void draw_button(PlCanvas* c, Dlg* d, PlRect r, const char* label, int accent, int idx)
@@ -1085,7 +1085,7 @@ static void draw_button(PlCanvas* c, Dlg* d, PlRect r, const char* label, int ac
 	int hov = d->hov == idx;
 	PlColor fill = accent ? (hov ? CLR_ACCENT_HOVER : CLR_ACCENT)
 		: (hov ? CLR_BTN_GHOST_HOVER : CLR_BTN_GHOST);
-	pl_round_rect(c, r, fill, accent ? fill : CLR_BTN_GHOST_BD, 8);
+	pl_round_rect(c, r, fill, accent ? fill : CLR_BTN_GHOST_BD, th_scale(8));
 	pl_text(c, d->font, r, label, CLR_TEXT_PRIMARY, PL_TEXT_CENTER);
 }
 
@@ -1094,7 +1094,7 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 	Dlg* d = (Dlg*)u;
 	PlRect b1, b2, card;
 	char buf[160], a[48], b[48];
-	int x = 24, state = (int)d->state;
+	int x = th_scale(24), state = (int)d->state;
 	unsigned long done = 0, total = 0;
 
 	d->W = w; d->H = h;
@@ -1104,66 +1104,66 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 
 	pl_fill(c, 0, 0, w, h, CLR_BG);
 
-	pl_round_rect(c, mkr(x, 22, x + 44, 66), CLR_ACCENT, CLR_ACCENT, 12);
-	pl_line(c, x + 22, 33, x + 22, 52, CLR_TEXT_PRIMARY);
-	pl_line(c, x + 14, 44, x + 22, 53, CLR_TEXT_PRIMARY);
-	pl_line(c, x + 30, 44, x + 22, 53, CLR_TEXT_PRIMARY);
-	pl_line(c, x + 13, 58, x + 31, 58, CLR_TEXT_PRIMARY);
+	pl_round_rect(c, mkr(x, th_scale(22), x + th_scale(44), th_scale(66)), CLR_ACCENT, CLR_ACCENT, th_scale(12));
+	pl_line(c, x + th_scale(22), th_scale(33), x + th_scale(22), th_scale(52), CLR_TEXT_PRIMARY);
+	pl_line(c, x + th_scale(14), th_scale(44), x + th_scale(22), th_scale(53), CLR_TEXT_PRIMARY);
+	pl_line(c, x + th_scale(30), th_scale(44), x + th_scale(22), th_scale(53), CLR_TEXT_PRIMARY);
+	pl_line(c, x + th_scale(13), th_scale(58), x + th_scale(31), th_scale(58), CLR_TEXT_PRIMARY);
 
-	pl_text(c, d->fontt, mkr(x + 60, 20, w - x, 46),
+	pl_text(c, d->fontt, mkr(x + th_scale(60), th_scale(20), w - x, th_scale(46)),
 		state == S_DONE ? translate("Update installed")
 		: state == S_DL ? translate("Downloading update")
 		: state == S_ERR ? translate("Update failed")
 		: translate("Update available"),
 		CLR_TEXT_PRIMARY, PL_TEXT_ELLIPSIS);
 	snprintf(buf, sizeof(buf), "cdie %s", d->cur[0] ? d->cur : "");
-	pl_text(c, d->font, mkr(x + 60, 46, w - x, 68), buf, CLR_TEXT_SECONDARY, PL_TEXT_ELLIPSIS);
+	pl_text(c, d->font, mkr(x + th_scale(60), th_scale(46), w - x, th_scale(68)), buf, CLR_TEXT_SECONDARY, PL_TEXT_ELLIPSIS);
 
-	card = mkr(x, 84, w - x, h - 20 - BTN_H - 16);
-	pl_round_rect(c, card, CLR_PANEL_BODY, CLR_PANEL_BORDER, 12);
+	card = mkr(x, th_scale(84), w - x, h - th_scale(20) - BTN_H - th_scale(16));
+	pl_round_rect(c, card, CLR_PANEL_BODY, CLR_PANEL_BORDER, th_scale(12));
 
 	if (state == S_OFFER || state == S_CANCELLED) {
 		char date[16] = "";
 		strncpy(date, d->info.stamp, 10); date[10] = 0;
-		pl_text(c, d->fontb, mkr(card.l + 18, card.t + 14, card.r - 18, card.t + 36),
+		pl_text(c, d->fontb, mkr(card.l + th_scale(18), card.t + th_scale(14), card.r - th_scale(18), card.t + th_scale(36)),
 			translate("NEW VERSION"), CLR_TEXT_SECONDARY, PL_TEXT_ELLIPSIS);
-		pl_text(c, d->fontt, mkr(card.l + 18, card.t + 38, card.r - 18, card.t + 66),
+		pl_text(c, d->fontt, mkr(card.l + th_scale(18), card.t + th_scale(38), card.r - th_scale(18), card.t + th_scale(66)),
 			d->info.tag, CLR_TEXT_PRIMARY, PL_TEXT_ELLIPSIS);
 		if (date[0]) {
 			snprintf(buf, sizeof(buf), "%s %s", translate("Released"), date);
-			text_line(c, d->font, CLR_TEXT_SECONDARY, card.l + 18, card.t + 68, card.r - 18, buf);
+			text_line(c, d->font, CLR_TEXT_SECONDARY, card.l + th_scale(18), card.t + th_scale(68), card.r - th_scale(18), buf);
 		}
 		if (is_setup_install()) {
-			text_line(c, d->font, CLR_TEXT_CODE, card.l + 18, card.t + 98, card.r - 18,
+			text_line(c, d->font, CLR_TEXT_CODE, card.l + th_scale(18), card.t + th_scale(98), card.r - th_scale(18),
 				translate("cdie will download the installer, close itself"));
-			text_line(c, d->font, CLR_TEXT_CODE, card.l + 18, card.t + 118, card.r - 18,
+			text_line(c, d->font, CLR_TEXT_CODE, card.l + th_scale(18), card.t + th_scale(118), card.r - th_scale(18),
 				translate("and start the setup. Your settings are kept."));
 		}
 		else {
-			text_line(c, d->font, CLR_TEXT_CODE, card.l + 18, card.t + 98, card.r - 18,
+			text_line(c, d->font, CLR_TEXT_CODE, card.l + th_scale(18), card.t + th_scale(98), card.r - th_scale(18),
 				translate("cdie will download it, replace the program files"));
-			text_line(c, d->font, CLR_TEXT_CODE, card.l + 18, card.t + 118, card.r - 18,
+			text_line(c, d->font, CLR_TEXT_CODE, card.l + th_scale(18), card.t + th_scale(118), card.r - th_scale(18),
 				translate("and restart automatically. Your settings are kept."));
 		}
 	}
 	else if (state == S_DL || state == S_DONE) {
-		PlRect track = mkr(card.l + 18, card.t + 52, card.r - 18, card.t + 66);
+		PlRect track = mkr(card.l + th_scale(18), card.t + th_scale(52), card.r - th_scale(18), card.t + th_scale(66));
 		int pct = 0, fw;
 		appupd_get_progress(&done, &total);
 		if (state == S_DONE) pct = 100;
 		else if (total) pct = (int)((unsigned long long)done * 100 / total);
 		if (pct > 100) pct = 100;
 
-		text_line(c, d->font, CLR_TEXT_PRIMARY, card.l + 18, card.t + 18, card.r - 18,
+		text_line(c, d->font, CLR_TEXT_PRIMARY, card.l + th_scale(18), card.t + th_scale(18), card.r - th_scale(18),
 			state == S_DONE ? translate(is_setup_install() ? "Starting the installer..." : (UPD_DONE_BUTTON ? "Ready. Restart cdie to finish." : "Restarting cdie..."))
 			: d->cancel_req ? translate("Cancelling...")
 			: translate("Downloading the latest version..."));
 
-		pl_round_rect(c, track, CLR_PANEL_HEADER, CLR_PANEL_BORDER, 7);
+		pl_round_rect(c, track, CLR_PANEL_HEADER, CLR_PANEL_BORDER, th_scale(7));
 		fw = (track.r - track.l - 2) * pct / 100;
-		if (fw > 6)
+		if (fw > th_scale(6))
 			pl_round_rect(c, mkr(track.l + 1, track.t + 1, track.l + 1 + fw, track.b - 1),
-				CLR_ACCENT, CLR_ACCENT, 6);
+				CLR_ACCENT, CLR_ACCENT, th_scale(6));
 
 		if (state == S_DONE) snprintf(buf, sizeof(buf), "100%%");
 		else if (total) {
@@ -1174,8 +1174,8 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 			kb_label(done, a, sizeof(a));
 			snprintf(buf, sizeof(buf), "%s", a);
 		}
-		text_line(c, d->font, CLR_TEXT_SECONDARY, card.l + 18, card.t + 76, card.r - 18, buf);
-		text_line(c, d->font, CLR_TEXT_CODE, card.l + 18, card.t + 104, card.r - 18,
+		text_line(c, d->font, CLR_TEXT_SECONDARY, card.l + th_scale(18), card.t + th_scale(76), card.r - th_scale(18), buf);
+		text_line(c, d->font, CLR_TEXT_CODE, card.l + th_scale(18), card.t + th_scale(104), card.r - th_scale(18), 
 			translate("Please keep this window open."));
 	}
 	else { /* S_ERR: two-line message */
@@ -1185,10 +1185,10 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 		if (n > 56) { while (cut > 30 && d->err[cut] != ' ') --cut; }
 		snprintf(l1, sizeof(l1), "%.*s", (int)cut, d->err);
 		snprintf(l2, sizeof(l2), "%s", d->err + cut + (d->err[cut] == ' ' ? 1 : 0));
-		text_line(c, d->fontb, CLR_TEXT_PRIMARY, card.l + 18, card.t + 18, card.r - 18,
+		text_line(c, d->fontb, CLR_TEXT_PRIMARY, card.l + th_scale(18), card.t + th_scale(18), card.r - th_scale(18), 
 			translate("Something went wrong"));
-		text_line(c, d->font, CLR_TEXT_SECONDARY, card.l + 18, card.t + 52, card.r - 18, l1);
-		text_line(c, d->font, CLR_TEXT_SECONDARY, card.l + 18, card.t + 74, card.r - 18, l2);
+		text_line(c, d->font, CLR_TEXT_SECONDARY, card.l + th_scale(18), card.t + th_scale(52), card.r - th_scale(18), l1);
+		text_line(c, d->font, CLR_TEXT_SECONDARY, card.l + th_scale(18), card.t + th_scale(74), card.r - th_scale(18), l2);
 	}
 
 	buttons(d, &b1, &b2);
@@ -1303,7 +1303,7 @@ int appupd_dialog_show(void* owner_hwnd, const AppUpdateInfo* info,
 	d->win = pl_window_create(owner_hwnd, translate("Update"), DLG_W, DLG_H, DLG_W, DLG_H,
 		on_win_size, on_win_close, d);
 	if (!d->win) goto fail;
-	d->w = pl_widget_create(pl_window_client(d->win), &s_ops, d, 0, 0, DLG_W, DLG_H - 20);
+	d->w = pl_widget_create(pl_window_client(d->win), &s_ops, d, 0, 0, DLG_W, DLG_H - th_scale(20));
 	if (!d->w) { pl_window_destroy(d->win); goto fail; }
 
 	appupd_set_progress_hook(progress_hook, d);

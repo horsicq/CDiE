@@ -25,8 +25,10 @@
 #define _UNICODE
 #endif
 
+#define COBJMACROS
 #include <windows.h>
 #include <commctrl.h>
+#include <objbase.h>
 #include <shlobj.h>
 #include <dwmapi.h>
 #include <uxtheme.h>
@@ -43,6 +45,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "global.h"
 #include "core/gui_backend.h"
 #include "core/config.h"
 #include "resource.h"
@@ -78,15 +81,6 @@
 #define CDIE_SHOW_CONTEXT 1
 #endif
 
-#if defined(_M_ARM64)
-#define CDIE_ARCH "ARM64"
-#elif defined(_M_X64)
-#define CDIE_ARCH "x64"
-#elif defined(_M_IX86)
-#define CDIE_ARCH "x86"
-#else
-#define CDIE_ARCH "Unknown"
-#endif
 
 #define SIDEBAR_PALETTE_ID  1000
 #define PALETTE_ACTION_BASE 100
@@ -144,6 +138,67 @@ static void sync_system_theme(void);
 static HWND native(xxwidgets_widget* widget)
 {
 	return (HWND)xxwidgets_widget_native_handle(widget);
+}
+
+static void update_dpi(void)
+{
+	HWND hwnd = g_window ? native(g_window) : NULL;
+	if (hwnd) g_dpi = GetDpiForWindow(hwnd);
+}
+
+static ITaskbarList3* g_taskbar;
+static UINT           g_msgTbCreated;
+static TBPFLAG        g_tbFlag = TBPF_NOPROGRESS;
+static int            g_comInit;
+
+static int       g_tbPct;
+static ULONGLONG g_estMs = 1000;   
+static ULONGLONG g_fileSize;
+static ULONGLONG g_ioBase;
+
+static void taskbar_apply(void)
+{
+	HWND hwnd = g_window ? native(g_window) : NULL;
+	if (!g_taskbar || !hwnd) return;
+	ITaskbarList3_SetProgressState(g_taskbar, hwnd, g_tbFlag);
+	if (g_tbFlag == TBPF_ERROR)   
+		ITaskbarList3_SetProgressValue(g_taskbar, hwnd, 100, 100);
+	else if (g_tbFlag == TBPF_NORMAL)
+		ITaskbarList3_SetProgressValue(g_taskbar, hwnd, (ULONGLONG)g_tbPct, 100);
+}
+
+static void taskbar_progress(int pct)
+{
+	if (pct < 0) pct = 0;
+	if (pct > 100) pct = 100;
+	g_tbPct = pct;
+	g_tbFlag = TBPF_NORMAL;
+	taskbar_apply();
+}
+static void taskbar_set(TBPFLAG flag)
+{
+	g_tbFlag = flag;
+	taskbar_apply();
+}
+
+static void taskbar_init(void)
+{
+	HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+	g_comInit = SUCCEEDED(hr);
+	g_msgTbCreated = RegisterWindowMessageW(L"TaskbarButtonCreated");
+	if (SUCCEEDED(CoCreateInstance(&CLSID_TaskbarList, NULL, CLSCTX_INPROC_SERVER,
+		&IID_ITaskbarList3, (void**)&g_taskbar))) {
+		if (FAILED(ITaskbarList3_HrInit(g_taskbar))) {
+			ITaskbarList3_Release(g_taskbar);
+			g_taskbar = NULL;
+		}
+	}
+}
+
+static void taskbar_shutdown(void)
+{
+	if (g_taskbar) { ITaskbarList3_Release(g_taskbar); g_taskbar = NULL; }
+	if (g_comInit) { CoUninitialize(); g_comInit = 0; }
 }
 
 static void repaint_all(void)
@@ -223,6 +278,14 @@ static char* copy_utf8(const char* text)
 static void set_status(const char* text)
 {
 	if (g_bottombar) bottombar_set_status(g_bottombar, text);
+}
+
+static void scan_progress(int busy, int pct, const char* stage)
+{
+	if (g_tree) resultstree_set_busy(g_tree, busy, pct, stage);
+	if (g_window)
+		RedrawWindow(native(g_window), NULL, NULL,
+			RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
 }
 
 static void set_scan_path(const char* path)
@@ -446,21 +509,141 @@ static void clear_scan(void)
 	if (g_header_wnd)  header_clear(g_header_wnd);
 }
 
-static void collect_result(const char* type, const char* name,
+typedef struct { char* type, * name, * version, * info; } ScanRow;
+typedef struct {
+	char* path;
+	ScanRow* rows;
+	SIZE_T count, cap;
+	char* type;
+	int ok;
+	unsigned msec;
+	ULONGLONG t0;
+} ScanJob;
+
+static ScanJob* g_job;
+static HANDLE g_jobThread;
+static volatile LONG g_jobDone;
+
+static void job_free(ScanJob* j)
+{
+	SIZE_T i;
+	for (i = 0; i < j->count; ++i) {
+		HeapFree(GetProcessHeap(), 0, j->rows[i].type);
+		HeapFree(GetProcessHeap(), 0, j->rows[i].name);
+		HeapFree(GetProcessHeap(), 0, j->rows[i].version);
+		HeapFree(GetProcessHeap(), 0, j->rows[i].info);
+	}
+	if (j->rows) HeapFree(GetProcessHeap(), 0, j->rows);
+	if (j->type) gui_backend_free(j->type);
+	if (j->path) HeapFree(GetProcessHeap(), 0, j->path);
+	HeapFree(GetProcessHeap(), 0, j);
+}
+
+static void job_collect(const char* type, const char* name,
 	const char* version, const char* info, void* user_data)
 {
-	++*(unsigned int*)user_data;
-	resultstree_add(g_tree, type, name, version, info);
+	ScanJob* j = (ScanJob*)user_data;
+	ScanRow* r;
+	if (j->count == j->cap) {
+		SIZE_T cap = j->cap ? j->cap * 2 : 16;
+		ScanRow* n = j->rows
+			? (ScanRow*)HeapReAlloc(GetProcessHeap(), 0, j->rows, cap * sizeof(*n))
+			: (ScanRow*)HeapAlloc(GetProcessHeap(), 0, cap * sizeof(*n));
+		if (!n) return;
+		j->rows = n; j->cap = cap;
+	}
+	r = &j->rows[j->count++];
+	r->type = copy_utf8(type);   r->name = copy_utf8(name);
+	r->version = copy_utf8(version); r->info = copy_utf8(info);
+}
+
+static DWORD WINAPI scan_thread(LPVOID param)
+{
+	ScanJob* j = (ScanJob*)param;
+	LARGE_INTEGER f, a, b;
+	QueryPerformanceFrequency(&f);
+	QueryPerformanceCounter(&a);
+	j->ok = gui_backend_scan_results_type(j->path, 0, job_collect, j, NULL, &j->type);
+	QueryPerformanceCounter(&b);
+	j->msec = f.QuadPart > 0
+		? (unsigned)(((b.QuadPart - a.QuadPart) * 1000) / f.QuadPart) : 0;
+	InterlockedExchange(&g_jobDone, 1);
+	return 0;
+}
+
+static void scan_animate(void)
+{
+	char text[64];
+	int pct;
+	ULONGLONG ms = GetTickCount64() - g_job->t0;
+
+	pct = gui_backend_scan_progress();
+	if (pct < 0)                                   /* engine has no total yet */
+		pct = (int)(ms * 95 / (ms + g_estMs));     /* time-based fallback */
+	if (pct > 99) pct = 99;
+	if (pct < g_tbPct) pct = g_tbPct;              /* never move backwards */
+	taskbar_progress(pct);
+
+	snprintf(text, sizeof(text), "Scanning... %d%%  (%u.%u s)", pct,
+		(unsigned)(ms / 1000), (unsigned)((ms % 1000) / 100));
+	if (g_tree)
+		resultstree_set_busy(g_tree, 1, pct, text);
+}
+
+static void scan_finish(void)        
+{
+	ScanJob* j = g_job;
+	SIZE_T i;
+	char text[512];
+
+	WaitForSingleObject(g_jobThread, INFINITE);
+	CloseHandle(g_jobThread);
+	g_jobThread = NULL;
+	g_job = NULL;
+	InterlockedExchange(&g_jobDone, 0);
+	if (g_tree) resultstree_set_busy(g_tree, 0, 0, "");
+	taskbar_set(j->ok ? TBPF_NOPROGRESS : TBPF_ERROR);
+
+	if (j->ok) {
+		for (i = 0; i < j->count; ++i)
+			resultstree_add(g_tree, j->rows[i].type, j->rows[i].name,
+				j->rows[i].version, j->rows[i].info);
+		snprintf(text, sizeof(text), "Scan complete (%s). %u result%s in %u ms.",
+			j->type && j->type[0] ? j->type : "Unknown type",
+			(unsigned)j->count, j->count == 1 ? "" : "s", j->msec);
+		set_status(text);
+
+		{
+			ULONGLONG t1 = GetTickCount64();
+			update_chrome_after_scan(j->path, j->type);
+			if (g_lastPath) HeapFree(GetProcessHeap(), 0, g_lastPath);
+			g_lastPath = copy_utf8(j->path);
+			open_file_views(j->path);
+			if (g_vt) vtview_set_file(g_vt, j->path);
+			if (g_sec) secview_set_file(g_sec, j->path);
+			if (g_str) stringsview_set_file(g_str, j->path);
+			snprintf(text + strlen(text), sizeof(text) - strlen(text),
+				" Views: %u ms.", (unsigned)(GetTickCount64() - t1));
+			set_status(text);
+		}
+		if (g_lastPath) HeapFree(GetProcessHeap(), 0, g_lastPath);
+		g_lastPath = copy_utf8(j->path);
+		open_file_views(j->path);
+		if (g_vt) vtview_set_file(g_vt, j->path);
+		if (g_sec) secview_set_file(g_sec, j->path);
+		if (g_str) stringsview_set_file(g_str, j->path);
+	}
+	else {
+		set_status("Cannot open the file.");
+	}
+	job_free(j);
 }
 
 static void do_scan(void)
 {
-	char* path, * type = NULL;
-	char text[512];
-	unsigned int count = 0, msec = 0;
-	LARGE_INTEGER frequency, started, ended;
-	int ok;
+	ScanJob* j;
 
+	if (g_job) { set_status("A scan is already running."); return; }
 	if (config_db_required()) {
 		set_status("Select the signature database folder first.");
 		g_pending = ACTION_DATABASE_PATHS;
@@ -473,41 +656,42 @@ static void do_scan(void)
 		if (g_sig) sigview_activate(g_sig);
 		return;
 	}
-	path = copy_utf8(g_scanPath);
-	if (!path) { set_status("Out of memory."); return; }
+
+	j = (ScanJob*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*j));
+	if (!j) { set_status("Out of memory."); return; }
+	j->path = copy_utf8(g_scanPath);
+	if (!j->path) { HeapFree(GetProcessHeap(), 0, j); set_status("Out of memory."); return; }
 
 	apply_flags_to_backend();
 	clear_scan();
 	set_status("Scanning the selected file...");
-	UpdateWindow(native(g_window));
-
-	QueryPerformanceFrequency(&frequency);
-	QueryPerformanceCounter(&started);
-	ok = gui_backend_scan_results_type(path, 0, collect_result, &count, NULL, &type);
-	QueryPerformanceCounter(&ended);
-
-	if (ok) {
-		if (frequency.QuadPart > 0)
-			msec = (unsigned int)(((ended.QuadPart - started.QuadPart) * 1000)
-				/ frequency.QuadPart);
-		snprintf(text, sizeof(text), "Scan complete (%s). %u result%s in %u ms.",
-			type && type[0] ? type : "Unknown type",
-			count, count == 1 ? "" : "s", msec);
-		set_status(text);
-
-		update_chrome_after_scan(path, type);
-		if (g_lastPath) HeapFree(GetProcessHeap(), 0, g_lastPath);
-		g_lastPath = copy_utf8(path);
-		open_file_views(path);
-		if (g_vt) vtview_set_file(g_vt, path);
-		if (g_sec) secview_set_file(g_sec, path);
-		if (g_str) stringsview_set_file(g_str, path);
+	{
+		WCHAR* wp = utf8_to_wide(g_scanPath);
+		WIN32_FILE_ATTRIBUTE_DATA fa;
+		ULONGLONG sz = 0;
+		IO_COUNTERS ioc;
+		if (wp) {
+			if (GetFileAttributesExW(wp, GetFileExInfoStandard, &fa))
+				sz = ((ULONGLONG)fa.nFileSizeHigh << 32) | fa.nFileSizeLow;
+			HeapFree(GetProcessHeap(), 0, wp);
+		}
+		g_estMs = 300 + sz / 40960;   /* fallback only */
+		g_fileSize = sz;
+		g_ioBase = GetProcessIoCounters(GetCurrentProcess(), &ioc)
+			? ioc.ReadTransferCount : 0;
 	}
-	else {
-		set_status("Cannot open the file.");
+	j->t0 = GetTickCount64();
+	InterlockedExchange(&g_jobDone, 0);
+	g_job = j;
+	g_jobThread = CreateThread(NULL, 0, scan_thread, j, 0, NULL);
+	if (!g_jobThread) {
+		g_job = NULL;
+		job_free(j);
+		set_status("Could not start the scan.");
+		return;
 	}
-	HeapFree(GetProcessHeap(), 0, path);
-	if (type) gui_backend_free(type);
+	if (g_tree) resultstree_set_busy(g_tree, 1, 0, "Scanning...");
+	taskbar_progress(0);
 }
 
 static void do_browse(void)
@@ -981,10 +1165,10 @@ static void layout(void)
 
 	tx = cx + CONTENT_PAD;
 	tw = cw - 2 * CONTENT_PAD;
-	ty = cy + 4;
-	th = H - cy - BOTTOMBAR_H - 8;
-	if (tw < 40) tw = 40;
-	if (th < 40) th = 40;
+	ty = cy + th_scale(4);
+	th = H - cy - BOTTOMBAR_H - th_scale(8);
+	if (tw < th_scale(40)) tw = th_scale(40);
+	if (th < th_scale(40)) th = th_scale(40);
 
 	if (g_tree)    pl_widget_set_rect(resultstree_widget(g_tree), VIEW_RECT(NAV_OVERVIEW));
 	if (g_hex)     hexview_set_rect(g_hex, VIEW_RECT(NAV_HEX));
@@ -997,12 +1181,12 @@ static void layout(void)
 	if (g_str)     stringsview_set_rect(g_str, VIEW_RECT(NAV_STRINGS));
 
 	GetWindowRect(native(g_window), &window_bounds);
-	g_minWindowWidth = SIDEBAR_W + 520 +
+	g_minWindowWidth = SIDEBAR_W + th_scale(520) +
 		(window_bounds.right - window_bounds.left - W);
-	if (g_minWindowWidth < 900) g_minWindowWidth = 900;
-	g_minWindowHeight = HEADER_H + INFOBAR_H + TABBAR_H + BOTTOMBAR_H + 200 +
+	if (g_minWindowWidth < th_scale(900)) g_minWindowWidth = th_scale(900);
+	g_minWindowHeight = HEADER_H + INFOBAR_H + TABBAR_H + BOTTOMBAR_H + th_scale(200) +
 		(window_bounds.bottom - window_bounds.top - H);
-	if (g_minWindowHeight < 540) g_minWindowHeight = 540;
+	if (g_minWindowHeight < th_scale(540)) g_minWindowHeight = th_scale(540);
 }
 
 #undef VIEW_RECT
@@ -1128,11 +1312,25 @@ static LRESULT CALLBACK window_subclass(HWND handle, UINT message,
 		return tray_result;
 	if (dlwatch_handle_message(handle, message, wp, lp, &tray_result))
 		return tray_result;
+	if (g_msgTbCreated && message == g_msgTbCreated) {
+		taskbar_apply();
+		return 0;
+	}
 	switch (message) {
 	case WM_SETTINGCHANGE:
 	case WM_THEMECHANGED:
 		sync_system_theme();
 		return 0;
+	case WM_DPICHANGED: {
+		RECT* r = (RECT*)lp;
+		g_dpi = HIWORD(wp);
+		SetWindowPos(handle, NULL, r->left, r->top,
+			r->right - r->left, r->bottom - r->top,
+			SWP_NOZORDER | SWP_NOACTIVATE);
+		layout();
+		repaint_all();
+		return 0;
+	}
 	case WM_GETMINMAXINFO: {
 		MINMAXINFO* info = (MINMAXINFO*)lp;
 		info->ptMinTrackSize.x = g_minWindowWidth;
@@ -1625,7 +1823,7 @@ static int create_main_window(void)
 		MessageBoxW(NULL, L"Main window creation failed", L"cdie", MB_ICONERROR);
 		return 0;
 	}
-
+	update_dpi();
 	sync_system_theme();
 	set_app_icon();
 	xxwidgets_widget_set_visible(g_window, 0);
@@ -1699,7 +1897,8 @@ int gui_run(void)
 	}
 
 	init_tray_and_monitor();
-	SetWindowPos(native(g_window), NULL, 0, 0, 1281, 700, SWP_NOMOVE | SWP_NOZORDER);
+	taskbar_init();
+	SetWindowPos(native(g_window), NULL, 0, 0, th_scale(1281), th_scale(700), SWP_NOMOVE | SWP_NOZORDER);
 	db_ok = init_backend_with_config();
 	apply_saved_prefs();
 	g_prefsReady = 1;
@@ -1736,6 +1935,11 @@ int gui_run(void)
 		g_pending = ACTION_NONE;
 		run_action(action);
 
+		if (g_job) {
+			if (g_jobDone) scan_finish();
+			else scan_animate();
+		}
+
 		if (g_vt) vtview_tick(g_vt);
 		if (g_str) stringsview_tick(g_str);
 		if (g_sig) sigview_tick(g_sig);
@@ -1746,8 +1950,10 @@ int gui_run(void)
 
 finish:
 	if (g_palHook) { UnhookWindowsHookEx(g_palHook); g_palHook = NULL; }
+	if (g_jobThread) { WaitForSingleObject(g_jobThread, INFINITE); CloseHandle(g_jobThread); g_jobThread = NULL; }
 	if (g_vt) vtview_cancel(g_vt);
 	hex_close();
+	taskbar_shutdown();
 	dlwatch_shutdown();
 	tray_remove();
 	save_config_on_exit();

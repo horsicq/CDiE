@@ -24,9 +24,9 @@
 #include "theme/logo_data.h"
 #include "core/i18n.h"
 
-#define LOGO_DRAW 24
+#define LOGO_DRAW th_scale(24)
 #define SB_GROUPS 3
-#define GRP_H     28
+#define GRP_H th_scale(28)
 
 struct Sidebar {
 	PlWidget* w;
@@ -59,7 +59,7 @@ static int row_visible(const Sidebar* d, int r)
 
 static int row_h(int r) { return s_rows[r].nav < 0 ? GRP_H : NAV_H; }
 
-#define LIST_TOP (LOGO_H + SEARCH_MY + SEARCH_H + SEARCH_MY + 4)
+#define LIST_TOP (LOGO_H + SEARCH_MY + SEARCH_H + SEARCH_MY + th_scale(4))
 
 static int row_y(const Sidebar* d, int r)
 {
@@ -72,7 +72,7 @@ static int row_y(const Sidebar* d, int r)
 static int nav_item_y(const Sidebar* d, int i)
 {
 	int r;
-	if (i == NAV_OPTIONS) return d->height - NAV_H - 8;
+	if (i == NAV_OPTIONS) return d->height - NAV_H - th_scale(8);
 	for (r = 0; r < SB_ROWS; ++r)
 		if (s_rows[r].nav == i) return row_visible(d, r) ? row_y(d, r) : -1;
 	return -1;
@@ -80,7 +80,7 @@ static int nav_item_y(const Sidebar* d, int i)
 
 static int list_bottom(const Sidebar* d)
 {
-	return nav_item_y(d, NAV_OPTIONS) - 8;     
+	return nav_item_y(d, NAV_OPTIONS) - th_scale(8);
 }
 
 static int content_h(const Sidebar* d)
@@ -137,8 +137,8 @@ static void invalidate_item(Sidebar* d, int i)
 
 static void draw_group(Sidebar* d, PlCanvas* c, int g, int y, int w)
 {
-	PlRect r = { 22, y, w - 34, y + GRP_H };
-	int cx = w - 20, cy = y + GRP_H / 2;
+	PlRect r = { th_scale(22), y, w - th_scale(34), y + GRP_H };
+	int cx = w - th_scale(20), cy = y + GRP_H / 2;
 	if (d->hovered == -(g + 2))
 		pl_fill(c, 0, y, w, y + GRP_H, CLR_SIDEBAR_HOVER);
 	pl_text(c, d->fontBold, r, translate(s_group_names[g]),
@@ -157,9 +157,9 @@ static void draw_search(Sidebar* d, PlCanvas* c, int width)
 {
 	int sx = SEARCH_MX, sy = LOGO_H + SEARCH_MY;
 	int sw = width - 2 * SEARCH_MX;
-	int cx = sx + 14, cy = sy + SEARCH_H / 2;
+	int cx = sx + th_scale(14), cy = sy + SEARCH_H / 2;
 	PlRect box = { sx, sy, sx + sw, sy + SEARCH_H };
-	PlRect tr = { sx + 26, sy, sx + sw - 4, sy + SEARCH_H };
+	PlRect tr = { sx + th_scale(26), sy, sx + sw - th_scale(4), sy + SEARCH_H };
 
 	pl_round_rect(c, box, CLR_SEARCH_BG, CLR_PANEL_BORDER, 6);
 	pl_ellipse(c, cx - 5, cy - 5, cx + 5, cy + 5, PL_NONE, CLR_TEXT_SECONDARY);
@@ -172,10 +172,10 @@ static void draw_item(Sidebar* d, PlCanvas* c, int i, int w, int h)
 	int y = nav_item_y(d, i);
 	int sel = (d->selected == i), hov = (d->hovered == i);
 	PlColor bg = sel ? CLR_SIDEBAR_SEL : (hov ? CLR_SIDEBAR_HOVER : CLR_SIDEBAR_BG);
-	PlRect r = { 30, y, w - 8, y + NAV_H };
+	PlRect r = { th_scale(30), y, w - th_scale(8), y + NAV_H };
 
 	pl_fill(c, 0, y, w, y + NAV_H, bg);
-	if (sel) pl_fill(c, 0, y, 3, y + NAV_H, CLR_ACCENT);
+	if (sel) pl_fill(c, 0, y, th_scale(3), y + NAV_H, CLR_ACCENT);
 	pl_text(c, d->fontNav, r, translate(s_labels[i]),
 		sel ? CLR_TEXT_PRIMARY : CLR_TEXT_SECONDARY, PL_TEXT_ELLIPSIS);
 }
@@ -201,7 +201,7 @@ static void draw_logo(PlCanvas* c, int x, int y, PlColor bg)
 static void on_paint(void* u, PlCanvas* c, int w, int h)
 {
 	Sidebar* d = (Sidebar*)u;
-	PlRect tr = { 14 + LOGO_DRAW + 8, 13, w - 8, 37 };
+	PlRect tr = { th_scale(14) + LOGO_DRAW + th_scale(8), th_scale(13), w - th_scale(8), th_scale(37) };
 	int i, lb, th, ch;
 
 	d->width = w; d->height = h;
@@ -220,7 +220,7 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 	pl_fill(c, 0, lb, w, h, CLR_SIDEBAR_BG);
 
 	pl_fill(c, 0, 0, w, LOGO_H, CLR_LOGO_BG);
-	pl_image(c, 14, (LOGO_H - LOGO_DRAW) / 2, LOGO_DRAW, LOGO_DRAW,
+	pl_image(c, th_scale(14), (LOGO_H - LOGO_DRAW) / 2, LOGO_DRAW, LOGO_DRAW, 
 		LOGO_IMG_W, LOGO_IMG_H, logo_rgba);
 	pl_text(c, d->fontTitle, tr, translate("Detect It Easy"), CLR_TEXT_PRIMARY, PL_TEXT_ELLIPSIS);
 	pl_line(c, 0, LOGO_H, w, LOGO_H, CLR_SEPARATOR);

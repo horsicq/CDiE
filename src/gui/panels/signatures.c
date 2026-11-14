@@ -45,14 +45,14 @@
 
 enum { CL_TXT, CL_COM, CL_STR, CL_KEY, CL_FN, CL_NUM, CL_OBJ };
 
-#define BANNER_H 52
-#define HEAD_ED  38
-#define HEAD_OUT 34
+#define BANNER_H th_scale(52)
+#define HEAD_ED  th_scale(38)
+#define HEAD_OUT th_scale(34)
 #define NCHIPS   5
-#define TROW     28          /* tree row height   */
-#define LH       18          /* editor line height */
-#define OLH      16          /* output line height */
-#define MAXC     2048        /* max drawn columns per line */
+#define TROW     th_scale(28)          /* tree row height   */
+#define LH       th_scale(18)          /* editor line height */
+#define OLH      th_scale(16)          /* output line height */
+#define MAXC     2048                  /* max drawn columns per line */
 #define OUT_MAX  1000
 
 enum { K_NORMAL, K_ACCENT, K_CHIP, K_SWITCH, K_LINK, K_DROP };
@@ -1106,41 +1106,41 @@ static void paint_banner(Sig* s, PlCanvas* c)
 
 static void layout(Sig* s)
 {
-  const int m = 12, lw = 300, bh = 34, gap = 12;
-  const int nextW = 70, findW = 70, boxW = 260;
-  const int barH = s->embedded ? 0 : 56;
+  const int m = th_scale(12), lw = th_scale(300), bh = th_scale(34), gap = th_scale(12);
+  const int nextW = th_scale(70), findW = th_scale(70), boxW = th_scale(260);
+  const int barH = s->embedded ? 0 : th_scale(56);
   int W = s->W, H = s->H, bot = H - barH - m, rx, rw, y, top, gy, gh, by, ty;
 
   s->r_banner = mkr(m, m, W - m, m + BANNER_H);
-  s->b[B_UPD].r = mkr(W - m - 16 - 110, m + 9, W - m - 16, m + 9 + bh);
+  s->b[B_UPD].r = mkr(W - m - th_scale(16) - th_scale(110), m + th_scale(9), W - m - th_scale(16), m + th_scale(9) + bh);
   ty = m + BANNER_H + gap;
 
   s->r_left = mkr(m, ty, m + lw, bot);
-  s->r_filter = mkr(m + 12, ty + 12, m + lw - 12, ty + 12 + bh);
-  s->r_tree = mkr(m + 8, s->r_filter.b + 8, m + lw - 8, bot - 8);
+  s->r_filter = mkr(m + th_scale(12), ty + th_scale(12), m + lw - th_scale(12), ty + th_scale(12) + bh);
+  s->r_tree = mkr(m + th_scale(8), s->r_filter.b + th_scale(8), m + lw - th_scale(8), bot - th_scale(8));
 
   rx = m + lw + gap;
   rw = W - rx - m;
-  if (rw < 300) rw = 300;
+  if (rw < th_scale(300)) rw = th_scale(300);
   y = ty;
-  s->b[B_SAVE].r = mkr(rx, y, rx + 80, y + bh);
-  s->b[B_RO].r = mkr(rx + 92, y, rx + 202, y + bh);
+  s->b[B_SAVE].r = mkr(rx, y, rx + th_scale(80), y + bh);
+  s->b[B_RO].r = mkr(rx + th_scale(92), y, rx + th_scale(202), y + bh);
   s->b[B_NEXT].r = mkr(rx + rw - nextW, y, rx + rw, y + bh);
-  s->b[B_FIND].r = mkr(rx + rw - nextW - 8 - findW, y, rx + rw - nextW - 8, y + bh);
-  s->r_findbox = mkr(rx + rw - nextW - 8 - findW - 8 - boxW, y,
-    rx + rw - nextW - 8 - findW - 8, y + bh);
+  s->b[B_FIND].r = mkr(rx + rw - nextW - th_scale(8) - findW, y, rx + rw - nextW - th_scale(8), y + bh);
+  s->r_findbox = mkr(rx + rw - nextW - th_scale(8) - findW - th_scale(8) - boxW, y,
+    rx + rw - nextW - th_scale(8) - findW - th_scale(8), y + bh);
 
   top = ty + bh + gap;
   s->r_edcard = mkr(rx, top, rx + rw, bot);
 
-  gy = s->r_edcard.t + HEAD_ED + 8;
-  gh = s->r_edcard.b - 8 - gy;
-  s->r_gut = mkr(rx + 1, gy, rx + 53, gy + gh);
-  s->r_ed = mkr(rx + 53, gy, rx + rw - 10, gy + gh);
+  gy = s->r_edcard.t + HEAD_ED + th_scale(8);
+  gh = s->r_edcard.b - th_scale(8) - gy;
+  s->r_gut = mkr(rx + 1, gy, rx + th_scale(53), gy + gh);
+  s->r_ed = mkr(rx + th_scale(53), gy, rx + rw - th_scale(10), gy + gh);
 
   s->r_bar = mkr(0, H - barH, W, H);
   by = H - barH;
-  s->b[B_CLOSE].r = mkr(W - 12 - 80, by + 11, W - 12, by + 11 + bh);
+  s->b[B_CLOSE].r = mkr(W - th_scale(12) - th_scale(80), by + th_scale(11), W - th_scale(12), by + th_scale(11) + bh);
   if (s->embedded) s->b[B_CLOSE].r = mkr(0, 0, 0, 0);     /* no Close button on a page */
 }
 
@@ -1514,10 +1514,10 @@ void signatures_show(xxwidgets_app* app, xxwidgets_widget* owner)
   init_btn(s, B_CLOSE, K_NORMAL, translate("Close"), 0, 1);
   init_btn(s, B_UPD, K_NORMAL, translate("Checking"), 0, 0);
 
-  win = pl_window_create(ow, translate("Signatures"), 1280, 780, 1000, 640, on_win_size, on_win_close, s);
+  win = pl_window_create(ow, translate("Signatures"), th_scale(1280), th_scale(780), th_scale(1000), th_scale(640), on_win_size, on_win_close, s);
   if (!win) { on_destroy(s); return; }
   s->win = win;
-  s->w = pl_widget_create(pl_window_client(win), &s_ops, s, 0, 0, 1280, 780);
+  s->w = pl_widget_create(pl_window_client(win), &s_ops, s, 0, 0, th_scale(1280), th_scale(780));
   if (!s->w) { pl_window_destroy(win); on_destroy(s); return; }
   s_sig = s;
   updater_init(&s->upd, upd_notify, s);

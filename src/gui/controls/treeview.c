@@ -25,13 +25,13 @@
 #include "theme/theme.h"
 #include "core/i18n.h"
 
-#define HDR_H     40
-#define DET_H     28
+#define HDR_H     th_scale(40)
+#define DET_H     th_scale(28)
 #define DET_ROWS  4
-#define MX        14
-#define GAP       3
-#define SCROLL_W  6
-#define PILL_W  150
+#define MX        th_scale(14)
+#define GAP       th_scale(3)
+#define SCROLL_W  th_scale(6)
+#define PILL_W    th_scale(150)
 
 typedef struct {
   char* type, * name, * version, * info;
@@ -44,6 +44,8 @@ struct ResultsTree {
   size_t    count, cap;
   int       scroll, width, height;
   PlFont* font, * bold, * tiny, * mono;
+  int       busy, pct;
+  char      stage[96];
 };
 
 typedef struct { const char* key; PlColor bg, fg; } Badge;
@@ -159,13 +161,13 @@ static void paint_header(ResultsTree* t, PlCanvas* c, const Item* it,
   int y, int w)
 {
   PlColor bg, fg;
-  PlRect card = { MX + 16, y + GAP, w - MX - SCROLL_W, y + HDR_H - GAP };
+  PlRect card = { MX + th_scale(16), y + GAP, w - MX - SCROLL_W, y + HDR_H - GAP };
   int mid = (card.t + card.b) / 2;
   int pill_w = PILL_W, x;
   char up[80], label[80]; size_t i;
 
   pl_round_rect(c, card, CLR_PANEL, CLR_PANEL_BORDER, 16);
-  pl_line(c, MX + 2, mid, card.l, mid, CLR_PANEL_BORDER);
+  pl_line(c, MX + th_scale(2), mid, card.l, mid, CLR_PANEL_BORDER);
 
   type_label(it->type, label, sizeof label);
   for (i = 0; label[i] && i < sizeof up - 1; ++i) {
@@ -177,30 +179,30 @@ static void paint_header(ResultsTree* t, PlCanvas* c, const Item* it,
   
 
   {
-    PlRect pill = { card.l + 14, mid - 11, card.l + 14 + pill_w, mid + 11 };
+    PlRect pill = { card.l + th_scale(14), mid - th_scale(11), card.l + th_scale(14) + pill_w, mid + th_scale(11) };
     pl_round_rect(c, pill, bg, bg, 22);
     pl_text(c, t->tiny, pill, up, fg, PL_TEXT_CENTER);
   }
 
-  x = card.l + 14 + pill_w + 14;
+  x = card.l + th_scale(14) + pill_w + th_scale(14);
   {
-    PlRect nr = { x, card.t, card.r - 40, card.b };
+    PlRect nr = { x, card.t, card.r - th_scale(40), card.b };
     pl_text(c, t->bold, nr, it->name, CLR_TEXT_PRIMARY, 0);
     if (it->version[0]) {
-      PlRect vr = { x + pl_text_width(t->bold, it->name) + 10,
-                    card.t, card.r - 40, card.b };
+      PlRect vr = { x + pl_text_width(t->bold, it->name) + th_scale(10),
+              card.t, card.r - th_scale(40), card.b };
       pl_text(c, t->mono, vr, it->version, CLR_TEXT_ACCENT, 0);
     }
   }
-  paint_chevron(c, card.r - 20, mid, it->open, CLR_TEXT_SECONDARY);
+  paint_chevron(c, card.r - th_scale(20), mid, it->open, CLR_TEXT_SECONDARY);
 }
 
 static void paint_detail(ResultsTree* t, PlCanvas* c, const char* label,
   const char* value, int y, int w)
 {
-  int l = MX + 32, r = w - MX - 14 - SCROLL_W;
-  PlRect lr = { l + 14,  y, l + 110, y + DET_H };
-  PlRect vr = { l + 120, y, r - 14,  y + DET_H };
+  int l = MX + th_scale(32), r = w - MX - th_scale(14) - SCROLL_W;
+  PlRect lr = { l + th_scale(14),  y, l + th_scale(110), y + DET_H };
+  PlRect vr = { l + th_scale(120), y, r - th_scale(14),  y + DET_H };
   pl_fill(c, l, y, r, y + DET_H, CLR_SIDEBAR_SEL);
   pl_text(c, t->font, lr, label, CLR_TEXT_SECONDARY, 0);
   pl_text(c, t->mono, vr, value, CLR_TEXT_PRIMARY, 0);
@@ -215,6 +217,25 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
   PlRect frame = { 0, 0, w - 1, h - 1 };
   pl_fill(c, 0, 0, w, h, CLR_BG);
   pl_round_rect(c, frame, CLR_PANEL_BODY, CLR_PANEL_BORDER, 12);
+
+  if (t->busy && t->count == 0) {
+    int bw = w / 2, bx, by = h / 2;
+    if (bw > th_scale(360)) bw = th_scale(360);
+    if (bw < th_scale(120)) bw = th_scale(120);
+    bx = (w - bw) / 2;
+    {
+      PlRect label = { bx, by - th_scale(32), bx + bw, by - th_scale(8) };
+      PlRect track = { bx, by, bx + bw, by + th_scale(4) };
+      int fl = 0, fr = t->pct;
+      PlRect fill = { bx + bw * (fl < 0 ? 0 : fl) / 100, by,
+      bx + bw * (fr > 100 ? 100 : fr) / 100, by + th_scale(4) };
+      pl_text(c, t->font, label, t->stage, CLR_TEXT_PRIMARY, PL_TEXT_CENTER);
+      pl_round_rect(c, track, CLR_PANEL_BORDER, CLR_PANEL_BORDER, 4);
+      if (fill.r - fill.l >= 4)
+        pl_round_rect(c, fill, CLR_ACCENT, CLR_ACCENT, 4);
+    }
+    return;
+  }
 
   for (i = 0; i < t->count; ++i) {
     const Item* it = &t->items[i];
@@ -239,7 +260,7 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 
   if (total > h) {                       /* thin scrollbar thumb */
     int th = h * h / total, ty;
-    if (th < 24) th = 24;
+    if (th < th_scale(24)) th = th_scale(24);
     ty = (int)((long long)t->scroll * (h - th) / (total - h));
     {
       PlRect thumb = { w - SCROLL_W, ty, w - 1, ty + th };
@@ -279,7 +300,7 @@ static void on_wheel(void* u, int x, int y, int delta, int mods)
   ResultsTree* t = (ResultsTree*)u;
   int old = t->scroll;
   (void)x; (void)y; (void)mods;
-  t->scroll -= delta * 40;      /* flip the sign if it goes backwards */
+  t->scroll -= delta * th_scale(40);     /* flip the sign if it goes backwards */
   clamp_scroll(t);
   if (t->scroll != old) pl_invalidate(t->w, NULL);
 }
@@ -331,6 +352,15 @@ ResultsTree* resultstree_create(void* parent_native, int x, int y, int w, int h)
 void resultstree_destroy(ResultsTree* t) { if (t) pl_widget_destroy(t->w); }
 PlWidget* resultstree_widget(const ResultsTree* t) { return t->w; }
 int resultstree_count(const ResultsTree* t) { return (int)t->count; }
+
+void resultstree_set_busy(ResultsTree* t, int busy, int percent, const char* stage)
+{
+  if (!t) return;
+  t->busy = busy ? 1 : 0;
+  t->pct = percent < 0 ? 0 : (percent > 130 ? 130 : percent);  
+  snprintf(t->stage, sizeof(t->stage), "%s", stage ? stage : "");
+  if (t->w) pl_invalidate(t->w, NULL);
+}
 
 void resultstree_clear(ResultsTree* t)
 {

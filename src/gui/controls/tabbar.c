@@ -38,10 +38,10 @@ struct Tabbar {
 
 static void measure(Tabbar* d)
 {
-	int x = CONTENT_PAD - 4, i;
+	int x = CONTENT_PAD - th_scale(4), i;
 	for (i = 0; i < TAB_COUNT; ++i) {
 		d->tab_x[i] = x;
-		x += pl_text_width(d->font, s_labels[i]) + 42;
+		x += pl_text_width(d->font, s_labels[i]) + th_scale(42);
 	}
 	d->tab_x[TAB_COUNT] = x;
 }
@@ -80,14 +80,14 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 	for (i = 0; i < TAB_COUNT; ++i) {
 		int tx = d->tab_x[i], tw = d->tab_x[i + 1] - tx;
 		int ac = (d->active == i), hv = (d->hovered == i);
-		PlRect pill = { tx + 4, 6, tx + tw - 4, h - 6 };
-		PlRect txt = { tx, 6, tx + tw, h - 6 };
+		PlRect pill = { tx + th_scale(4), th_scale(6), tx + tw - th_scale(4), h - th_scale(6) };
+		PlRect txt = { tx, th_scale(6), tx + tw, h - th_scale(6) };
 
 		if (ac)
-			pl_round_rect(c, pill, CLR_ACCENT, CLR_ACCENT, 8);
+			pl_round_rect(c, pill, CLR_ACCENT, CLR_ACCENT, th_scale(8));
 		else
 			pl_round_rect(c, pill, hv ? CLR_BTN_GHOST_HOVER : CLR_BTN_GHOST,
-				CLR_BTN_GHOST_BD, 8);
+				CLR_BTN_GHOST_BD, th_scale(8));
 		pl_text(c, d->font, txt, s_labels[i], CLR_TEXT_PRIMARY, PL_TEXT_CENTER);
 	}
 	pl_line(c, 0, h - 1, w, h - 1, CLR_SEPARATOR);

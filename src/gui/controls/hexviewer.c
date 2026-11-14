@@ -33,26 +33,26 @@
 #include "theme/theme.h"
 #include "controls/hexviewer.h"
 
-#define TB_H        44      /* toolbar height */
-#define EDIT_H      28
-#define ROW_H       20
-#define HEAD_H      34      /* column header band (separator line sits at its bottom) */
-#define HEAD_TOP    8       /* top padding above the header text */
-#define HEAD_GAP    4       /* gap between header separator and first row */
-#define INSP_W      250     /* data inspector width */
-#define INSP_ROW    28
-#define INSP_TITLE  22      /* advance after a section title */
-#define INSP_SECT   14      /* extra gap between sections */
-#define LEG_ROW     23
-#define PAD         20      /* toolbar side padding */
-#define GRID_PAD    16      /* hex grid left padding */
-#define EDGE        16      /* gap between grid and the inspector / scrollbar */
-#define SB_W        6
-#define GOTO_W      104
-#define BPR_W       48
-#define ENC_W       74
-#define COPY_W      54
-#define NAV_W       24
+#define TB_H        th_scale(44)      /* toolbar height */
+#define EDIT_H      th_scale(28)
+#define ROW_H       th_scale(20)
+#define HEAD_H      th_scale(34)      /* column header band (separator line sits at its bottom) */
+#define HEAD_TOP    th_scale(8)       /* top padding above the header text */
+#define HEAD_GAP    th_scale(4)       /* gap between header separator and first row */
+#define INSP_W      th_scale(250)     /* data inspector width */
+#define INSP_ROW    th_scale(28)
+#define INSP_TITLE  th_scale(22)      /* advance after a section title */
+#define INSP_SECT   th_scale(14)      /* extra gap between sections */
+#define LEG_ROW     th_scale(23)
+#define PAD         th_scale(20)      /* toolbar side padding */
+#define GRID_PAD    th_scale(16)      /* hex grid left padding */
+#define EDGE        th_scale(16)      /* gap between grid and the inspector / scrollbar */
+#define SB_W        th_scale(6)
+#define GOTO_W      th_scale(104)
+#define BPR_W       th_scale(48)
+#define ENC_W       th_scale(74)
+#define COPY_W      th_scale(54)
+#define NAV_W       th_scale(24)
 #define COPY_MAX    (16u * 1024u * 1024u)
 
 enum { F_VIEW, F_GOTO, F_FIND };
@@ -242,7 +242,7 @@ static int ax(const HexViewer* hv, unsigned i) { return hv->x_asc + (int)i * hv-
 
 static void layout(HexViewer* hv)
 {
-  int W = hv->W, H = hv->H, ty = (TB_H - EDIT_H) / 2, gap = 8;
+  int W = hv->W, H = hv->H, ty = (TB_H - EDIT_H) / 2, gap = th_scale(8);
   int x, lx, fx, fw, right_limit, need;
   int wl_goto, wl_find, wl_bpr, wl_enc;
 
@@ -256,18 +256,18 @@ static void layout(HexViewer* hv)
   x = W - PAD;
   hv->r_copy = mkr(x - COPY_W, ty, x, ty + EDIT_H); x -= COPY_W + gap;
   hv->r_enc = mkr(x - ENC_W, ty, x, ty + EDIT_H);   x -= ENC_W + gap;
-  hv->x_lbl_enc = x - wl_enc;                       x = hv->x_lbl_enc - 12;
+  hv->x_lbl_enc = x - wl_enc;                       x = hv->x_lbl_enc - th_scale(12);
   hv->r_bpr = mkr(x - BPR_W, ty, x, ty + EDIT_H);   x -= BPR_W + gap;
   hv->x_lbl_bpr = x - wl_bpr;
-  right_limit = hv->x_lbl_bpr - 16;
+  right_limit = hv->x_lbl_bpr - th_scale(16);
 
   lx = PAD;
   hv->x_lbl_goto = lx; lx += wl_goto + gap;
-  hv->r_goto = mkr(lx, ty, lx + GOTO_W, ty + EDIT_H); lx += GOTO_W + 16;
+  hv->r_goto = mkr(lx, ty, lx + GOTO_W, ty + EDIT_H); lx += GOTO_W + th_scale(16);
   hv->x_lbl_find = lx; lx += wl_find + gap;
   fx = lx;
   fw = right_limit - fx - gap - (2 * NAV_W + gap);
-  if (fw < 60) fw = 60;
+  if (fw < th_scale(60)) fw = th_scale(60);
   hv->r_find = mkr(fx, ty, fx + fw, ty + EDIT_H);
   hv->r_prev = mkr(fx + fw + gap, ty, fx + fw + gap + NAV_W, ty + EDIT_H);
   hv->r_next = mkr(hv->r_prev.r + gap, ty, hv->r_prev.r + gap + NAV_W, ty + EDIT_H);
@@ -282,9 +282,9 @@ static void layout(HexViewer* hv)
   hv->x_end = hv->hex_right - EDGE;     
   hv->r_insp = mkr(W - INSP_W, TB_H + 1, W, H);
   hv->y0 = TB_H + 1 + HEAD_H + HEAD_GAP;
-  hv->vis_rows = (H - hv->y0 - 4) / ROW_H;
+  hv->vis_rows = (H - hv->y0 - th_scale(4)) / ROW_H;
   if (hv->vis_rows < 1) hv->vis_rows = 1;
-  hv->r_sb = mkr(hv->hex_right - SB_W - 4, hv->y0, hv->hex_right - 4, H - 4);
+  hv->r_sb = mkr(hv->hex_right - SB_W - th_scale(4), hv->y0, hv->hex_right - th_scale(4), H - th_scale(4));
   clamp_scroll(hv);
 }
 
@@ -323,7 +323,7 @@ static int hit_byte(HexViewer* hv, int x, int y, uint64_t* off)
 
 static PlRect sb_hit_rect(const HexViewer* hv)
 {
-  return mkr(hv->r_sb.l - 4, hv->r_sb.t, hv->r_sb.r + 4, hv->r_sb.b);
+  return mkr(hv->r_sb.l - th_scale(4), hv->r_sb.t, hv->r_sb.r + th_scale(4), hv->r_sb.b);
 }
 
 static void sel_range(const HexViewer* hv, uint64_t* lo, uint64_t* hi)
@@ -532,7 +532,7 @@ static void search(HexViewer* hv, int dir)
 static void draw_edit(HexViewer* hv, PlCanvas* c, PlRect r, const char* s,
   const char* hint, int focused, int hover)
 {
-  PlRect tr = mkr(r.l + 10, r.t, r.r - 8, r.b);
+  PlRect tr = mkr(r.l + th_scale(10), r.t, r.r - th_scale(8), r.b);
   pl_round_rect(c, r, CLR_SEARCH_BG,
     focused ? CLR_ACCENT : (hover ? CLR_BTN_GHOST_BD : CLR_PANEL_BORDER), 6);
   if (s[0]) pl_text(c, hv->mono, tr, s, CLR_TEXT_PRIMARY, PL_TEXT_ELLIPSIS);
@@ -540,7 +540,7 @@ static void draw_edit(HexViewer* hv, PlCanvas* c, PlRect r, const char* s,
   if (focused && hv->caret_on) {
     int cx = tr.l + pl_text_width(hv->mono, s);
     if (cx > tr.r) cx = tr.r;
-    pl_line(c, cx, r.t + 7, cx, r.b - 7, CLR_TEXT_PRIMARY);
+    pl_line(c, cx, r.t + th_scale(7), cx, r.b - th_scale(7), CLR_TEXT_PRIMARY);
   }
 }
 
@@ -554,12 +554,12 @@ static void draw_btn(HexViewer* hv, PlCanvas* c, PlRect r, const char* t, int ho
 static void draw_drop(HexViewer* hv, PlCanvas* c, PlRect r, const char* t, int hover)
 {
   pl_round_rect(c, r, CLR_SEARCH_BG, hover ? CLR_ACCENT : CLR_PANEL_BORDER, 6);
-  pl_text(c, hv->ui, mkr(r.l + 10, r.t, r.r - 8, r.b), t, CLR_TEXT_PRIMARY, PL_TEXT_LEFT);
+  pl_text(c, hv->ui, mkr(r.l + th_scale(10), r.t, r.r - th_scale(8), r.b), t, CLR_TEXT_PRIMARY, PL_TEXT_LEFT);
 }
 
 static void label(HexViewer* hv, PlCanvas* c, int x, const char* t)
 {
-  pl_text(c, hv->ui, mkr(x, 0, x + pl_text_width(hv->ui, t) + 4, TB_H), t,
+  pl_text(c, hv->ui, mkr(x, 0, x + pl_text_width(hv->ui, t) + th_scale(4), TB_H), t,
     CLR_TEXT_SECONDARY, PL_TEXT_LEFT);
 }
 
@@ -613,7 +613,7 @@ static void paint_rows(HexViewer* hv, PlCanvas* c)
   char line[48];
 
   if (!hv->size) {
-    pl_text(c, hv->ui, mkr(hv->x_off, hv->y0 + 8, hv->x_end, hv->y0 + 8 + ROW_H),
+    pl_text(c, hv->ui, mkr(hv->x_off, hv->y0 + th_scale(8), hv->x_end, hv->y0 + th_scale(8) + ROW_H),
       "No data", CLR_TEXT_SECONDARY, PL_TEXT_LEFT);
     return;
   }
@@ -699,11 +699,11 @@ static void paint_scroll(HexViewer* hv, PlCanvas* c)
   if (trows <= (uint64_t)hv->vis_rows) return;
   track = hv->r_sb.b - hv->r_sb.t;
   th = (int)((double)track * hv->vis_rows / (double)trows);
-  if (th < 24) th = 24;
+  if (th < th_scale(24)) th = th_scale(24);
   if (th > track) th = track;
   frac = max_scroll(hv) ? (double)hv->scroll / (double)max_scroll(hv) : 0.0;
   ty = hv->r_sb.t + (int)((track - th) * frac);
-  pl_round_rect(c, mkr(hv->hex_right - 6, ty, hv->hex_right - 3, ty + th),
+  pl_round_rect(c, mkr(hv->hex_right - th_scale(6), ty, hv->hex_right - th_scale(3), ty + th),
     CLR_BTN_GHOST_BD, CLR_BTN_GHOST_BD, 1);
 }
 
@@ -715,14 +715,14 @@ static void insp_title(HexViewer* hv, PlCanvas* c, int x, int r, int y, const ch
 static void insp_row(HexViewer* hv, PlCanvas* c, int x, int r, int y, const char* lbl, const char* val)
 {
   int w = pl_text_width(hv->mono, val);
-  pl_text(c, hv->ui, mkr(x, y, x + 110, y + INSP_ROW), lbl, CLR_TEXT_SECONDARY, PL_TEXT_LEFT);
+  pl_text(c, hv->ui, mkr(x, y, x + th_scale(110), y + INSP_ROW), lbl, CLR_TEXT_SECONDARY, PL_TEXT_LEFT);
   pl_text(c, hv->mono, mkr(r - w, y, r, y + INSP_ROW), val, CLR_TEXT_PRIMARY, PL_TEXT_LEFT);
   pl_line(c, x, y + INSP_ROW, r, y + INSP_ROW, CLR_SEPARATOR);
 }
 
 static void paint_inspector(HexViewer* hv, PlCanvas* c)
 {
-  int x = hv->r_insp.l + 16, r = hv->r_insp.r - 16, y = hv->r_insp.t + 10;
+  int x = hv->r_insp.l + th_scale(16), r = hv->r_insp.r - th_scale(16), y = hv->r_insp.t + th_scale(10);
   unsigned char d[4] = { 0, 0, 0, 0 };
   size_t m = 0, i, nleg = 0;
   uint64_t lo = 0, hi = 0;
@@ -781,12 +781,12 @@ static void paint_inspector(HexViewer* hv, PlCanvas* c)
     for (k = 0; k < nleg; ++k) if (!strcmp(seen[k], hv->reg[i].name)) dup = 1;
     if (dup) continue;
     seen[nleg++] = hv->reg[i].name;
-    pl_round_rect(c, mkr(x, y + 5, x + 14, y + 19), hv->reg[i].bg, hv->reg[i].bg, 4);
-    pl_text(c, hv->ui, mkr(x + 22, y, r, y + 24), hv->reg[i].name, CLR_TEXT_PRIMARY, PL_TEXT_ELLIPSIS);
+    pl_round_rect(c, mkr(x, y + th_scale(5), x + th_scale(14), y + th_scale(19)), hv->reg[i].bg, hv->reg[i].bg, 4);
+    pl_text(c, hv->ui, mkr(x + th_scale(22), y, r, y + th_scale(24)), hv->reg[i].name, CLR_TEXT_PRIMARY, PL_TEXT_ELLIPSIS);
     y += LEG_ROW;
   }
-  pl_round_rect(c, mkr(x, y + 5, x + 14, y + 19), CLR_ACCENT, CLR_ACCENT, 4);
-  pl_text(c, hv->ui, mkr(x + 22, y, r, y + 24), "Selection", CLR_TEXT_PRIMARY, PL_TEXT_LEFT);
+  pl_round_rect(c, mkr(x, y + th_scale(5), x + th_scale(14), y + th_scale(19)), CLR_ACCENT, CLR_ACCENT, 4);
+  pl_text(c, hv->ui, mkr(x + th_scale(22), y, r, y + th_scale(24)), "Selection", CLR_TEXT_PRIMARY, PL_TEXT_LEFT);
 }
 
 static void on_paint(void* u, PlCanvas* c, int w, int h)
