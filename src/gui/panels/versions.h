@@ -25,7 +25,6 @@
 extern "C" {
 #endif
 
-
 int versions_show(void* owner_native, const char* current_version);
 
 #ifdef __cplusplus

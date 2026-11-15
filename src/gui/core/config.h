@@ -24,6 +24,7 @@
 #include <stddef.h>         
 
 #define CDIE_FONT_ROLES 4
+#define CDIE_RECENT_MAX 10
 
 typedef struct {
   char main_db[1024];
@@ -39,10 +40,10 @@ typedef struct {
   int  use_sse2, use_avx2;
   unsigned long long buffer_size, file_buffer_size;
   char         font_family[CDIE_FONT_ROLES][128];
+  char recent  [CDIE_RECENT_MAX][1024];
   unsigned int font_size[CDIE_FONT_ROLES];
   int          font_bold[CDIE_FONT_ROLES];
   int          font_italic[CDIE_FONT_ROLES];
-
   int db_commits;
 } CdieConfig;
 

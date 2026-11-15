@@ -29,7 +29,6 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <winhttp.h>
-#pragma comment(lib, "winhttp.lib")   
 #else
 #include <pthread.h>
 #include <unistd.h>

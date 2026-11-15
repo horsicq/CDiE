@@ -37,8 +37,6 @@ typedef struct {
 	char     operands[128];
 } DasmLine;
 
-/* Parses the PE headers through rd. Returns 0 if the file is not a PE the
- * build can disassemble (unsupported machine, or cdisasm lacks that arch). */
 int       dasm_open(DasmRead rd, void* user, uint64_t file_size);
 void      dasm_close(void);
 DasmArch  dasm_arch(void);

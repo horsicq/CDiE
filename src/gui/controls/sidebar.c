@@ -27,6 +27,7 @@
 #define LOGO_DRAW th_scale(24)
 #define SB_GROUPS 3
 #define GRP_H th_scale(28)
+#define NAV_RECENT_ITEM 1001   
 
 struct Sidebar {
 	PlWidget* w;
@@ -73,6 +74,7 @@ static int nav_item_y(const Sidebar* d, int i)
 {
 	int r;
 	if (i == NAV_OPTIONS) return d->height - NAV_H - th_scale(8);
+	if (i == NAV_RECENT_ITEM) return d->height - 2 * NAV_H - th_scale(8);
 	for (r = 0; r < SB_ROWS; ++r)
 		if (s_rows[r].nav == i) return row_visible(d, r) ? row_y(d, r) : -1;
 	return -1;
@@ -80,7 +82,7 @@ static int nav_item_y(const Sidebar* d, int i)
 
 static int list_bottom(const Sidebar* d)
 {
-	return nav_item_y(d, NAV_OPTIONS) - th_scale(8);
+	return nav_item_y(d, NAV_RECENT_ITEM) - th_scale(8);
 }
 
 static int content_h(const Sidebar* d)
@@ -109,6 +111,8 @@ static int sidebar_hittest(Sidebar* d, int my)
 		if (my >= y && my < y + row_h(r))
 			return s_rows[r].nav >= 0 ? s_rows[r].nav : -(s_rows[r].group + 2);
 	}
+	y = nav_item_y(d, NAV_RECENT_ITEM);
+	if (my >= y && my < y + NAV_H) return NAV_RECENT_ITEM;
 	y = nav_item_y(d, NAV_OPTIONS);
 	if (my >= y && my < y + NAV_H) return NAV_OPTIONS;
 	return -1;
@@ -198,6 +202,20 @@ static void draw_logo(PlCanvas* c, int x, int y, PlColor bg)
 		}
 }
 
+static void draw_recent(Sidebar* d, PlCanvas* c, int w)
+{
+	int y = nav_item_y(d, NAV_RECENT_ITEM);
+	int hov = (d->hovered == NAV_RECENT_ITEM);
+	int cx = w - th_scale(18), cy = y + NAV_H / 2;
+	PlRect r = { th_scale(30), y, w - th_scale(30), y + NAV_H };
+
+	pl_fill(c, 0, y, w, y + NAV_H, hov ? CLR_SIDEBAR_HOVER : CLR_SIDEBAR_BG);
+	pl_text(c, d->fontNav, r, translate("Recent files"),
+		CLR_TEXT_SECONDARY, PL_TEXT_ELLIPSIS);
+	pl_line(c, cx - 2, cy - 4, cx + 2, cy, CLR_TEXT_SECONDARY);
+	pl_line(c, cx + 2, cy, cx - 3, cy + 5, CLR_TEXT_SECONDARY);
+}
+
 static void on_paint(void* u, PlCanvas* c, int w, int h)
 {
 	Sidebar* d = (Sidebar*)u;
@@ -228,6 +246,7 @@ static void on_paint(void* u, PlCanvas* c, int w, int h)
 	draw_search(d, c, w);
 
 	pl_line(c, SEARCH_MX, lb, w - SEARCH_MX, lb, CLR_SEPARATOR);
+	draw_recent(d, c, w);
 	draw_item(d, c, NAV_OPTIONS, w, h);
 
 	th = lb - LIST_TOP;
@@ -282,14 +301,18 @@ static void on_mouse_down(void* u, int x, int y)
 	int hit = sidebar_hittest(d, y);
 	(void)x;
 	if (y >= LOGO_H + SEARCH_MY && y < LOGO_H + SEARCH_MY + SEARCH_H) {
-		if (d->cb) d->cb(d->user, 1000);  /* 1000 = open the command palette */
+		if (d->cb) d->cb(d->user, 1000);  
 		return;
 	}
 	if (hit == -1) return;
-	if (hit < -1) {                       /* group header: fold / unfold on click */
+	if (hit == NAV_RECENT_ITEM) {        
+		if (d->cb) d->cb(d->user, NAV_RECENT_ITEM);
+		return;
+	}
+	if (hit < -1) {                     
 		int g = -hit - 2;
 		d->open[g] = !d->open[g];
-		clamp_scroll(d);                 /* folding can shrink the list */
+		clamp_scroll(d);                
 		pl_invalidate(d->w, NULL);
 		return;
 	}

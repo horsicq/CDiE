@@ -40,8 +40,6 @@
 #define EV_C  PL_TEXT_CENTER
 #define EV_R  (PL_TEXT_RIGHT | PL_TEXT_ELLIPSIS)
 
-
-
 enum { B_ENT, B_BYTES, B_GRID, B_RANGE, B_CLEAR, B_RELOAD, B_COPY, B_COUNT };
 
 static int CX[5] = { 10, 110, 210, 380, 540 };

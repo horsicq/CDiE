@@ -43,7 +43,6 @@
 #include "theme/theme.h"
 
 
-enum { CL_TXT, CL_COM, CL_STR, CL_KEY, CL_FN, CL_NUM, CL_OBJ };
 
 #define BANNER_H th_scale(52)
 #define HEAD_ED  th_scale(38)
@@ -54,6 +53,8 @@ enum { CL_TXT, CL_COM, CL_STR, CL_KEY, CL_FN, CL_NUM, CL_OBJ };
 #define OLH      th_scale(16)          /* output line height */
 #define MAXC     2048                  /* max drawn columns per line */
 #define OUT_MAX  1000
+
+enum { CL_TXT, CL_COM, CL_STR, CL_KEY, CL_FN, CL_NUM, CL_OBJ };
 
 enum { K_NORMAL, K_ACCENT, K_CHIP, K_SWITCH, K_LINK, K_DROP };
 enum {

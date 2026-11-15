@@ -19,5 +19,8 @@
  * SOFTWARE.
  */
 const char* translate(const char* english);
-int  i18n_load(const char* code);          // "de", or "" for English
+int  i18n_load(const char* code);         
 int  i18n_list(void (*add)(const char* code, const char* name, void* ud), void* ud);
+int i18n_installed(const char* code);
+int i18n_remote_list(void (*add)(const char* code, const char* name, void* ud), void* ud);
+int i18n_download(const char* code);

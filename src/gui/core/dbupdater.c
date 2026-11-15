@@ -31,7 +31,6 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <winhttp.h>
-#pragma comment(lib, "winhttp.lib")
 #define SEP '\\'
 #else
 #include <dirent.h>

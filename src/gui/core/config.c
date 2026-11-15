@@ -337,6 +337,8 @@ int config_load(CdieConfig* cfg)
     else if (int_key(line, "avx2", &cfg->use_avx2)) {}
     else if (!strncmp(line, "buffer=", 7))      cfg->buffer_size = strtoull(line + 7, NULL, 10);
     else if (!strncmp(line, "file_buffer=", 12)) cfg->file_buffer_size = strtoull(line + 12, NULL, 10);
+    else if (!strncmp(line, "recent", 6) && line[6] >= '0' && line[6] <= '9' && line[7] == '=')
+      copy_field(cfg->recent[line[6] - '0'], sizeof(cfg->recent[0]), line + 8);
     else if (parse_font(cfg, line)) {}
   }
   fclose(f);
@@ -348,6 +350,7 @@ int config_save(const CdieConfig* cfg)
   const char* path = config_file_path();
   FILE* f;
   char ver[32];
+  int r;
 
   if (!path) return 0;
 
@@ -372,6 +375,9 @@ int config_save(const CdieConfig* cfg)
   fprintf(f, "theme=%d\n", cfg->theme_mode);
   fprintf(f, "\n[virustotal]\n");
   fprintf(f, "vt_key=%s\n", cfg->vt_key);
+  fprintf(f, "\n[recent]\n");
+  for (r = 0; r < CDIE_RECENT_MAX; ++r)
+  if (cfg->recent[r][0]) fprintf(f, "recent%d=%s\n", r, cfg->recent[r]);
   if (cfg->has_prefs) {
     int k;
     fprintf(f, "\n[scan]\n");

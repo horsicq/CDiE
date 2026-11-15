@@ -29,6 +29,8 @@ if(WIN32)
         ${CMAKE_CURRENT_LIST_DIR}/core/dbupdater.c
         ${CMAKE_CURRENT_LIST_DIR}/core/appupdate.c
         ${CMAKE_CURRENT_LIST_DIR}/core/i18n.c
+        ${CMAKE_CURRENT_LIST_DIR}/core/recent.c
+        ${CMAKE_CURRENT_LIST_DIR}/core/jumplist.c
         ${CMAKE_CURRENT_LIST_DIR}/panels/header.c
         ${CMAKE_CURRENT_LIST_DIR}/panels/infobar.c
         ${CMAKE_CURRENT_LIST_DIR}/panels/options.c
@@ -37,6 +39,7 @@ if(WIN32)
         ${CMAKE_CURRENT_LIST_DIR}/panels/strings.c
         ${CMAKE_CURRENT_LIST_DIR}/panels/ntview.c
         ${CMAKE_CURRENT_LIST_DIR}/panels/versions.c)
+
 else()
     target_sources(cdie_gui PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/main_gui_gtk.c)
@@ -71,7 +74,7 @@ if(WIN32)
         ${CMAKE_CURRENT_LIST_DIR}/platform/platform_win32.c
         ${CMAKE_CURRENT_LIST_DIR}/resource/cdie_gui.rc)
     target_link_libraries(cdie_gui PRIVATE
-        user32 gdi32 comdlg32 comctl32 shell32 ole32 advapi32 dwmapi msimg32)
+    user32 gdi32 comdlg32 comctl32 shell32 ole32 advapi32 dwmapi msimg32 winhttp bcrypt crypt32 uuid)
 elseif(APPLE)
     enable_language(OBJC)
     target_sources(cdie_gui PRIVATE
@@ -121,15 +124,12 @@ if(MSVC)
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
-# Add headers so they appear in Solution Explorer (they are not compiled).
 file(GLOB_RECURSE _cdie_gui_headers CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_LIST_DIR}/*.h"
     "${CMAKE_SOURCE_DIR}/src/app/*.h"
     "${CMAKE_SOURCE_DIR}/src/global.h")
 target_sources(cdie_gui PRIVATE ${_cdie_gui_headers})
 
-# Group files in Solution Explorer: separate Source/Header/Resource roots,
-# each mirroring the folder layout under src\.
 get_target_property(_cdie_gui_all cdie_gui SOURCES)
 list(FILTER _cdie_gui_all EXCLUDE REGEX "^\\$<")
 
@@ -138,7 +138,6 @@ foreach(_f IN LISTS _cdie_gui_all)
     get_filename_component(_abs "${_f}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
     list(APPEND _cdie_gui_abs "${_abs}")
 endforeach()
-# Only files under src\ can be grouped by TREE.
 list(FILTER _cdie_gui_abs INCLUDE REGEX "^${CMAKE_SOURCE_DIR}/src/")
 
 set(_cdie_gui_grp_h ${_cdie_gui_abs})

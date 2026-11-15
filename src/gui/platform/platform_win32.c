@@ -26,9 +26,10 @@
 #define _UNICODE
 #endif
 #include <windows.h>
+#include <dwmapi.h>
 #include <stdlib.h>
 #include "platform/platform.h"
-#include <dwmapi.h>
+#include "theme/theme.h"
 
 #define PL_CLASS L"CDiE_PlWidget"
 #define PLWIN_CLASS L"PlModalWindow"
@@ -74,17 +75,11 @@ static LRESULT CALLBACK pl_proc(HWND hw, UINT m, WPARAM wp, LPARAM lp)
 		PAINTSTRUCT ps;
 		HDC wdc = BeginPaint(hw, &ps);
 		if (w && w->hw && w->ops.paint) {
-			RECT cr; HDC mem; HBITMAP bmp, ob; PlCanvas c;
+			RECT cr; ThBuf tb; PlCanvas c;
 			GetClientRect(hw, &cr);
-			mem = CreateCompatibleDC(wdc);
-			bmp = CreateCompatibleBitmap(wdc, cr.right, cr.bottom);
-			ob = (HBITMAP)SelectObject(mem, bmp);
-			c.dc = mem;
+			c.dc = th_buf_begin_hw(&tb, wdc, cr.right, cr.bottom, hw);
 			w->ops.paint(w->user, &c, cr.right, cr.bottom);
-			BitBlt(wdc, 0, 0, cr.right, cr.bottom, mem, 0, 0, SRCCOPY);
-			SelectObject(mem, ob);
-			DeleteObject(bmp);
-			DeleteDC(mem);
+			th_buf_end(&tb);
 		}
 		EndPaint(hw, &ps);
 		return 0;
@@ -730,7 +725,7 @@ void pl_window_close(PlWindow* win)
 {
 	if (!win) return;
 	win->done = 1;
-	PostMessageW(win->hwnd, WM_NULL, 0, 0);                      /* wake GetMessage */
+	PostMessageW(win->hwnd, WM_NULL, 0, 0);                     
 }
 
 void pl_window_destroy(PlWindow* win)
@@ -739,7 +734,7 @@ void pl_window_destroy(PlWindow* win)
 	if (!win) return;
 	owner = win->owner;
 	ShowWindow(win->hwnd, SW_HIDE);
-	if (owner) EnableWindow(owner, TRUE);                        /* before destroy so focus returns */
+	if (owner) EnableWindow(owner, TRUE);                        
 	DestroyWindow(win->hwnd);
 	if (owner) SetForegroundWindow(owner);
 	free(win);

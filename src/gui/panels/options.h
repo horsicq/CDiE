@@ -28,7 +28,7 @@
 extern "C" {
 #endif
 
-#define OPTIONS_FONT_ROLES 4   /* controls, table views, tree views, text edits */
+#define OPTIONS_FONT_ROLES 4   
 
 enum {
   OPTIONS_PAGE_SCAN = 0,
@@ -41,10 +41,10 @@ enum {
 };
 
 enum {
-  OPTIONS_RESULT_NONE = 0,       /* closed with OK or Cancel */
-  OPTIONS_RESULT_DATABASES,      /* host should open its database paths dialog */
-  OPTIONS_RESULT_FONTS,          /* host should open its fonts dialog */
-  OPTIONS_RESULT_CONTEXT         /* host should open its context menu dialog */
+  OPTIONS_RESULT_NONE = 0,       
+  OPTIONS_RESULT_DATABASES,      
+  OPTIONS_RESULT_FONTS,         
+  OPTIONS_RESULT_CONTEXT        
 };
 
 typedef struct OptionsScan {
@@ -53,15 +53,15 @@ typedef struct OptionsScan {
 } OptionsScan;
 
 typedef struct OptionsOptimization {
-  size_t buffer_size;            /* 0 = Default */
-  size_t file_buffer_size;       /* 0 = Default */
+  size_t buffer_size;            
+  size_t file_buffer_size;      
   int use_sse2, use_avx2;
-  int has_sse2, has_avx2;        /* host-reported CPU/OS support */
+  int has_sse2, has_avx2;       
 } OptionsOptimization;
 
 typedef struct OptionsFont {
-  char family[128];            /* empty = default family */
-  unsigned int point_size;     /* 0 = default size */
+  char family[128];           
+  unsigned int point_size;    
   int bold, italic;
 } OptionsFont;
 
@@ -72,8 +72,8 @@ typedef struct OptionsHost {
   int  (*get_optimization)(void* user, OptionsOptimization* out);
   int  (*set_optimization)(void* user, const OptionsOptimization* in);
 
-  int  context_available;      /* 0 hides the Context menu page */
-  int  updates_available;      /* 0 hides the Update page */
+  int  context_available;      
+  int  updates_available;      
   int (*open_url)(void* user, const char* url);
   int (*copy_text)(void* user, const char* text);
 

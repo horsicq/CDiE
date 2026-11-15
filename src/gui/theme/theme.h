@@ -24,13 +24,138 @@
 #include "platform/platform.h"
 #ifdef _WIN32
 #include <windows.h>
+#include <dwmapi.h>
 #endif
-
 
 #if defined(_MSC_VER)
 #define THEME_SHARED __declspec(selectany)
 #else
 #define THEME_SHARED __attribute__((weak))
+#endif
+
+#define SEC_PAL_INIT { PL_RGB(0x4C,0x82,0xF5), PL_RGB(0x2F,0xA6,0xA0), \
+                       PL_RGB(0x8E,0x6B,0xD8), PL_RGB(0xD8,0x84,0x3A), \
+                       PL_RGB(0x6C,0x7A,0x94), PL_RGB(0xD9,0x53,0x4F) }
+
+#define ENT_T_PACKED    6.5
+#define ENT_T_HIGH      7.2
+#define FONT_UI_PT   9
+
+#define TH_DWM_BORDER_COLOR   34
+#define TH_DWM_CAPTION_COLOR  35
+#define TH_DWM_TEXT_COLOR     36
+#define TH_DWM_DARK_MODE      20
+#define TH_DWM_BACKDROP       38
+#define TH_BACKDROP_NONE      1
+#define TH_BACKDROP_ACRYLIC   3
+
+#define CLR_BG              (theme_cur()->bg)
+#define CLR_SIDEBAR_BG      (theme_cur()->sidebar_bg)
+#define CLR_SIDEBAR_SEL     (theme_cur()->sidebar_sel)
+#define CLR_SIDEBAR_HOVER   (theme_cur()->sidebar_hover)
+#define CLR_PANEL           (theme_cur()->panel)
+#define CLR_PANEL_BORDER    (theme_cur()->panel_border)
+#define CLR_PANEL_HEADER    (theme_cur()->panel_header)
+#define CLR_PANEL_BODY      (theme_cur()->panel_body)
+#define CLR_ACCENT          (theme_cur()->accent)
+#define CLR_ACCENT_HOVER    (theme_cur()->accent_hover)
+#define CLR_ON_ACCENT       (theme_cur()->on_accent)
+#define CLR_TEXT_PRIMARY    (theme_cur()->text_primary)
+#define CLR_TEXT_SECONDARY  (theme_cur()->text_secondary)
+#define CLR_TEXT_CODE       (theme_cur()->text_code)
+#define CLR_TEXT_ACCENT     (theme_cur()->text_accent)
+#define CLR_HIGHLIGHT_BG    (theme_cur()->highlight_bg)
+#define CLR_HIGHLIGHT_TXT   (theme_cur()->highlight_txt)
+#define CLR_SEPARATOR       (theme_cur()->separator)
+#define CLR_SEARCH_BG       (theme_cur()->search_bg)
+#define CLR_LOGO_BG         (theme_cur()->logo_bg)
+#define CLR_BTN_GHOST       (theme_cur()->btn_ghost)
+#define CLR_BTN_GHOST_HOVER (theme_cur()->btn_ghost_hover)
+#define CLR_BTN_GHOST_BD    (theme_cur()->btn_ghost_bd)
+#define CLR_BADGE           (theme_cur()->badge)
+#define CLR_BADGE_BG        (theme_cur()->badge_bg)
+
+#define CLR_ENT_LOW         (theme_cur()->ent_low)
+#define CLR_ENT_MID         (theme_cur()->ent_mid)
+#define CLR_ENT_HIGH        (theme_cur()->ent_high)
+#define CLR_BYTE_NULL       (theme_cur()->byte_null)
+#define CLR_BYTE_CTRL       (theme_cur()->byte_ctrl)
+#define COL_LOW   CLR_ENT_LOW
+#define COL_MID   CLR_ENT_MID
+#define COL_HIGH  CLR_ENT_HIGH
+
+#define CLR_NT_ZERO         (theme_cur()->nt_zero)
+#define CLR_NT_RAW          (theme_cur()->nt_raw)
+#define CLR_NT_ROW_ALT      (theme_cur()->nt_row_alt)
+#define CLR_NT_ROW_SEL      (theme_cur()->nt_row_sel)
+#define CLR_NT_COLHDR       (theme_cur()->nt_colhdr)
+#define CLR_NT_COLHDR_LINE  (theme_cur()->nt_colhdr_line)
+#define CLR_NT_GROUP_LINE   (theme_cur()->nt_group_line)
+#define CLR_NT_GREEN        (theme_cur()->nt_green)
+#define CLR_NT_AMBER        (theme_cur()->nt_amber)
+#define CLR_NT_CHIP_BG      (theme_cur()->nt_chip_bg)
+#define CLR_NT_CHIP_BORDER  (theme_cur()->nt_chip_border)
+#define CLR_NT_SB_THUMB     (theme_cur()->nt_sb_thumb)
+#define CLR_NT_SB_HOT       (theme_cur()->nt_sb_hot)
+
+#define CLR_DANGER          (theme_cur()->danger)
+#define CLR_WARNING         (theme_cur()->warning)
+#define CLR_SUCCESS         (theme_cur()->success)
+#define CLR_ON_COLOR        (theme_cur()->on_color)
+
+#define CLR_SYN_STRING      (theme_cur()->syn_string)
+#define CLR_SYN_KEYWORD     (theme_cur()->syn_keyword)
+#define CLR_SYN_FUNCTION    (theme_cur()->syn_function)
+#define CLR_SYN_NUMBER      (theme_cur()->syn_number)
+#define CLR_SYN_OBJECT      (theme_cur()->syn_object)
+
+#define CLR_STATUS_OK_TEXT  (theme_cur()->status_ok_text)
+#define CLR_STATUS_OK_FILL  (theme_cur()->status_ok_fill)
+#define CLR_STATUS_ERR_TEXT (theme_cur()->status_err_text)
+#define CLR_STR_ASCII       (theme_cur()->str_ascii)
+#define CLR_STR_UTF16       (theme_cur()->str_utf16)
+
+#define CLR_SEC_PAL_COUNT   6
+#define CLR_ROW_SEL_MIX_PCT   16
+#define CLR_ROW_HOVER_MIX_PCT 7
+
+#define CLR_SEC_PAL_0   theme_sec_pal(0)
+#define CLR_SEC_PAL_1   theme_sec_pal(1)
+#define CLR_SEC_PAL_2   theme_sec_pal(2)
+#define CLR_SEC_PAL_3   theme_sec_pal(3)
+#define CLR_SEC_PAL_4   theme_sec_pal(4)
+#define CLR_SEC_PAL_5   theme_sec_pal(5)
+
+#define SIDEBAR_W      th_scale(268)
+#define LOGO_H         th_scale(50)
+#define SEARCH_H       th_scale(36)
+#define SEARCH_MX      th_scale(12)
+#define SEARCH_MY      th_scale(8)
+#define NAV_H          th_scale(40)
+#define HEADER_H       th_scale(90)
+#define INFOBAR_H      th_scale(84)
+#define TABBAR_H       th_scale(46)
+#define BOTTOMBAR_H    th_scale(56)
+#define CONTENT_PAD    th_scale(20)
+
+#ifdef _WIN32
+#define TH_CR(c) RGB(((c) >> 16) & 255, ((c) >> 8) & 255, (c) & 255)
+#endif
+enum { THEME_DARK = 0, THEME_LIGHT = 1, THEME_SLATE = 2, THEME_COUNT };
+
+
+THEME_SHARED int   g_theme_mode = THEME_DARK;
+THEME_SHARED void (*g_theme_listener)(void) = 0;   /* set by main window */
+THEME_SHARED int   g_mica_ok = 0;
+#ifdef _WIN32
+THEME_SHARED HWND  g_mica_hwnd = NULL;
+THEME_SHARED UINT  g_dpi = 96;
+#endif
+
+#ifdef _WIN32
+static __inline int th_scale(int px) { return MulDiv(px, (int)g_dpi, 96); }
+#else
+static __inline int th_scale(int px) { return px; }
 #endif
 
 typedef struct {
@@ -41,7 +166,6 @@ typedef struct {
   PlColor highlight_bg, highlight_txt, separator, search_bg, logo_bg;
   PlColor btn_ghost, btn_ghost_hover, btn_ghost_bd;
   PlColor badge, badge_bg;
-
   PlColor ent_low, ent_mid, ent_high, byte_null, byte_ctrl;
 
   PlColor nt_zero, nt_raw, nt_row_alt, nt_row_sel, nt_colhdr, nt_colhdr_line,
@@ -49,18 +173,25 @@ typedef struct {
     nt_sb_thumb, nt_sb_hot;
 
   PlColor danger, warning, success, on_color;
-
   PlColor syn_string, syn_keyword, syn_function, syn_number, syn_object;
-
   PlColor status_ok_text, status_ok_fill, status_err_text;
   PlColor str_ascii, str_utf16;
-
   PlColor sec_pal[6];
+  int mica;
+  unsigned char a_bg, a_side, a_panel, a_card;
 } Theme;
 
-#define SEC_PAL_INIT { PL_RGB(0x4C,0x82,0xF5), PL_RGB(0x2F,0xA6,0xA0), \
-                       PL_RGB(0x8E,0x6B,0xD8), PL_RGB(0xD8,0x84,0x3A), \
-                       PL_RGB(0x6C,0x7A,0x94), PL_RGB(0xD9,0x53,0x4F) }
+
+#ifdef _WIN32
+typedef struct {
+  HDC       target;
+  HDC       dc;
+  HBITMAP   bmp;
+  HBITMAP   old;
+  int       w, h;
+  unsigned* bits;
+} ThBuf;
+#endif
 
 static const Theme s_theme_dark = {
   .bg = PL_RGB(0x1F,0x21,0x2E), .sidebar_bg = PL_RGB(0x17,0x17,0x23),
@@ -146,102 +277,71 @@ static const Theme s_theme_light = {
   .sec_pal = SEC_PAL_INIT
 };
 
-/* ------------------------------------------------------------------ */
-/*  Runtime switching                                                  */
-/* ------------------------------------------------------------------ */
+static const Theme s_theme_slate = {
+  .bg = PL_RGB(0x22,0x29,0x3A),           .a_bg = 215,
+  .sidebar_bg = PL_RGB(0x19,0x1F,0x2B),   .a_side = 175,
+  .panel = PL_RGB(0x1D,0x23,0x30),        .a_panel = 218,
+  .panel_header = PL_RGB(0x2A,0x32,0x44), .a_card = 195,
+  .panel_body = PL_RGB(0x1D,0x23,0x30),
+  .mica = 1,
 
-enum { THEME_DARK = 0, THEME_LIGHT = 1 };
+  .sidebar_sel = PL_RGB(0x38,0x43,0x5E), .sidebar_hover = PL_RGB(0x2D,0x36,0x4B),
+  .panel_border = PL_RGB(0x3A,0x42,0x55),
+  .accent = PL_RGB(0x3F,0x7B,0xD0), .accent_hover = PL_RGB(0x5B,0x92,0xE0),
+  .on_accent = PL_RGB(0xFF,0xFF,0xFF),
+  .text_primary = PL_RGB(0xEE,0xF1,0xF8), .text_secondary = PL_RGB(0xB9,0xC2,0xD6),
+  .text_code = PL_RGB(0xB4,0xBD,0xD0), .text_accent = PL_RGB(0x7F,0xCD,0xF0),
+  .highlight_bg = PL_RGB(0x4A,0x3A,0x48), .highlight_txt = PL_RGB(0xF0,0xA0,0xB4),
+  .separator = PL_RGB(0x36,0x40,0x55), .search_bg = PL_RGB(0x3B,0x42,0x54),
+  .logo_bg = PL_RGB(0x22,0x2A,0x3B),
+  .btn_ghost = PL_RGB(0x3B,0x42,0x54), .btn_ghost_hover = PL_RGB(0x47,0x50,0x68),
+  .btn_ghost_bd = PL_RGB(0x4C,0x56,0x6E),
+  .badge = PL_RGB(0xE0,0xAF,0x68), .badge_bg = PL_RGB(0x3D,0x3A,0x3A),
 
-THEME_SHARED int   g_theme_mode = THEME_DARK;
-THEME_SHARED void (*g_theme_listener)(void) = 0;   /* set by main window */
+  .nt_zero = PL_RGB(0x6B,0x76,0x94), .nt_raw = PL_RGB(0x87,0x92,0xB0),
+  .nt_row_alt = PL_RGB(0x24,0x2B,0x3A), .nt_row_sel = PL_RGB(0x38,0x47,0x6A),
+  .nt_colhdr = PL_RGB(0x21,0x28,0x37), .nt_colhdr_line = PL_RGB(0x3A,0x45,0x60),
+  .nt_group_line = PL_RGB(0x3D,0x48,0x62), .nt_chip_bg = PL_RGB(0x34,0x40,0x5A),
+  .nt_chip_border = PL_RGB(0x5E,0x6B,0x8C), .nt_sb_thumb = PL_RGB(0x4A,0x56,0x75),
+  .nt_sb_hot = PL_RGB(0x62,0x70,0x8F),
+
+  .ent_low = PL_RGB(0x43,0xA0,0x47), .ent_mid = PL_RGB(0xFF,0xB3,0x00),
+  .ent_high = PL_RGB(0xE5,0x39,0x35), .byte_null = PL_RGB(0x5C,0x9D,0xFF),
+  .byte_ctrl = PL_RGB(0x9E,0x9E,0xB8),
+  .nt_green = PL_RGB(0x7F,0xD6,0xA4), .nt_amber = PL_RGB(0xE6,0xC2,0x7A),
+  .danger = PL_RGB(0xD9,0x53,0x4F), .warning = PL_RGB(0xF0,0xAD,0x4E),
+  .success = PL_RGB(0x5C,0xB8,0x5C), .on_color = PL_RGB(0xFF,0xFF,0xFF),
+  .syn_string = PL_RGB(158,206,106), .syn_keyword = PL_RGB(122,162,247),
+  .syn_function = PL_RGB(224,175,104), .syn_number = PL_RGB(255,158,100),
+  .syn_object = PL_RGB(187,154,247),
+  .status_ok_text = PL_RGB(123,224,165), .status_ok_fill = PL_RGB(46,158,106),
+  .status_err_text = PL_RGB(242,154,147),
+  .str_ascii = PL_RGB(98,219,196), .str_utf16 = PL_RGB(187,154,247),
+  .sec_pal = SEC_PAL_INIT
+};
 
 static __inline const Theme* theme_cur(void)
 {
-  return g_theme_mode == THEME_LIGHT ? &s_theme_light : &s_theme_dark;
+  switch (g_theme_mode) {
+  case THEME_LIGHT: return &s_theme_light;
+  case THEME_SLATE: return &s_theme_slate;
+  default:          return &s_theme_dark;
+  }
 }
 
 static __inline void theme_set(int mode)
 {
+  if (mode < 0 || mode >= THEME_COUNT) mode = THEME_DARK;
   if (mode == g_theme_mode) return;
   g_theme_mode = mode;
   if (g_theme_listener) g_theme_listener();   /* repaint every view */
 }
 
-/* ------------------------------------------------------------------ */
-/*  Colour names (same names as before, so call sites don't change)    */
-/* ------------------------------------------------------------------ */
+static __inline int theme_is_dark(void)
+{
+  return g_theme_mode != THEME_LIGHT;
+}
 
-#define CLR_BG              (theme_cur()->bg)
-#define CLR_SIDEBAR_BG      (theme_cur()->sidebar_bg)
-#define CLR_SIDEBAR_SEL     (theme_cur()->sidebar_sel)
-#define CLR_SIDEBAR_HOVER   (theme_cur()->sidebar_hover)
-#define CLR_PANEL           (theme_cur()->panel)
-#define CLR_PANEL_BORDER    (theme_cur()->panel_border)
-#define CLR_PANEL_HEADER    (theme_cur()->panel_header)
-#define CLR_PANEL_BODY      (theme_cur()->panel_body)
-#define CLR_ACCENT          (theme_cur()->accent)
-#define CLR_ACCENT_HOVER    (theme_cur()->accent_hover)
-#define CLR_ON_ACCENT       (theme_cur()->on_accent)
-#define CLR_TEXT_PRIMARY    (theme_cur()->text_primary)
-#define CLR_TEXT_SECONDARY  (theme_cur()->text_secondary)
-#define CLR_TEXT_CODE       (theme_cur()->text_code)
-#define CLR_TEXT_ACCENT     (theme_cur()->text_accent)
-#define CLR_HIGHLIGHT_BG    (theme_cur()->highlight_bg)
-#define CLR_HIGHLIGHT_TXT   (theme_cur()->highlight_txt)
-#define CLR_SEPARATOR       (theme_cur()->separator)
-#define CLR_SEARCH_BG       (theme_cur()->search_bg)
-#define CLR_LOGO_BG         (theme_cur()->logo_bg)
-#define CLR_BTN_GHOST       (theme_cur()->btn_ghost)
-#define CLR_BTN_GHOST_HOVER (theme_cur()->btn_ghost_hover)
-#define CLR_BTN_GHOST_BD    (theme_cur()->btn_ghost_bd)
-#define CLR_BADGE           (theme_cur()->badge)
-#define CLR_BADGE_BG        (theme_cur()->badge_bg)
-
-#define CLR_ENT_LOW         (theme_cur()->ent_low)
-#define CLR_ENT_MID         (theme_cur()->ent_mid)
-#define CLR_ENT_HIGH        (theme_cur()->ent_high)
-#define CLR_BYTE_NULL       (theme_cur()->byte_null)
-#define CLR_BYTE_CTRL       (theme_cur()->byte_ctrl)
-#define COL_LOW   CLR_ENT_LOW
-#define COL_MID   CLR_ENT_MID
-#define COL_HIGH  CLR_ENT_HIGH
-
-#define CLR_NT_ZERO         (theme_cur()->nt_zero)
-#define CLR_NT_RAW          (theme_cur()->nt_raw)
-#define CLR_NT_ROW_ALT      (theme_cur()->nt_row_alt)
-#define CLR_NT_ROW_SEL      (theme_cur()->nt_row_sel)
-#define CLR_NT_COLHDR       (theme_cur()->nt_colhdr)
-#define CLR_NT_COLHDR_LINE  (theme_cur()->nt_colhdr_line)
-#define CLR_NT_GROUP_LINE   (theme_cur()->nt_group_line)
-#define CLR_NT_GREEN        (theme_cur()->nt_green)
-#define CLR_NT_AMBER        (theme_cur()->nt_amber)
-#define CLR_NT_CHIP_BG      (theme_cur()->nt_chip_bg)
-#define CLR_NT_CHIP_BORDER  (theme_cur()->nt_chip_border)
-#define CLR_NT_SB_THUMB     (theme_cur()->nt_sb_thumb)
-#define CLR_NT_SB_HOT       (theme_cur()->nt_sb_hot)
-
-#define CLR_DANGER          (theme_cur()->danger)
-#define CLR_WARNING         (theme_cur()->warning)
-#define CLR_SUCCESS         (theme_cur()->success)
-#define CLR_ON_COLOR        (theme_cur()->on_color)
-
-#define CLR_SYN_STRING      (theme_cur()->syn_string)
-#define CLR_SYN_KEYWORD     (theme_cur()->syn_keyword)
-#define CLR_SYN_FUNCTION    (theme_cur()->syn_function)
-#define CLR_SYN_NUMBER      (theme_cur()->syn_number)
-#define CLR_SYN_OBJECT      (theme_cur()->syn_object)
-
-#define CLR_STATUS_OK_TEXT  (theme_cur()->status_ok_text)
-#define CLR_STATUS_OK_FILL  (theme_cur()->status_ok_fill)
-#define CLR_STATUS_ERR_TEXT (theme_cur()->status_err_text)
-#define CLR_STR_ASCII       (theme_cur()->str_ascii)
-#define CLR_STR_UTF16       (theme_cur()->str_utf16)
-
-#define CLR_SEC_PAL_COUNT   6
-#define CLR_ROW_SEL_MIX_PCT   16
-#define CLR_ROW_HOVER_MIX_PCT 7
-
-/* Syntax class -> colour. Order matches CL_TXT..CL_OBJ in signatures.c */
 static __inline PlColor theme_syn(int cls)
 {
   const Theme* t = theme_cur();
@@ -261,7 +361,6 @@ static __inline PlColor theme_sec_pal(int k)
   return theme_cur()->sec_pal[(unsigned)k % CLR_SEC_PAL_COUNT];
 }
 
-/* Blend: pct % of a, the rest of b. Works on any platform. */
 static __inline PlColor theme_mix_pct(PlColor a, PlColor b, int pct)
 {
   unsigned x = (unsigned)a, y = (unsigned)b, r = 0;
@@ -275,7 +374,6 @@ static __inline PlColor theme_mix_pct(PlColor a, PlColor b, int pct)
   return (PlColor)r;
 }
 
-/* 0..256 blend toward b (used by the entropy ramp) */
 static __inline PlColor theme_mix(PlColor a, PlColor b, int t)
 {
   unsigned ar = (a >> 16) & 255, ag = (a >> 8) & 255, ab = a & 255;
@@ -286,39 +384,6 @@ static __inline PlColor theme_mix(PlColor a, PlColor b, int t)
     (((ag * (256 - t) + bg * t) >> 8) << 8) |
     ((ab * (256 - t) + bb * t) >> 8));
 }
-
-#define ENT_T_PACKED    6.5
-#define ENT_T_HIGH      7.2
-#define FONT_UI_PT   9
-
-/* ---- DPI scaling ---- */
-#ifdef _WIN32
-THEME_SHARED UINT g_dpi = 96;
-static __inline int th_scale(int px) { return MulDiv(px, (int)g_dpi, 96); }
-#else
-static __inline int th_scale(int px) { return px; }
-#endif
-
-/* ---- layout constants (scaled) ---- */
-#define SIDEBAR_W      th_scale(268)
-#define LOGO_H         th_scale(50)
-#define SEARCH_H       th_scale(36)
-#define SEARCH_MX      th_scale(12)
-#define SEARCH_MY      th_scale(8)
-#define NAV_H          th_scale(40)
-#define HEADER_H       th_scale(90)
-#define INFOBAR_H      th_scale(84)
-#define TABBAR_H       th_scale(46)
-#define BOTTOMBAR_H    th_scale(56)
-#define CONTENT_PAD    th_scale(20)
-
-/* ---- section palette names (were constants, now lookups) ---- */
-#define CLR_SEC_PAL_0   theme_sec_pal(0)
-#define CLR_SEC_PAL_1   theme_sec_pal(1)
-#define CLR_SEC_PAL_2   theme_sec_pal(2)
-#define CLR_SEC_PAL_3   theme_sec_pal(3)
-#define CLR_SEC_PAL_4   theme_sec_pal(4)
-#define CLR_SEC_PAL_5   theme_sec_pal(5)
 
 static __inline PlColor theme_entropy_col(double e)
 {
@@ -338,7 +403,6 @@ static __inline int theme_entropy_lvl(double e)
 }
 
 #ifdef _WIN32
-#define TH_CR(c) RGB(((c) >> 16) & 255, ((c) >> 8) & 255, (c) & 255)
 
 static __inline void th_fill_cr(HDC dc, int l, int t, int r, int b, COLORREF c)
 {
@@ -424,43 +488,6 @@ static __inline void th_round_rect(HDC dc, int l, int t, int r, int b,
   }
 }
 
-typedef struct {
-  HDC     target;
-  HDC     dc;
-  HBITMAP bmp;
-  HBITMAP old;
-  int     w, h;
-} ThBuf;
-
-static __inline HDC th_buf_begin(ThBuf* b, HDC target, int w, int h)
-{
-  b->target = target; b->dc = target; b->bmp = NULL; b->old = NULL;
-  b->w = w; b->h = h;
-  if (w <= 0 || h <= 0) return target;
-  b->dc = CreateCompatibleDC(target);
-  if (b->dc) {
-    b->bmp = CreateCompatibleBitmap(target, w, h);
-    if (b->bmp) {
-      b->old = (HBITMAP)SelectObject(b->dc, b->bmp);
-      return b->dc;
-    }
-    DeleteDC(b->dc);
-  }
-  b->dc = target;
-  return target;
-}
-
-static __inline void th_buf_end(ThBuf* b)
-{
-  if (b->bmp) {
-    BitBlt(b->target, 0, 0, b->w, b->h, b->dc, 0, 0, SRCCOPY);
-    SelectObject(b->dc, b->old);
-    DeleteObject(b->bmp);
-    DeleteDC(b->dc);
-    b->bmp = NULL;
-  }
-}
-
 static __inline void th_dot(HDC dc, int cx, int cy, int radius, PlColor color)
 {
   th_aa_shape(dc, cx - radius, cy - radius, cx + radius, cy + radius,
@@ -475,7 +502,174 @@ static __inline HFONT th_font(int pt, int bold, const WCHAR* face)
     CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
     DEFAULT_PITCH | FF_SWISS, face);
 }
+
+static __inline int th_mica_on(void)
+{
+  return theme_cur()->mica && g_mica_ok;
+}
+
+static __inline void th_alpha_blit(HDC dst, int l, int t, int w, int h, HDC src)
+{
+  BLENDFUNCTION bf;
+  bf.BlendOp = AC_SRC_OVER;
+  bf.BlendFlags = 0;
+  bf.SourceConstantAlpha = 255;
+  bf.AlphaFormat = AC_SRC_ALPHA;
+  BitBlt(dst, l, t, w, h, NULL, 0, 0, BLACKNESS);
+  AlphaBlend(dst, l, t, w, h, src, 0, 0, w, h, bf);
+}
+
+static __inline HDC th_buf_begin_ex(ThBuf* b, HDC target, int w, int h, int mica)
+{
+  b->target = target; b->dc = target; b->bmp = NULL; b->old = NULL;
+  b->w = w; b->h = h; b->bits = NULL;
+  if (w <= 0 || h <= 0) return target;
+  b->dc = CreateCompatibleDC(target);
+  if (b->dc) {
+    if (mica) {
+      BITMAPINFO bi;
+      ZeroMemory(&bi, sizeof(bi));
+      bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+      bi.bmiHeader.biWidth = w;
+      bi.bmiHeader.biHeight = -h;
+      bi.bmiHeader.biPlanes = 1;
+      bi.bmiHeader.biBitCount = 32;
+      bi.bmiHeader.biCompression = BI_RGB;
+      b->bmp = CreateDIBSection(target, &bi, DIB_RGB_COLORS,
+        (void**)&b->bits, NULL, 0);
+      if (!b->bmp) b->bits = NULL;
+    }
+    if (!b->bmp) b->bmp = CreateCompatibleBitmap(target, w, h);
+    if (b->bmp) {
+      b->old = (HBITMAP)SelectObject(b->dc, b->bmp);
+      return b->dc;
+    }
+    DeleteDC(b->dc);
+  }
+  b->dc = target;
+  return target;
+}
+
+static __inline HDC th_buf_begin(ThBuf* b, HDC target, int w, int h)
+{
+  return th_buf_begin_ex(b, target, w, h, th_mica_on());
+}
+
+static __inline HDC th_buf_begin_hw(ThBuf* b, HDC target, int w, int h, HWND hw)
+{
+  int mica = th_mica_on() && g_mica_hwnd && GetAncestor(hw, GA_ROOT) == g_mica_hwnd;
+  return th_buf_begin_ex(b, target, w, h, mica);
+}
+
+static __inline void th_mica_alpha(ThBuf* b)
+{
+  const Theme* t = theme_cur();
+  unsigned k[4], a[4], * p = b->bits;
+  size_t i, n = (size_t)b->w * (size_t)b->h;
+  k[0] = (unsigned)t->bg;           a[0] = t->a_bg;
+  k[1] = (unsigned)t->sidebar_bg;   a[1] = t->a_side;
+  k[2] = (unsigned)t->panel;        a[2] = t->a_panel;
+  k[3] = (unsigned)t->panel_header; a[3] = t->a_card;
+  for (i = 0; i < n; ++i) {
+    unsigned px = p[i] & 0x00FFFFFFu, al = 255, r, g, bl;
+    if (px == k[0]) al = a[0];
+    else if (px == k[1]) al = a[1];
+    else if (px == k[2]) al = a[2];
+    else if (px == k[3]) al = a[3];
+    r = ((px >> 16) & 255) * al / 255;
+    g = ((px >> 8) & 255) * al / 255;
+    bl = (px & 255) * al / 255;
+    p[i] = (al << 24) | (r << 16) | (g << 8) | bl;
+  }
+}
+
+static __inline void th_buf_end(ThBuf* b)
+{
+  if (!b->bmp) return;
+  if (b->bits) {
+    th_mica_alpha(b);
+    th_alpha_blit(b->target, 0, 0, b->w, b->h, b->dc);
+  }
+  else {
+    BitBlt(b->target, 0, 0, b->w, b->h, b->dc, 0, 0, SRCCOPY);
+  }
+  SelectObject(b->dc, b->old);
+  DeleteObject(b->bmp);
+  DeleteDC(b->dc);
+  b->bmp = NULL; b->bits = NULL;
+}
+
+static __inline void th_fill_surface(HDC dc, int l, int t, int r, int b,
+  PlColor c, int alpha)
+{
+  int w = r - l, h = b - t;
+  BITMAPINFO bi;
+  HBITMAP bmp, old;
+  HDC mdc;
+  unsigned* bits = NULL;
+  unsigned px, rr, gg, bb;
+  size_t i, n;
+
+  if (w <= 0 || h <= 0) return;
+  if (alpha >= 255) { th_fill(dc, l, t, r, b, c); return; }
+  mdc = CreateCompatibleDC(dc);
+  if (!mdc) { th_fill(dc, l, t, r, b, c); return; }
+  ZeroMemory(&bi, sizeof(bi));
+  bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+  bi.bmiHeader.biWidth = w;
+  bi.bmiHeader.biHeight = -h;
+  bi.bmiHeader.biPlanes = 1;
+  bi.bmiHeader.biBitCount = 32;
+  bi.bmiHeader.biCompression = BI_RGB;
+  bmp = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, (void**)&bits, NULL, 0);
+  if (!bmp || !bits) {
+    if (bmp) DeleteObject(bmp);
+    DeleteDC(mdc);
+    th_fill(dc, l, t, r, b, c);
+    return;
+  }
+  rr = (((unsigned)c >> 16) & 255) * (unsigned)alpha / 255;
+  gg = (((unsigned)c >> 8) & 255) * (unsigned)alpha / 255;
+  bb = ((unsigned)c & 255) * (unsigned)alpha / 255;
+  px = ((unsigned)alpha << 24) | (rr << 16) | (gg << 8) | bb;
+  n = (size_t)w * (size_t)h;
+  for (i = 0; i < n; ++i) bits[i] = px;
+  old = (HBITMAP)SelectObject(mdc, bmp);
+  th_alpha_blit(dc, l, t, w, h, mdc);
+  SelectObject(mdc, old);
+  DeleteObject(bmp);
+  DeleteDC(mdc);
+}
+
+static __inline void th_mica_apply(HWND hwnd)
+{
+  MARGINS m = { 0, 0, 0, 0 };
+  int dark = theme_is_dark();
+  int bt = theme_cur()->mica ? TH_BACKDROP_ACRYLIC : TH_BACKDROP_NONE;
+  COLORREF cap = 0xFFFFFFFF, txt = 0xFFFFFFFF;   /* 0xFFFFFFFF = system default */
+
+  DwmSetWindowAttribute(hwnd, TH_DWM_DARK_MODE, &dark, sizeof(dark));
+  g_mica_ok = 0;
+  g_mica_hwnd = NULL;
+  if (theme_cur()->mica &&
+    SUCCEEDED(DwmSetWindowAttribute(hwnd, TH_DWM_BACKDROP, &bt, sizeof(bt)))) {
+    m.cxLeftWidth = m.cxRightWidth = m.cyTopHeight = m.cyBottomHeight = -1;
+    cap = TH_CR(theme_cur()->bg);
+    txt = TH_CR(theme_cur()->text_primary);
+    g_mica_ok = 1;
+    g_mica_hwnd = hwnd;
+  }
+  else {
+    bt = TH_BACKDROP_NONE;
+    DwmSetWindowAttribute(hwnd, TH_DWM_BACKDROP, &bt, sizeof(bt));
+  }
+  DwmSetWindowAttribute(hwnd, TH_DWM_CAPTION_COLOR, &cap, sizeof(cap));
+  DwmSetWindowAttribute(hwnd, TH_DWM_BORDER_COLOR, &cap, sizeof(cap));
+  DwmSetWindowAttribute(hwnd, TH_DWM_TEXT_COLOR, &txt, sizeof(txt));
+  DwmExtendFrameIntoClientArea(hwnd, &m);
+  InvalidateRect(hwnd, NULL, TRUE);
+}
+
 #endif /* _WIN32 */
 
-
-#endif /* THEME_H */
+#endif /* CDIE_THEME_H */
