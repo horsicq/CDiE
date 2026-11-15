@@ -37,8 +37,6 @@ extern "C" {
   PlWidget* disasmview_widget(DisasmView* dv);
   void        disasmview_set_rect(DisasmView* dv, int x, int y, int w, int h);
 
-  /* Parses the PE through rd and jumps to the entry point. Returns 0 when the
-   * file cannot be disassembled (the view then shows a short message). */
   int         disasmview_open(DisasmView* dv, DasmRead rd, void* user, uint64_t file_size);
   void        disasmview_close(DisasmView* dv);
 

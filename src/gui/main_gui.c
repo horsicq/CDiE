@@ -32,7 +32,6 @@
 #include <shlobj.h>
 #include <dwmapi.h>
 #include <uxtheme.h>
-#pragma comment(lib, "uxtheme.lib")
 #ifndef TVM_SETLINECOLOR
 #define TVM_SETLINECOLOR (TV_FIRST + 40)
 #endif
@@ -46,9 +45,16 @@
 #include <string.h>
 
 #include "global.h"
+#include "resource.h"
 #include "core/gui_backend.h"
 #include "core/config.h"
-#include "resource.h"
+#include "core/tray.h"
+#include "core/dlwatch.h"
+#include "core/i18n.h"
+#include "core/virustotal.h"
+#include "core/appupdate.h"
+#include "core/recent.h"
+#include "core/jumplist.h"
 #include "theme/theme.h"
 #include "panels/header.h"
 #include "panels/infobar.h"
@@ -58,6 +64,7 @@
 #include "panels/signatures.h"
 #include "panels/strings.h"
 #include "panels/ntview.h"
+#include "panels/versions.h"
 #include "controls/sidebar.h"
 #include "controls/tabbar.h"
 #include "controls/bottombar.h"
@@ -65,14 +72,8 @@
 #include "controls/hexviewer.h"
 #include "controls/palette.h"
 #include "controls/disasmview.h"
-#include "core/tray.h"
-#include "core/dlwatch.h"
-#include "core/i18n.h"
-#include "core/virustotal.h"
-#include "core/appupdate.h"
-#include "panels/versions.h"
 
- /* Store / VSIX builds get updates from Microsoft */
+/* Store / VSIX builds get updates from Microsoft */
 #ifdef CDIE_STORE_BUILD
 #define CDIE_SHOW_UPDATES 0
 #define CDIE_SHOW_CONTEXT 0
@@ -83,15 +84,30 @@
 
 
 #define SIDEBAR_PALETTE_ID  1000
+#define SIDEBAR_RECENT_ID   1001
 #define PALETTE_ACTION_BASE 100
 #define INFO_LEN            80
+#define ACTION_RECENT_BASE  200
+
+typedef struct { WCHAR** names; SIZE_T count, cap; int failed; int fixed_only; } font_list;
+typedef struct { char* type, * name, * version, * info; } ScanRow;
+typedef struct {
+	char* path;
+	ScanRow* rows;
+	SIZE_T count, cap;
+	char* type;
+	int ok;
+	unsigned msec;
+	ULONGLONG t0;
+} ScanJob;
 
 enum gui_action {
 	ACTION_NONE, ACTION_SCAN, ACTION_BROWSE,
 	ACTION_OPTIONS, ACTION_ABOUT,
 	ACTION_DATABASE_PATHS,
 	ACTION_SIGNATURES, ACTION_STRINGS,
-	ACTION_MONITOR, ACTION_VIRUSTOTAL, ACTION_PALETTE, ACTION_VERSIONS
+	ACTION_MONITOR, ACTION_VIRUSTOTAL, ACTION_PALETTE, ACTION_VERSIONS,
+	ACTION_CLEAR_RECENT, ACTION_RECENT_MENU
 };
 
 static xxwidgets_app* g_app;
@@ -114,6 +130,7 @@ static Palette* g_pal;
 static SigView* g_sig;
 static StringsView* g_str;
 static HWND g_palWnd;
+static ScanJob* g_job;
 
 static int g_page = NAV_OVERVIEW;
 static HANDLE g_hexFile = INVALID_HANDLE_VALUE;
@@ -131,9 +148,14 @@ static int g_bFlagAggr, g_bFlagHideUnknown, g_bFlagFormat;
 static int g_bDbExtra = 1, g_bDbCustom = 1;
 static char g_lang[32];
 static int g_themeMode;
+static char* g_palRecent[RECENT_MAX];
+
+static HANDLE g_jobThread;
+static volatile LONG g_jobDone;
 
 static void layout(void);
 static void sync_system_theme(void);
+static void fly_close(void);
 
 static HWND native(xxwidgets_widget* widget)
 {
@@ -278,6 +300,14 @@ static char* copy_utf8(const char* text)
 static void set_status(const char* text)
 {
 	if (g_bottombar) bottombar_set_status(g_bottombar, text);
+}
+
+static void recent_refresh_shell(void)
+{
+	const char* list[RECENT_MAX];
+	int i, n = recent_count();
+	for (i = 0; i < n; ++i) list[i] = recent_get(i);
+	jumplist_update(list, n);
 }
 
 static void scan_progress(int busy, int pct, const char* stage)
@@ -509,20 +539,7 @@ static void clear_scan(void)
 	if (g_header_wnd)  header_clear(g_header_wnd);
 }
 
-typedef struct { char* type, * name, * version, * info; } ScanRow;
-typedef struct {
-	char* path;
-	ScanRow* rows;
-	SIZE_T count, cap;
-	char* type;
-	int ok;
-	unsigned msec;
-	ULONGLONG t0;
-} ScanJob;
 
-static ScanJob* g_job;
-static HANDLE g_jobThread;
-static volatile LONG g_jobDone;
 
 static void job_free(ScanJob* j)
 {
@@ -626,12 +643,8 @@ static void scan_finish(void)
 				" Views: %u ms.", (unsigned)(GetTickCount64() - t1));
 			set_status(text);
 		}
-		if (g_lastPath) HeapFree(GetProcessHeap(), 0, g_lastPath);
-		g_lastPath = copy_utf8(j->path);
-		open_file_views(j->path);
-		if (g_vt) vtview_set_file(g_vt, j->path);
-		if (g_sec) secview_set_file(g_sec, j->path);
-		if (g_str) stringsview_set_file(g_str, j->path);
+		recent_add(j->path);
+		recent_refresh_shell();
 	}
 	else {
 		set_status("Cannot open the file.");
@@ -800,8 +813,6 @@ static void opt_db_changed(void* u)
 		gui_backend_signature_count());
 	set_status(text);
 }
-
-typedef struct { WCHAR** names; SIZE_T count, cap; int failed; int fixed_only; } font_list;
 
 static int CALLBACK enum_font_proc(const LOGFONTW* lf, const TEXTMETRICW* tm,
 	DWORD type, LPARAM param)
@@ -1043,7 +1054,7 @@ static const char* opt_get_language(void* u) { (void)u; return g_lang; }
 static int opt_set_theme(void* u, int mode)
 {
 	(void)u;
-	if (mode < 0 || mode > 2) return 0;
+	if (mode < 0 || mode > 3) return 0;
 	g_themeMode = mode;
 	sync_system_theme();
 	return 1;
@@ -1143,6 +1154,7 @@ static void layout(void)
 	GetClientRect(native(g_window), &bounds);
 	W = bounds.right; H = bounds.bottom;
 	if (g_pal && palette_is_open(g_pal)) palette_close(g_pal);
+	recent_flyout_close();
 
 	if (g_sidebar)
 		pl_widget_set_rect(sidebar_widget(g_sidebar), 0, 0, SIDEBAR_W, H);
@@ -1197,6 +1209,16 @@ static void on_browse(void* user)
 	g_pending = ACTION_BROWSE;
 }
 
+static void recent_on_pick(const char* path, void* user)
+{
+	(void)user;
+	set_scan_path(path);
+	g_pending = ACTION_SCAN;
+}
+
+static void recent_on_open(void* user) { (void)user; g_pending = ACTION_BROWSE; }
+static void recent_on_clear(void* user) { (void)user; g_pending = ACTION_CLEAR_RECENT; }
+
 static void on_nav(void* user, int nav_id)
 {
 	(void)user;
@@ -1207,6 +1229,10 @@ static void on_nav(void* user, int nav_id)
 
 	case SIDEBAR_PALETTE_ID:
 		g_pending = ACTION_PALETTE;
+		return;
+
+	case SIDEBAR_RECENT_ID:
+		g_pending = ACTION_RECENT_MENU;
 		return;
 
 	case NAV_OVERVIEW:
@@ -1287,7 +1313,7 @@ static void sync_system_theme(void)
 		return;
 
 	if (g_themeMode == 1)      dark = FALSE;
-	else if (g_themeMode == 2) dark = TRUE;
+	else if (g_themeMode == 2 || g_themeMode == 3) dark = TRUE;
 	else                       dark = system_theme_is_dark() ? TRUE : FALSE;
 
 	DwmSetWindowAttribute(
@@ -1296,11 +1322,11 @@ static void sync_system_theme(void)
 		&dark,
 		sizeof(dark));
 
-	theme_set(dark ? THEME_DARK : THEME_LIGHT);
+	theme_set(g_themeMode == 3 ? THEME_SLATE : (dark ? THEME_DARK : THEME_LIGHT));
+	th_mica_apply(hwnd);
 
 	repaint_all();
 }
-
 
 static LRESULT CALLBACK window_subclass(HWND handle, UINT message,
 	WPARAM wp, LPARAM lp,
@@ -1341,7 +1367,11 @@ static LRESULT CALLBACK window_subclass(HWND handle, UINT message,
 	case WM_ERASEBKGND: {
 		HDC dc = (HDC)wp;
 		RECT r; GetClientRect(handle, &r);
-		th_fill(dc, r.left, r.top, r.right, r.bottom, CLR_BG);
+		if (th_mica_on())
+			th_fill_surface(dc, r.left, r.top, r.right, r.bottom,
+				CLR_BG, theme_cur()->a_bg);
+		else
+			th_fill(dc, r.left, r.top, r.right, r.bottom, CLR_BG);
 		return 1;
 	}
 
@@ -1426,13 +1456,28 @@ static void fill_palette(void)
 	palette_add(g_pal, "Monitor downloads", "action", PALETTE_ACTION_BASE + ACTION_MONITOR);
 	palette_add(g_pal, "Check on VirusTotal (browser)", "action", PALETTE_ACTION_BASE + ACTION_VIRUSTOTAL);
 	palette_add(g_pal, "About", "action", PALETTE_ACTION_BASE + ACTION_ABOUT);
+	palette_add(g_pal, "Clear recent files", "action", PALETTE_ACTION_BASE + ACTION_CLEAR_RECENT);
+	{
+		int i, n = recent_count();
+		for (i = 0; i < n; ++i) {
+			const char* p, * name;
+		free_palette_recent_slot:
+			g_palRecent[i] = copy_utf8(recent_get(i));
+			if (!g_palRecent[i]) continue;
+			name = g_palRecent[i];
+			for (p = g_palRecent[i]; *p; ++p)
+				if (*p == '\\' || *p == '/') name = p + 1;
+			palette_add(g_pal, name, "recent",
+				PALETTE_ACTION_BASE + ACTION_RECENT_BASE + i);
+		}
+	}
 #ifdef CDIE_STORE_BUILD
 	palette_add(g_pal, "Version history (rollback)", "action", PALETTE_ACTION_BASE + ACTION_VERSIONS);
 #endif
 }
 static void pal_round(void)
 {
-	if (g_palWnd) SetWindowRgn(g_palWnd, NULL, TRUE);   /* no clipping: smooth corners */
+	if (g_palWnd) SetWindowRgn(g_palWnd, NULL, TRUE);
 }
 
 static void do_palette(void)
@@ -1590,7 +1635,12 @@ static LRESULT CALLBACK input_hook(int code, WPARAM wp, LPARAM lp)
 {
 	if (code >= 0 && wp == PM_REMOVE) {
 		MSG* m = (MSG*)lp;
-		if (g_pal && palette_is_open(g_pal)) {
+		if (m->message == WM_LBUTTONUP)
+			recent_flyout_filter(m);     
+		if (recent_flyout_is_open()) {
+			recent_flyout_filter(m);
+		}
+		else if (g_pal && palette_is_open(g_pal)) {
 			hook_palette(m);
 		}
 		else if (GetActiveWindow() == native(g_window)) {
@@ -1655,6 +1705,14 @@ static int create_controls(void)
 
 	g_pal = palette_create(native(g_window), on_palette, NULL);
 	if (g_pal) fill_palette();
+	{
+		RecentFlyoutHost fh;
+		ZeroMemory(&fh, sizeof(fh));
+		fh.on_pick = recent_on_pick;
+		fh.on_open = recent_on_open;
+		fh.on_clear = recent_on_clear;
+		recent_flyout_create(native(g_window), &fh);
+	}
 	g_palHook = SetWindowsHookExW(WH_GETMESSAGE, input_hook, NULL, GetCurrentThreadId());
 
 	if (!g_sidebar || !g_header_wnd || !g_infobar_wnd || !g_bottombar || !g_tree || !g_hex || !g_dasm || !g_entropy || !g_vt || !g_sec || !g_nt) {
@@ -1860,6 +1918,13 @@ static void run_action(int action)
 	switch (action) {
 	case ACTION_SCAN:           do_scan();           break;
 	case ACTION_BROWSE:         do_browse();         break;
+	case ACTION_RECENT_MENU: {
+		RECT cb;
+		GetClientRect(native(g_window), &cb);
+		if (!recent_flyout_toggle(SIDEBAR_W, cb.bottom - th_scale(40) - th_scale(8)))
+			set_status("No recent files yet. Open a file first.");
+		break;
+	}
 	case ACTION_OPTIONS:        do_options_window(OPTIONS_PAGE_SCAN); break;
 	case ACTION_ABOUT:          do_options_window(OPTIONS_PAGE_ABOUT); break;
 	case ACTION_MONITOR:        dlwatch_set_enabled(!dlwatch_enabled()); break;
@@ -1872,7 +1937,18 @@ static void run_action(int action)
 		break;
 #endif
 	case ACTION_SIGNATURES:     signatures_show(g_app, g_window); break;
-	default: break;
+	case ACTION_CLEAR_RECENT:
+		recent_clear();
+		recent_refresh_shell();
+		set_status("Recent files cleared.");
+		break;
+	default:
+		if (action >= ACTION_RECENT_BASE && action < ACTION_RECENT_BASE + RECENT_MAX
+			&& g_palRecent[action - ACTION_RECENT_BASE]) {
+			set_scan_path(g_palRecent[action - ACTION_RECENT_BASE]);
+			do_scan();
+		}
+		break;
 	}
 }
 
@@ -1884,6 +1960,8 @@ int gui_run(void)
 	char ready[512];
 
 	load_saved_settings();
+	recent_init();       
+	jumplist_init();    
 
 	status = xxwidgets_app_create(&config, &g_app);
 	if (status != XXWIDGETS_OK) {
@@ -1898,6 +1976,7 @@ int gui_run(void)
 
 	init_tray_and_monitor();
 	taskbar_init();
+	recent_refresh_shell();   
 	SetWindowPos(native(g_window), NULL, 0, 0, th_scale(1281), th_scale(700), SWP_NOMOVE | SWP_NOZORDER);
 	db_ok = init_backend_with_config();
 	apply_saved_prefs();
@@ -1956,6 +2035,7 @@ finish:
 	taskbar_shutdown();
 	dlwatch_shutdown();
 	tray_remove();
+	recent_shutdown();
 	save_config_on_exit();
 	gui_backend_shutdown();
 	if (xxwidgets_app_destroy(g_app) != XXWIDGETS_OK) result = 1;

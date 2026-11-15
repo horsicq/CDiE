@@ -22,10 +22,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include "i18n.h"
+#include "core/config.h"
 
 #ifdef _WIN32
 #include <windows.h>
+#include <winhttp.h>
 #define PATH_SEP '\\'
 #define PATH_CAP MAX_PATH
 #define STRDUP _strdup
@@ -33,6 +36,9 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <limits.h>
+#include <stdint.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
 #endif
@@ -40,6 +46,10 @@
 #define PATH_CAP PATH_MAX
 #define STRDUP strdup
 #endif
+
+#define I18N_HOST "raw.githubusercontent.com"
+#define I18N_PATH "/horsicq/CDiE/NewLook/lang/"
+#define I18N_MAX  (1024 * 1024)
 
 typedef struct { char* key; char* val; } Pair;
 static Pair* s_pairs; static int s_n;
@@ -111,14 +121,39 @@ static char* skip_bom(char* p) {
   return p;
 }
 
+static int lang_base(char* out, size_t cap)
+{
+  const char* p = config_file_path();
+  char* slash;
+  if (!p) return 0;
+  snprintf(out, cap, "%s", p);
+  slash = strrchr(out, PATH_SEP);
+  if (!slash) return 0;
+  *slash = 0;
+  return 1;
+}
+
+static FILE* open_lang(const char* code)
+{
+  char base[PATH_CAP], path[PATH_CAP + 64];
+  FILE* f;
+  if (lang_base(base, sizeof base)) {
+    snprintf(path, sizeof path, "%s%clang%c%s.txt", base, PATH_SEP, PATH_SEP, code);
+    if ((f = open_utf8(path)) != NULL) return f;
+  }
+  if (exe_dir(base, sizeof base)) {
+    snprintf(path, sizeof path, "%s%clang%c%s.txt", base, PATH_SEP, PATH_SEP, code);
+    return open_utf8(path);
+  }
+  return NULL;
+}
+
 int i18n_load(const char* code) {
-  char dir[PATH_CAP], path[PATH_CAP + 64], line[2048];
+  char line[2048];
   FILE* f; int cap = 0, first = 1;
   clear();
   if (!code || !code[0]) return 1;                 // English
-  if (!exe_dir(dir, sizeof dir)) return 0;
-  snprintf(path, sizeof path, "%s%clang%c%s.txt", dir, PATH_SEP, PATH_SEP, code);
-  f = open_utf8(path);
+  f = open_lang(code);
   if (!f) return 0;
   while (fgets(line, sizeof line, f)) {
     char* p = line, * eq; size_t n;
@@ -175,11 +210,10 @@ static void report_lang(const char* dir, const char* code,
   add(code, name, ud);
 }
 
-int i18n_list(void (*add)(const char* code, const char* name, void* ud), void* ud)
+static int list_in(const char* dir, void (*add)(const char* code, const char* name, void* ud), void* ud)
 {
-  char dir[PATH_CAP], code[128];
+  char code[128];
   int n = 0;
-  if (!exe_dir(dir, sizeof dir)) return 0;
 
 #ifdef _WIN32
   {
@@ -220,4 +254,170 @@ int i18n_list(void (*add)(const char* code, const char* name, void* ud), void* u
   }
 #endif
   return n;
+}
+
+int i18n_list(void (*add)(const char*, const char*, void*), void* ud)
+{
+  char base[PATH_CAP];
+  int n = 0;
+  if (exe_dir(base, sizeof base)) n += list_in(base, add, ud);
+  if (lang_base(base, sizeof base)) n += list_in(base, add, ud);
+  return n;
+}
+
+static int safe_code(const char* c)
+{
+  size_t n = strlen(c);
+  if (!n || n > 31) return 0;
+  for (; *c; ++c)
+    if (!isalnum((unsigned char)*c) && *c != '-' && *c != '_') return 0;
+  return 1;  
+}
+
+static void make_dir(const char* p)
+{
+#ifdef _WIN32
+  WCHAR w[MAX_PATH];
+  if (MultiByteToWideChar(CP_UTF8, 0, p, -1, w, MAX_PATH)) CreateDirectoryW(w, NULL);
+#else
+  mkdir(p, 0755);
+#endif
+}
+
+static FILE* open_write(const char* path)
+{
+#ifdef _WIN32
+  WCHAR w[MAX_PATH];
+  if (!MultiByteToWideChar(CP_UTF8, 0, path, -1, w, MAX_PATH)) return NULL;
+  return _wfopen(w, L"wb");
+#else
+  return fopen(path, "wb");
+#endif
+}
+
+static char* http_get(const char* path, size_t* out_len)
+{
+#ifdef _WIN32
+  HINTERNET s = NULL, c = NULL, r = NULL;
+  char* buf = NULL; size_t len = 0, cap = 0; int ok = 0;
+  WCHAR wh[128], wp[512];
+  DWORD code = 0, sz = sizeof code;
+  if (!MultiByteToWideChar(CP_UTF8, 0, I18N_HOST, -1, wh, 128)) return NULL;
+  if (!MultiByteToWideChar(CP_UTF8, 0, path, -1, wp, 512)) return NULL;
+  s = WinHttpOpen(L"cdie", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, NULL, NULL, 0);
+  if (!s) goto done;
+  WinHttpSetTimeouts(s, 3000, 3000, 5000, 5000);
+  c = WinHttpConnect(s, wh, INTERNET_DEFAULT_HTTPS_PORT, 0);
+  if (!c) goto done;
+  r = WinHttpOpenRequest(c, L"GET", wp, NULL, NULL, NULL, WINHTTP_FLAG_SECURE);
+  if (!r || !WinHttpSendRequest(r, NULL, 0, NULL, 0, 0, 0) || !WinHttpReceiveResponse(r, NULL)) goto done;
+  if (!WinHttpQueryHeaders(r, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+    NULL, &code, &sz, NULL) || code != 200) goto done;
+  for (;;) {
+    DWORD avail = 0, got = 0;
+    if (!WinHttpQueryDataAvailable(r, &avail)) goto done;
+    if (!avail) break;
+    if (len + avail + 1 > I18N_MAX) goto done;
+    if (len + avail + 1 > cap) {
+      size_t nc = (len + avail + 1) * 2;
+      char* nb = (char*)realloc(buf, nc);
+      if (!nb) goto done;
+      buf = nb; cap = nc;
+    }
+    if (!WinHttpReadData(r, buf + len, avail, &got)) goto done;
+    len += got;
+  }
+  if (buf) { buf[len] = 0; ok = 1; }
+done:
+  if (r) WinHttpCloseHandle(r);
+  if (c) WinHttpCloseHandle(c);
+  if (s) WinHttpCloseHandle(s);
+  if (!ok) { free(buf); return NULL; }
+  *out_len = len;
+  return buf;
+#else
+  {
+    char cmd[512], tmp[4096];
+    char* buf = NULL; size_t len = 0, cap = 0;
+    FILE* p; int rc, bad = 0;
+    snprintf(cmd, sizeof cmd,
+      "curl -fsSL --max-time 10 \"https://%s%s\" 2>/dev/null", I18N_HOST, path);
+    p = popen(cmd, "r");
+    if (!p) return NULL;
+    for (;;) {
+      size_t n = fread(tmp, 1, sizeof tmp, p);
+      if (!n) break;
+      if (len + n + 1 > I18N_MAX) { bad = 1; break; }
+      if (len + n + 1 > cap) {
+        size_t nc = (len + n + 1) * 2;
+        char* nb = (char*)realloc(buf, nc);
+        if (!nb) { bad = 1; break; }
+        buf = nb; cap = nc;
+      }
+      memcpy(buf + len, tmp, n);
+      len += n;
+    }
+    rc = pclose(p);
+    if (bad || rc != 0 || !buf) { free(buf); return NULL; }
+    buf[len] = 0;
+    *out_len = len;
+    return buf;
+  }
+#endif
+}
+
+int i18n_installed(const char* code)
+{
+  FILE* f;
+  if (!code || !safe_code(code)) return 0;
+  f = open_lang(code);
+  if (!f) return 0;
+  fclose(f);
+  return 1;
+}
+
+int i18n_remote_list(void (*add)(const char*, const char*, void*), void* ud)
+{
+  size_t len; int n = 0;
+  char* data = http_get(I18N_PATH "index.txt", &len);
+  char* p = data;
+  if (!data) return 0;
+  while (*p) {
+    char* nl = strpbrk(p, "\r\n");
+    char* eq;
+    if (nl) *nl = 0;
+    eq = strchr(p, '=');
+    if (p[0] != '#' && eq) {
+      *eq = 0;
+      if (safe_code(p) && eq[1]) { add(p, eq + 1, ud); ++n; }
+    }
+    if (!nl) break;
+    p = nl + 1;
+    while (*p == '\r' || *p == '\n') ++p;
+  }
+  free(data);
+  return n;
+}
+
+int i18n_download(const char* code)
+{
+  char base[PATH_CAP], dir[PATH_CAP + 16], path[PATH_CAP + 64], url[256];
+  size_t len; char* data; FILE* f; int ok;
+
+  if (!code || !safe_code(code)) return 0;
+  if (!lang_base(base, sizeof base)) return 0;
+  make_dir(base);
+  snprintf(dir, sizeof dir, "%s%clang", base, PATH_SEP);
+  make_dir(dir);
+  snprintf(path, sizeof path, "%s%c%s.txt", dir, PATH_SEP, code);
+  snprintf(url, sizeof url, I18N_PATH "%s.txt", code);
+
+  data = http_get(url, &len);
+  if (!data || !len) { free(data); return 0; }
+  f = open_write(path);
+  if (!f) { free(data); return 0; }
+  ok = fwrite(data, 1, len, f) == len;
+  ok = (fclose(f) == 0) && ok;
+  free(data);
+  return ok;
 }

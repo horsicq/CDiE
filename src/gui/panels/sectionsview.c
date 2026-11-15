@@ -19,6 +19,7 @@
  * SOFTWARE.
  */
 #ifndef _WIN32
+#include <windows.h>
 #define _FILE_OFFSET_BITS 64
 #define _POSIX_C_SOURCE 200809L
 #endif
@@ -30,10 +31,6 @@
 #include <string.h>
 #include <stdint.h>
 #include <math.h>        
-
-#ifdef _WIN32
-#include <windows.h>
-#endif
 
 #define SEC_MAX     256                 
 #define SEC_ENT_CAP (8u << 20)        

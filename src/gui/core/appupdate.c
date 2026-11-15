@@ -27,7 +27,6 @@
 #endif
 #include <windows.h>
 #include <winhttp.h>
-#pragma comment(lib, "winhttp.lib")
 #else
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE

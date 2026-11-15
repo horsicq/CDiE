@@ -44,15 +44,6 @@
 #include "core/i18n.h"
 #include "panels/versions.h"
 
-#ifdef _MSC_VER
-#pragma comment(lib, "winhttp.lib")
-#pragma comment(lib, "bcrypt.lib")
-#pragma comment(lib, "crypt32.lib")
-#pragma comment(lib, "shell32.lib")
-#pragma comment(lib, "ole32.lib")
-#pragma comment(lib, "uuid.lib")
-#endif
-
 #define VERS_PRODUCT_ID "9NQ58D7GHB2X"
 
 #if defined(_M_ARM64) || defined(__aarch64__)

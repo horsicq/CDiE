@@ -22,7 +22,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-
+#ifdef _WIN32
+#define _strdup strdup
+#include <windows.h>
+#include <dwmapi.h>
+#endif
 #include "platform/platform.h"
 #include "panels/options.h"
 #include "core/gui_backend.h"
@@ -31,15 +35,6 @@
 #include "theme/theme.h"
 #include "core/virustotal.h"
 #include "panels/versions.h"
-#ifdef _WIN32
-#include <windows.h>
-#include <dwmapi.h>
-#pragma comment(lib, "dwmapi.lib")
-#endif
-
-#ifndef _WIN32
-#define _strdup strdup
-#endif
 
 #define HEAD    th_scale(44)
 #undef NAV_H
@@ -50,7 +45,6 @@
 
 #define DD_ROW th_scale(26)
 #define DD_MAXVIS 8
-
 
 enum { PG_SCAN, PG_DB, PG_OPT, PG_FONTS, PG_APPEARANCE, PG_LANG, PG_VT, PG_CTX, PG_UPDATE, PG_VERSIONS, PG_ABOUT, PG_COUNT };
 enum {
@@ -72,7 +66,7 @@ enum {
   ID_FDEF0, ID_FDEF1, ID_FDEF2, ID_FDEF3,
   ID_FVAL0, ID_FVAL1, ID_FVAL2, ID_FVAL3,
   ID_LANGVAL,
-  ID_THEME_SYS, ID_THEME_LIGHT, ID_THEME_DARK,
+  ID_THEME_SYS, ID_THEME_LIGHT, ID_THEME_DARK, ID_THEME_SLATE,
   ID_CTX_TOGGLE,
   ID_CHECK_UPDATE,
   ID_OPEN_VERSIONS,
@@ -117,7 +111,7 @@ typedef struct Opt {
   char** fnames;
   int nfnames, capfnames, fonts_loaded;
   int dd_open, dd_kind, dd_role, dd_scroll, dd_hov;
-  int nlang, caplang, langs_loaded;
+  int nlang, caplang, langs_loaded, remote_loaded;
   char** lcodes; char** lnames;
   char lang_cur[32];
   int langdirty;
@@ -167,7 +161,7 @@ static void apply_titlebar(Opt* o)
 {
   const Theme* t = theme_cur();
   if (o && o->win)
-    pl_window_set_caption(o->win, g_theme_mode == THEME_DARK, t->bg, t->text_primary);
+    pl_window_set_caption(o->win, theme_is_dark(), t->bg, t->text_primary);
 }
 
 static size_t u8_prev(const char* s, size_t i)
@@ -505,8 +499,9 @@ static void build_items(Opt* o)
   case PG_APPEARANCE:
     add(o, IK_HEAD, 0, "THEME", 1, x, y, x + w, y + s20); y += th_scale(32);
     add(o, IK_RADIO, ID_THEME_SYS, "Use system setting", 1, x, y, x + w, y + ROW_H); y += ROW_H;
+    add(o, IK_RADIO, ID_THEME_DARK, "Dark", 1, x, y, x + w, y + ROW_H); y += ROW_H;
     add(o, IK_RADIO, ID_THEME_LIGHT, "Light", 1, x, y, x + w, y + ROW_H); y += ROW_H;
-    add(o, IK_RADIO, ID_THEME_DARK, "Dark", 1, x, y, x + w, y + ROW_H); y += ROW_H + th_scale(8);
+    add(o, IK_RADIO, ID_THEME_SLATE, "Slate Mica", 1, x, y, x + w, y + ROW_H); y += ROW_H + th_scale(8);
     add(o, IK_NOTE, 0, "The theme is applied when you press Apply or OK.", 1, x, y, x + w, y + s22);
     break;
   case PG_LANG:
@@ -741,6 +736,9 @@ static void layout(Opt* o)
 static void lang_add(const char* code, const char* name, void* ud)
 {
   Opt* o = (Opt*)ud;
+  int k;
+  for (k = 0; k < o->nlang; ++k)
+    if (!strcmp(o->lcodes[k], code)) return;   /* already listed */
   if (o->nlang == o->caplang) {
     int nc = o->caplang ? o->caplang * 2 : 16;
     char** c = (char**)realloc(o->lcodes, (size_t)nc * sizeof(*c));
@@ -763,6 +761,13 @@ static void load_languages(Opt* o)
   o->langs_loaded = 1;
   lang_add("", translate("English"), o);
   if (o->host.list_languages) o->host.list_languages(o->host.user, lang_add, o);
+}
+
+static void lang_add_remote(const char* code, const char* name, void* ud)
+{
+  char label[160];
+  snprintf(label, sizeof(label), "%s (%s)", name, translate("online"));
+  lang_add(code, label, ud);   /* skipped if a local file already exists */
 }
 
 static const char* lang_name(Opt* o)
@@ -1021,7 +1026,14 @@ static void open_dropdown(Opt* o, int kind, int anchor_id, int role)
     if (o->it[i].id == anchor_id) b = o->it[i].r;
   o->dd_kind = kind;
   o->dd_role = role;
-  if (kind == DD_LANG) load_languages(o); else load_fonts(o);
+  if (kind == DD_LANG) {
+    load_languages(o);
+    if (!o->remote_loaded) {
+      o->remote_loaded = 1;
+      i18n_remote_list(lang_add_remote, o);
+    }
+  }
+  else load_fonts(o);
   if (dd_count(o) <= 0) return;
   vis = dd_visible(o);
   h = vis * DD_ROW + th_scale(8);
@@ -1048,7 +1060,12 @@ static void pick_font(Opt* o, int idx)
 static void dd_pick(Opt* o, int idx)
 {
   if (o->dd_kind == DD_LANG) {
-    snprintf(o->lang_cur, sizeof(o->lang_cur), "%s", o->lcodes[idx]);
+    const char* code = o->lcodes[idx];
+    if (code[0] && !i18n_installed(code) && !i18n_download(code)) {
+      snprintf(o->msg, sizeof(o->msg), "%s", translate("Could not download the language file."));
+      return;
+    }
+    snprintf(o->lang_cur, sizeof(o->lang_cur), "%s", code);
     o->langdirty = 1;
   }
   else pick_font(o, idx);
@@ -1219,7 +1236,7 @@ static void activate(Opt* o, int id)
     break;
   }
   default:
-    if (id >= ID_THEME_SYS && id <= ID_THEME_DARK) {
+    if (id >= ID_THEME_SYS && id <= ID_THEME_SLATE) {
       o->theme_mode = id - ID_THEME_SYS;
       o->themedirty = 1;
     }

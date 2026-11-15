@@ -19,7 +19,7 @@
  * SOFTWARE.
  */
 #pragma once
-#include "theme/theme.h"   /* PlWidget */
+#include "theme/theme.h"  
 
 typedef struct ResultsTree ResultsTree;
 
@@ -29,7 +29,6 @@ PlWidget    *resultstree_widget(const ResultsTree *t);
 void resultstree_set_busy(ResultsTree* t, int busy, int percent, const char* stage);
 
 void resultstree_clear(ResultsTree *t);
-/* Strings are copied. Returns 0 on out-of-memory. */
 int  resultstree_add(ResultsTree *t, const char *type, const char *name,
                      const char *version, const char *info);
 int  resultstree_count(const ResultsTree *t);
