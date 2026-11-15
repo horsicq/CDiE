@@ -1,2 +1,7 @@
 # code=Name
 de=Deutsch
+fr=French
+it=Italian
+pt=Portuguese
+ru=Russian
+zh=Chines
