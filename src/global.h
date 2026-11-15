@@ -18,13 +18,22 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
-
 #ifndef GLOBAL_H
 #define GLOBAL_H
 
+#if defined(_M_ARM64)
+#define CDIE_ARCH "ARM64"
+#elif defined(_M_X64)
+#define CDIE_ARCH "x64"
+#elif defined(_M_IX86)
+#define CDIE_ARCH "x86"
+#else
+#define CDIE_ARCH "Unknown"
+#endif
+
 #define X_APPLICATIONDISPLAYNAME "cdie"
 #define X_APPLICATIONNAME        "cdie"
-#define X_APPLICATIONVERSION     "4.0.0"
+#define X_APPLICATIONVERSION     "4.1.0"
 #define X_ORGANIZATIONNAME       "NTInfo"
 #define X_ORGANIZATIONDOMAIN     "ntinfo.biz"
 
