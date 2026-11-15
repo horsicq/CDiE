@@ -10,39 +10,55 @@ rem the resource script.
 rem
 rem Dependencies (dep\xxwidgets, dep\xxfclib): if no prebuilt .lib is found,
 rem they are configured and built automatically with CMake (Release, static
-rem CRT /MT) into dep\<name>\build, then picked up.
+rem CRT /MT) into dep\<name>\build_<arch>, then picked up.
 rem
-rem Usage (from any prompt):  run\build_msvc_gui.cmd [clean | cleanall | rebuild] [store] [noinstaller]
+rem Usage (cmd, PowerShell or any Developer prompt; the script switches the
+rem Visual Studio environment to the requested arch by itself):
+rem   build_msvc_gui.cmd [clean | cleanall | rebuild] [store] [noinstaller] [x64 | x86 | arm64]
 rem   store        build with /DCDIE_STORE_BUILD
 rem   noinstaller  build the app only; by default the installer is built after it
-rem   clean        delete the temp build folder
-rem   cleanall     clean, and also delete dep\xxwidgets\build and dep\xxfclib\build
+rem   x64|x86|arm64  target architecture (default x64)
+rem   clean        delete the temp build folders (all architectures)
+rem   cleanall     clean, and also delete dep\xxwidgets\build* and dep\xxfclib\build*
 rem   rebuild      clean, then build
+rem Examples:
+rem   build_msvc_gui.cmd store noinstaller x64
+rem   build_msvc_gui.cmd store noinstaller arm64
+rem   build_msvc_gui.cmd x86
 rem Overrides (optional):
-rem   set "VCVARS=...\vcvars64.bat"
+rem   set "VCVARS=...\vcvarsall.bat"
 rem   set "XXW_LIB=C:\full\path\xxwidgets.lib"
 rem   set "XXF_LIB=C:\full\path\die_engine.lib"
-rem   set "CDIS_LIB=C:\full\path\cdisasm.lib"
+rem   set "CDIS_LIB=C:\full\path\cdisasm.lib"     (must match the target arch)
 rem   set "REBUILD_DEPS=1"     force a rebuild of both dependencies
+rem
+rem The installer script receives the target arch in %CDIE_ARCH% and should
+rem name its output cdie-setup-%CDIE_ARCH%.exe so archs don't overwrite each other.
 rem ---------------------------------------------------------------------------
 setlocal enabledelayedexpansion
 
 set "ROOT=%~dp0.."
 set "SRC=%ROOT%\src"
 set "WORK_ROOT=%TEMP%\cdie_setup"
-set "OUT=%WORK_ROOT%\build_msvc"
 set "GUI=%SRC%\gui"
 set "DEP=%ROOT%\dep"
 set "RES=%GUI%\resource"
 set "STORE_BUILD=0"
 set "BUILD_INSTALLER="
 set "DO_REBUILD="
+set "ARCH=x64"
 for %%a in (%*) do (
     if /i "%%~a"=="store"       set "STORE_BUILD=1"
     if /i "%%~a"=="installer"   set "BUILD_INSTALLER=1"
     if /i "%%~a"=="noinstaller" set "BUILD_INSTALLER=0"
     if /i "%%~a"=="rebuild"     set "DO_REBUILD=1"
+    if /i "%%~a"=="x64"         set "ARCH=x64"
+    if /i "%%~a"=="x86"         set "ARCH=x86"
+    if /i "%%~a"=="arm64"       set "ARCH=arm64"
 )
+set "OUT=%WORK_ROOT%\build_msvc_%ARCH%"
+set "CDIE_ARCH=%ARCH%"
+
 rem default: normal build makes an installer, Store build does not (unless "installer" is given)
 if not defined BUILD_INSTALLER (
     if "%STORE_BUILD%"=="1" ( set "BUILD_INSTALLER=0" ) else ( set "BUILD_INSTALLER=1" )
@@ -53,8 +69,20 @@ if /i "%~1"=="clean"    call :do_clean     & exit /b 0
 if /i "%~1"=="cleanall" call :do_clean all & exit /b 0
 if defined DO_REBUILD   call :do_clean
 
-rem --- Visual Studio x64 environment (needed for cl and cmake) ---------------
-if not defined VSCMD_VER (
+rem --- Visual Studio environment for the requested arch ----------------------
+rem If the prompt already has a VS environment for another arch, clear it and
+rem re-run vcvarsall for the requested one. setlocal keeps this change local to
+rem the script, so the calling shell is left untouched.
+set "NEED_VCVARS="
+if not defined VSCMD_VER set "NEED_VCVARS=1"
+if defined VSCMD_VER if /i not "!VSCMD_ARG_TGT_ARCH!"=="%ARCH%" (
+    echo Prompt is set up for !VSCMD_ARG_TGT_ARCH!, switching to %ARCH%...
+    if not defined VCVARS if exist "!VSINSTALLDIR!VC\Auxiliary\Build\vcvarsall.bat" set "VCVARS=!VSINSTALLDIR!VC\Auxiliary\Build\vcvarsall.bat"
+    if defined __VSCMD_PREINIT_PATH set "PATH=!__VSCMD_PREINIT_PATH!"
+    for %%v in (VSCMD_VER VSCMD_ARG_app_plat VSCMD_ARG_HOST_ARCH VSCMD_ARG_TGT_ARCH INCLUDE LIB LIBPATH EXTERNAL_INCLUDE UCRTVersion UniversalCRTSdkDir WindowsSdkDir WindowsSDKVersion WindowsSDKLibVersion WindowsSdkBinPath WindowsSdkVerBinPath WindowsLibPath Platform VCINSTALLDIR VCToolsInstallDir VCToolsRedistDir DevEnvDir) do set "%%v="
+    set "NEED_VCVARS=1"
+)
+if defined NEED_VCVARS (
     if not defined VCVARS (
         set "VSVARS_PATH="
 
@@ -67,8 +95,8 @@ if not defined VSCMD_VER (
                 findstr /i "InstallLocation"
             ') do (
                 if not "%%c"=="" (
-                    if exist "%%c\VC\Auxiliary\Build\vcvars64.bat" (
-                        set "VSVARS_PATH=%%c\VC\Auxiliary\Build\vcvars64.bat"
+                    if exist "%%c\VC\Auxiliary\Build\vcvarsall.bat" (
+                        set "VSVARS_PATH=%%c\VC\Auxiliary\Build\vcvarsall.bat"
                         goto :found_vs
                     )
                 )
@@ -81,11 +109,29 @@ if not defined VSCMD_VER (
             exit /b 1
         )
 
-        set "VCVARS=%VSVARS_PATH%"
+        set "VCVARS=!VSVARS_PATH!"
     )
 
-    call "!VCVARS!" >nul
+    rem vcvarsall needs host_target for cross builds (e.g. x64_arm64 on an x64 PC)
+    set "VCARG=%ARCH%"
+    set "HOSTARCH=%PROCESSOR_ARCHITECTURE%"
+    if defined PROCESSOR_ARCHITEW6432 set "HOSTARCH=%PROCESSOR_ARCHITEW6432%"
+    if /i "!HOSTARCH!"=="AMD64" if /i "%ARCH%"=="arm64" set "VCARG=x64_arm64"
+    if /i "!HOSTARCH!"=="ARM64" if /i "%ARCH%"=="x64" set "VCARG=arm64_x64"
+    if /i "!HOSTARCH!"=="ARM64" if /i "%ARCH%"=="x86" set "VCARG=arm64_x86"
+    echo Host !HOSTARCH!, vcvarsall arg: !VCARG!
+    call "!VCVARS!" !VCARG! >nul
+    if errorlevel 1 (
+        echo ERROR: vcvarsall.bat failed for !VCARG! - is that toolchain installed?
+        exit /b 1
+    )
+    where cl >nul 2>&1
+    if errorlevel 1 (
+        echo ERROR: cl.exe not found on PATH after vcvarsall !VCARG!.
+        exit /b 1
+    )
 )
+echo Target architecture : %ARCH%
 
 set "XXW_INC=%DEP%\xxwidgets\include"
 set "XXF_INC=%DEP%\xxfclib\include"
@@ -110,28 +156,28 @@ if defined REBUILD_DEPS (
     call :build_dep "%DEP%\xxfclib" die_engine || exit /b 1
 )
 
-if not defined XXW_LIB call :find_lib XXW_LIB "%DEP%\xxwidgets" "xxwidgets*.lib"
+if not defined XXW_LIB call :find_lib XXW_LIB "%DEP%\xxwidgets\build_%ARCH%" "xxwidgets*.lib"
 if not defined XXW_LIB (
-    echo xxwidgets lib not found - building it...
+    echo xxwidgets lib not found for %ARCH% - building it...
     call :build_dep "%DEP%\xxwidgets" xxwidgets || exit /b 1
-    call :find_lib XXW_LIB "%DEP%\xxwidgets" "xxwidgets*.lib"
+    call :find_lib XXW_LIB "%DEP%\xxwidgets\build_%ARCH%" "xxwidgets*.lib"
 )
 if not defined XXW_LIB (
-    echo ERROR: still no xxwidgets*.lib under %DEP%\xxwidgets after building.
-    echo        Run: dir /s /b "%DEP%\xxwidgets\build\*.lib"
+    echo ERROR: still no xxwidgets*.lib under %DEP%\xxwidgets\build_%ARCH% after building.
+    echo        Run: dir /s /b "%DEP%\xxwidgets\build_%ARCH%\*.lib"
     echo        then set XXW_LIB to the right file.
     exit /b 1
 )
 
-if not defined XXF_LIB call :find_lib XXF_LIB "%DEP%\xxfclib" "*die_engine*.lib"
+if not defined XXF_LIB call :find_lib XXF_LIB "%DEP%\xxfclib\build_%ARCH%" "*die_engine*.lib"
 if not defined XXF_LIB (
-    echo die_engine lib not found - building xxfclib...
+    echo die_engine lib not found for %ARCH% - building xxfclib...
     call :build_dep "%DEP%\xxfclib" die_engine || exit /b 1
-    call :find_lib XXF_LIB "%DEP%\xxfclib" "*die_engine*.lib"
+    call :find_lib XXF_LIB "%DEP%\xxfclib\build_%ARCH%" "*die_engine*.lib"
 )
 if not defined XXF_LIB (
-    echo ERROR: still no *die_engine*.lib under %DEP%\xxfclib after building.
-    echo        Run: dir /s /b "%DEP%\xxfclib\build\*.lib"
+    echo ERROR: still no *die_engine*.lib under %DEP%\xxfclib\build_%ARCH% after building.
+    echo        Run: dir /s /b "%DEP%\xxfclib\build_%ARCH%\*.lib"
     echo        then set XXF_LIB to the right file.
     exit /b 1
 )
@@ -139,15 +185,28 @@ echo Using xxwidgets lib : %XXW_LIB%
 echo Using die_engine lib: %XXF_LIB%
 
 rem die_engine.lib needs the cdisasm library (static libs do not carry deps).
-rem Auto-detected under dep\ unless CDIS_LIB is already set.
+rem It is built next to the dependencies, so look ONLY in the per-arch build
+rem folders (never fall back to a lib from another arch) unless CDIS_LIB is set.
 set "CDIS_ARG="
-if not defined CDIS_LIB call :find_lib CDIS_LIB "%DEP%" "*cdisasm*.lib"
-if defined CDIS_LIB (
-    echo Using cdisasm lib   : %CDIS_LIB%
-    set CDIS_ARG="%CDIS_LIB%"
-) else (
-     echo WARNING: no *cdisasm*.lib found under %DEP% - link may fail with cdisasm_x86_* unresolved.
+if not defined CDIS_LIB call :find_lib CDIS_LIB "%DEP%\xxfclib\build_%ARCH%" "*cdisasm*.lib"
+if not defined CDIS_LIB call :find_lib CDIS_LIB "%DEP%\xxwidgets\build_%ARCH%" "*cdisasm*.lib"
+if not defined CDIS_LIB (
+    echo ERROR: no %ARCH% cdisasm.lib found under dep\xxfclib\build_%ARCH% or dep\xxwidgets\build_%ARCH%.
+    echo        Build it for %ARCH% or set CDIS_LIB to the right file.
+    exit /b 1
 )
+
+rem sanity check: the lib must be the target machine type
+set "MACH=x86"
+if /i "%ARCH%"=="x64"   set "MACH=x64"
+if /i "%ARCH%"=="arm64" set "MACH=ARM64"
+dumpbin /headers "!CDIS_LIB!" | findstr /i /c:"machine (!MACH!)" >nul
+if errorlevel 1 (
+    echo ERROR: !CDIS_LIB! is not a %ARCH% library.
+    exit /b 1
+)
+echo Using cdisasm lib   : %CDIS_LIB%
+set CDIS_ARG="%CDIS_LIB%"
 
 set "CDIS_INC_ARG="
 set "CDIS_HDR="
@@ -216,9 +275,9 @@ rem No /NODEFAULTLIB, /ENTRY or -DCDIE_NO_CRT: xxwidgets needs the hosted CRT.
 rem XXWIDGETS_STATIC / XXFC_STATIC stop the headers using dllimport (__imp_ symbols)
 rem when linking the static .lib files.
 if "%STORE_BUILD%"=="1" (
-    echo Building STORE version
+    echo Building STORE version ^(%ARCH%^)
 ) else (
-    echo Building NORMAL version
+    echo Building NORMAL version ^(%ARCH%^)
 )
 
 if not exist "%OUT%\obj_gui" mkdir "%OUT%\obj_gui"
@@ -227,8 +286,8 @@ cl /nologo /O1 /GL /Gy /Gw /GS- /W3 /MT /utf-8 /DNDEBUG /DXXWIDGETS_STATIC /DXXF
    !GUI_SOURCES! "%OUT%\cdie_gui.res" /Fe:"%OUT%\cdie_gui.exe" /Fo:"%OUT%\obj_gui\\" ^
       /link /SUBSYSTEM:WINDOWS /MANIFEST:NO /OPT:REF /OPT:ICF /LTCG /DEBUG:NONE /MAP:"%OUT%\cdie_gui.map" ^
    "%XXW_LIB%" "%XXF_LIB%" !CDIS_ARG! ^
-      user32.lib gdi32.lib comdlg32.lib comctl32.lib shell32.lib ole32.lib advapi32.lib dwmapi.lib uxtheme.lib msimg32.lib
-if errorlevel 1 ( echo BUILD FAILED ^(cdie_gui.exe^) & exit /b 1 )
+      user32.lib gdi32.lib comdlg32.lib comctl32.lib shell32.lib ole32.lib advapi32.lib dwmapi.lib uxtheme.lib msimg32.lib winhttp.lib bcrypt.lib crypt32.lib
+if errorlevel 1 ( echo BUILD FAILED ^(cdie_gui.exe, %ARCH%^) & exit /b 1 )
 
 echo.
 echo Built in %OUT%\ :
@@ -237,19 +296,20 @@ echo   cdie_gui.exe
 if "%BUILD_INSTALLER%"=="0" (
     if not exist "%ROOT%\release" mkdir "%ROOT%\release"
     if "%STORE_BUILD%"=="1" (
-        copy /y "%OUT%\cdie_gui.exe" "%ROOT%\release\cdie_gui_store.exe" >nul
-        echo Copied to %ROOT%\release\ : cdie_gui_store.exe
+        copy /y "%OUT%\cdie_gui.exe" "%ROOT%\release\cdie_gui_store_%ARCH%.exe" >nul
+        echo Copied to %ROOT%\release\ : cdie_gui_store_%ARCH%.exe
     ) else (
-        copy /y "%OUT%\cdie_gui.exe" "%ROOT%\release\cdie_gui.exe" >nul
-        echo Copied to %ROOT%\release\ : cdie_gui.exe
+        copy /y "%OUT%\cdie_gui.exe" "%ROOT%\release\cdie_gui_%ARCH%.exe" >nul
+        echo Copied to %ROOT%\release\ : cdie_gui_%ARCH%.exe
     )
 )
 
 if "%BUILD_INSTALLER%"=="1" (
     echo.
-    echo Building installer...
+    echo Building installer ^(%ARCH%^)...
     if not exist "%ROOT%\build_msvc" mkdir "%ROOT%\build_msvc"
     copy /y "%OUT%\cdie_gui.exe" "%ROOT%\build_msvc\cdie_gui.exe" >nul
+    rem build_installer.cmd sees CDIE_ARCH (inherited environment variable)
     call "%SRC%\installer\build_installer.cmd"
     if errorlevel 1 (
         if exist "%ROOT%\build_msvc" rmdir /s /q "%ROOT%\build_msvc"
@@ -265,7 +325,11 @@ if "%BUILD_INSTALLER%"=="1" (
     call :copy_setup "%SRC%\installer"
     if exist "%ROOT%\build_msvc" rmdir /s /q "%ROOT%\build_msvc"
     if not defined SETUP_COPIED echo WARNING: no cdie-setup*.exe found
-    if defined SETUP_COPIED if exist "!WORK_ROOT!" rmdir /s /q "!WORK_ROOT!"
+    rem remove only this arch's temp folder; drop the parent only if now empty
+    if defined SETUP_COPIED (
+        if exist "!OUT!" rmdir /s /q "!OUT!"
+        rmdir "!WORK_ROOT!" 2>nul
+    )
 )
 endlocal
 exit /b 0
@@ -281,8 +345,8 @@ for /r "%~1" %%f in (cdie-setup*.exe) do (
 exit /b 0
 
 rem :do_clean [all]
-rem   Removes the temp build folder. With "all", also the CMake build folders of
-rem   the dependencies (the next build then recompiles them, which is slow).
+rem   Removes the temp build folder (all archs). With "all", also the CMake build
+rem   folders of the dependencies (the next build then recompiles them, which is slow).
 :do_clean
 if exist "!WORK_ROOT!" (
     echo Removing !WORK_ROOT! ...
@@ -295,7 +359,8 @@ if exist "!ROOT!\build_msvc" (
     rmdir /s /q "!ROOT!\build_msvc"
 )
 if /i "%~1"=="all" (
-    for %%d in ("!DEP!\xxwidgets\build" "!DEP!\xxfclib\build") do (
+    for %%d in ("!DEP!\xxwidgets\build" "!DEP!\xxwidgets\build_x64" "!DEP!\xxwidgets\build_x86" "!DEP!\xxwidgets\build_arm64" ^
+                "!DEP!\xxfclib\build"   "!DEP!\xxfclib\build_x64"   "!DEP!\xxfclib\build_x86"   "!DEP!\xxfclib\build_arm64") do (
         if exist "%%~d" (
             echo Removing %%~d ...
             rmdir /s /q "%%~d"
@@ -311,7 +376,10 @@ for /r "%~2" %%f in (%~3) do if not defined %~1 set "%~1=%%f"
 exit /b 0
 
 rem :build_dep <source dir> [target]
-rem   Configure + build a CMake dependency as a Release static lib with /MT.
+rem   Configure + build a CMake dependency as a Release static lib with /MT into
+rem   <source dir>\build_<arch>. Uses Ninja if available, otherwise NMake Makefiles:
+rem   both use the cl on PATH (the arch set up by vcvarsall), unlike the default
+rem   Visual Studio generator, which would target the host arch.
 rem   Demos and tests are switched off (not needed, and the demo sources may
 rem   not be present). If [target] is given, only that target is built.
 :build_dep
@@ -324,17 +392,18 @@ if errorlevel 1 (
     echo ERROR: cmake not found on PATH. Install CMake or build %~1 manually.
     exit /b 1
 )
-set "GEN="
+set GEN=-G "NMake Makefiles"
 where ninja >nul 2>&1 && set "GEN=-G Ninja"
 set "TGT="
 if not "%~2"=="" set "TGT=--target %~2"
-echo Building %~1 ...
-cmake -S "%~1" -B "%~1\build" !GEN! -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DCMAKE_POLICY_DEFAULT_CMP0091=NEW -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DXXWIDGETS_BUILD_EXAMPLES=OFF -DXXWIDGETS_BUILD_TESTS=OFF -DXXWIDGETS_BUILD_SETTINGS=OFF -DBUILD_TESTING=OFF -DCMAKE_C_FLAGS_RELEASE="/O1 /Oi /Gy /GF /Gw /GL /DNDEBUG" -DCMAKE_CXX_FLAGS_RELEASE="/O1 /Oi /Gy /GF /Gw /GL /DNDEBUG" -DCMAKE_STATIC_LINKER_FLAGS_RELEASE=/LTCG
+echo Building %~1 for %ARCH% ...
+cmake -S "%~1" -B "%~1\build_%ARCH%" !GEN! -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DCMAKE_POLICY_DEFAULT_CMP0091=NEW -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DXXWIDGETS_BUILD_EXAMPLES=OFF -DXXWIDGETS_BUILD_TESTS=OFF -DXXWIDGETS_BUILD_SETTINGS=OFF -DBUILD_TESTING=OFF -DCMAKE_C_FLAGS_RELEASE="/O1 /Oi /Gy /GF /Gw /GL /DNDEBUG" -DCMAKE_CXX_FLAGS_RELEASE="/O1 /Oi /Gy /GF /Gw /GL /DNDEBUG" -DCMAKE_STATIC_LINKER_FLAGS_RELEASE=/LTCG
 if errorlevel 1 (
     echo ERROR: cmake configure failed for %~1
+    rmdir /s /q "%~1\build_%ARCH%" 2>nul
     exit /b 1
 )
-cmake --build "%~1\build" --config Release !TGT!
+cmake --build "%~1\build_%ARCH%" --config Release !TGT!
 if errorlevel 1 (
     echo ERROR: cmake build failed for %~1
     exit /b 1
