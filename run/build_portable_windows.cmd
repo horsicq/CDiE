@@ -57,6 +57,7 @@ if defined GEN_IS_VS (
 rem The portable package is the console binary only; skip building the
 rem shared/static libraries from lib\ altogether.
 set "GEN_ARGS=%GEN_ARGS% -DCDIE_BUILD_LIBRARY=OFF"
+set "GEN_ARGS=%GEN_ARGS% -DXXFC_ENABLE_STREAM_DATASTRUCTS=OFF"
 
 rem Size-optimised build, same flags as build_msvc_gui.cmd: /O1, static CRT (/MT),
 rem function/data sections, LTCG, and dead-code/duplicate folding at link time.
