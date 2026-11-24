@@ -23,9 +23,10 @@
 #include <string.h>
 #include <stdint.h>
 #ifdef _WIN32
-#define _strdup strdup
 #include <windows.h>
 #include <dwmapi.h>
+#else
+#define _strdup strdup
 #endif
 #include "platform/platform.h"
 #include "panels/options.h"
