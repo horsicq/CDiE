@@ -89,7 +89,12 @@
 /* What the main loop runs once app_poll returns (modal loops never start
  * inside the event callback): opening the path field, an action of the main
  * panel (g_pendingDie), or a shortcut (ACTION_SHORTCUT + gui_shortcut_action). */
-enum gui_action { ACTION_NONE, ACTION_OPEN /* the path field, as typed or dropped */, ACTION_DIE, ACTION_SHORTCUT = 100 };
+enum gui_action {
+    ACTION_NONE,
+    ACTION_OPEN /* the path field, as typed or dropped */,
+    ACTION_DIE,
+    ACTION_SHORTCUT = 100
+};
 #define SHORTCUT_ACTION(shortcut) (ACTION_SHORTCUT + (int)(shortcut))
 
 static HINSTANCE g_hInst;
@@ -137,8 +142,7 @@ static HWND native(xxwidgets_widget *widget)
 
 static void apply_flags_to_backend(void)
 {
-    gui_backend_set_flags(g_bFlagDeep, g_bFlagHeur, g_bFlagVerbose,
-                          g_bFlagAggr, g_bFlagHideUnknown, g_bFlagFormat);
+    gui_backend_set_flags(g_bFlagDeep, g_bFlagHeur, g_bFlagVerbose, g_bFlagAggr, g_bFlagHideUnknown, g_bFlagFormat);
     gui_backend_set_databases(g_bDbCustom);
 }
 
@@ -184,7 +188,7 @@ static void report_ui_error(const char *operation, xxwidgets_status status)
     WCHAR text[256];
     WCHAR *name = xx_str_utf8_to_unicode(CDIE_TR(operation));
     WCHAR *detail = xx_str_utf8_to_unicode(gui_error_status_text(status));
-    cdie_translation_swprintf(text, sizeof(text)/sizeof(text[0]), CDIE_N_(L"%s: %s"), name ? name : L"Interface error", detail ? detail : L"unknown error");
+    cdie_translation_swprintf(text, sizeof(text) / sizeof(text[0]), CDIE_N_(L"%s: %s"), name ? name : L"Interface error", detail ? detail : L"unknown error");
     show_error_wide(text);
     if (name) xx_str_wfree(name);
     if (detail) xx_str_wfree(detail);
@@ -201,9 +205,8 @@ static void apply_loaded(int loaded)
 }
 static unsigned int flags_mask(void)
 {
-    return (g_bFlagDeep ? 1u : 0u) | (g_bFlagHeur ? 2u : 0u) |
-           (g_bFlagVerbose ? 4u : 0u) | (g_bFlagAggr ? 8u : 0u) |
-           (g_bFlagHideUnknown ? 16u : 0u) | (g_bFlagFormat ? 32u : 0u);
+    return (g_bFlagDeep ? 1u : 0u) | (g_bFlagHeur ? 2u : 0u) | (g_bFlagVerbose ? 4u : 0u) | (g_bFlagAggr ? 8u : 0u) | (g_bFlagHideUnknown ? 16u : 0u) |
+           (g_bFlagFormat ? 32u : 0u);
 }
 
 static unsigned int databases_mask(void)
@@ -231,8 +234,7 @@ static xxwidgets_status apply_panel_tag_filters(void)
 static xxwidgets_status sync_panel_options(void)
 {
     xxwidgets_status status = xxwidgets_scan_panel_set_flags(g_panel, flags_mask());
-    if (status == XXWIDGETS_OK)
-        status = xxwidgets_scan_panel_set_databases(g_panel, databases_mask());
+    if (status == XXWIDGETS_OK) status = xxwidgets_scan_panel_set_databases(g_panel, databases_mask());
     return status;
 }
 
@@ -240,14 +242,15 @@ static xxwidgets_status read_panel_options(void)
 {
     unsigned int flags = 0, databases = 0;
     xxwidgets_status status = xxwidgets_scan_panel_get_flags(g_panel, &flags);
-    if (status == XXWIDGETS_OK)
-        status = xxwidgets_scan_panel_get_databases(g_panel, &databases);
-    if (status == XXWIDGETS_OK)
-        status = apply_panel_tag_filters();
+    if (status == XXWIDGETS_OK) status = xxwidgets_scan_panel_get_databases(g_panel, &databases);
+    if (status == XXWIDGETS_OK) status = apply_panel_tag_filters();
     if (status != XXWIDGETS_OK) return status;
-    g_bFlagDeep = (flags & 1u) != 0; g_bFlagHeur = (flags & 2u) != 0;
-    g_bFlagVerbose = (flags & 4u) != 0; g_bFlagAggr = (flags & 8u) != 0;
-    g_bFlagHideUnknown = (flags & 16u) != 0; g_bFlagFormat = (flags & 32u) != 0;
+    g_bFlagDeep = (flags & 1u) != 0;
+    g_bFlagHeur = (flags & 2u) != 0;
+    g_bFlagVerbose = (flags & 4u) != 0;
+    g_bFlagAggr = (flags & 8u) != 0;
+    g_bFlagHideUnknown = (flags & 16u) != 0;
+    g_bFlagFormat = (flags & 32u) != 0;
     g_bDbCustom = (databases & XXWIDGETS_SCAN_DATABASE_CUSTOM) != 0;
     apply_flags_to_backend();
     return XXWIDGETS_OK;
@@ -265,9 +268,15 @@ static char *read_path(const char *operation)
     SIZE_T required = 0;
     char *path;
     xxwidgets_status status = xxwidgets_widget_get_text(g_path, NULL, 0, &required);
-    if (status != XXWIDGETS_OK) { report_ui_error(operation, status); return NULL; }
+    if (status != XXWIDGETS_OK) {
+        report_ui_error(operation, status);
+        return NULL;
+    }
     path = (char *)HeapAlloc(GetProcessHeap(), 0, required ? required : 1);
-    if (!path) { report_ui_error(operation, XXWIDGETS_OUT_OF_MEMORY); return NULL; }
+    if (!path) {
+        report_ui_error(operation, XXWIDGETS_OUT_OF_MEMORY);
+        return NULL;
+    }
     status = xxwidgets_widget_get_text(g_path, path, required ? required : 1, NULL);
     if (status != XXWIDGETS_OK) {
         HeapFree(GetProcessHeap(), 0, path);
@@ -297,10 +306,12 @@ static xxwidgets_status refresh_file_types(const char *path)
     new_path = xx_str_create(path);
     if (!new_path) return XXWIDGETS_OUT_OF_MEMORY;
     status = gui_main_file_types_records(&g_fileTypes, &records);
-    if (status == XXWIDGETS_OK)
-        status = xxwidgets_file_header_set_file_types(g_header, records, g_fileTypes.count, g_fileTypes.selected);
+    if (status == XXWIDGETS_OK) status = xxwidgets_file_header_set_file_types(g_header, records, g_fileTypes.count, g_fileTypes.selected);
     if (records) gui_main_file_types_free_records(records, g_fileTypes.count);
-    if (status != XXWIDGETS_OK) { xx_str_free(new_path); return status; }
+    if (status != XXWIDGETS_OK) {
+        xx_str_free(new_path);
+        return status;
+    }
     if (g_typePath) xx_str_free(g_typePath);
     g_typePath = new_path;
     return gui_main_apply_file_facts(g_main, path, gui_main_file_types_scan_id(&g_fileTypes));
@@ -368,10 +379,10 @@ static void do_scan(void)
         WCHAR text[512];
         WCHAR *type_name = xx_str_utf8_to_unicode(type && type[0] ? type : "Unknown type");
         size_t count = xxwidgets_scan_panel_count(g_panel);
-        cdie_translation_swprintf_utf8(text, sizeof(text)/sizeof(text[0]),
-                  cdie_translation_ngettext("Scan complete (%s). %u result. Use > for the full engine output.",
-                                            "Scan complete (%s). %u results. Use > for the full engine output.", count),
-                  type_name ? type_name : L"Unknown type", (unsigned int)count);
+        cdie_translation_swprintf_utf8(text, sizeof(text) / sizeof(text[0]),
+                                       cdie_translation_ngettext("Scan complete (%s). %u result. Use > for the full engine output.",
+                                                                 "Scan complete (%s). %u results. Use > for the full engine output.", count),
+                                       type_name ? type_name : L"Unknown type", (unsigned int)count);
         note_message_wide(text);
         if (type_name) xx_str_wfree(type_name);
     } else {
@@ -409,7 +420,8 @@ static void do_browse(void)
     GetWindowTextW(native(g_path), file, (int)(sizeof(file) / sizeof(file[0])));
     /* The picker rejects a start name with '/' (FNERR_INVALIDFILENAME) and
      * would not open at all; a dropped or typed path may have them. */
-    for (WCHAR *s = file; *s; ++s) if (*s == L'/') *s = L'\\';
+    for (WCHAR *s = file; *s; ++s)
+        if (*s == L'/') *s = L'\\';
     ZeroMemory(&picker, sizeof(picker));
     picker.lStructSize = sizeof(picker);
     picker.hwndOwner = native(g_window);
@@ -462,25 +474,67 @@ static void do_tool(gui_tool_id id)
 {
     run_shortcut((gui_shortcut_action)(GUI_SHORTCUT_TOOL_FIRST + (int)id));
 }
-static void do_file_information(void) { do_tool(GUI_TOOL_FILE_INFORMATION); }
-static void do_entropy(void) { do_tool(GUI_TOOL_ENTROPY); }
-static void do_hash(void) { do_tool(GUI_TOOL_HASH); }
-static void do_strings(void) { do_tool(GUI_TOOL_STRINGS); }
-static void do_hex_view(void) { do_tool(GUI_TOOL_HEX_VIEW); }
-static void do_disasm(void) { do_tool(GUI_TOOL_DISASM); }
-static void do_memory_map(void) { do_tool(GUI_TOOL_MEMORY_MAP); }
-static void do_imports(void) { do_tool(GUI_TOOL_IMPORTS); }
-static void do_exports(void) { do_tool(GUI_TOOL_EXPORTS); }
-static void do_resources(void) { do_tool(GUI_TOOL_RESOURCES); }
-static void do_symbols(void) { do_tool(GUI_TOOL_SYMBOLS); }
-static void do_extractor(void) { do_tool(GUI_TOOL_EXTRACTOR); }
+static void do_file_information(void)
+{
+    do_tool(GUI_TOOL_FILE_INFORMATION);
+}
+static void do_entropy(void)
+{
+    do_tool(GUI_TOOL_ENTROPY);
+}
+static void do_hash(void)
+{
+    do_tool(GUI_TOOL_HASH);
+}
+static void do_strings(void)
+{
+    do_tool(GUI_TOOL_STRINGS);
+}
+static void do_hex_view(void)
+{
+    do_tool(GUI_TOOL_HEX_VIEW);
+}
+static void do_disasm(void)
+{
+    do_tool(GUI_TOOL_DISASM);
+}
+static void do_memory_map(void)
+{
+    do_tool(GUI_TOOL_MEMORY_MAP);
+}
+static void do_imports(void)
+{
+    do_tool(GUI_TOOL_IMPORTS);
+}
+static void do_exports(void)
+{
+    do_tool(GUI_TOOL_EXPORTS);
+}
+static void do_resources(void)
+{
+    do_tool(GUI_TOOL_RESOURCES);
+}
+static void do_symbols(void)
+{
+    do_tool(GUI_TOOL_SYMBOLS);
+}
+static void do_extractor(void)
+{
+    do_tool(GUI_TOOL_EXTRACTOR);
+}
 
 /* All settings live in one Options window (gui_options.c): a page list on
  * the left and the reusable xxwidgets forms on the right. */
 static gui_options_page_id g_optionsPage = GUI_OPTIONS_SCAN;
 static xx_settings *g_settings;
 /* Explicit persistence smoke runs use only an isolated portable directory. */
-enum { SETTINGS_SMOKE_NONE, SETTINGS_SMOKE_INSPECT, SETTINGS_SMOKE_WRITE, SETTINGS_SMOKE_CANCEL, SETTINGS_SMOKE_DEFAULT };
+enum {
+    SETTINGS_SMOKE_NONE,
+    SETTINGS_SMOKE_INSPECT,
+    SETTINGS_SMOKE_WRITE,
+    SETTINGS_SMOKE_CANCEL,
+    SETTINGS_SMOKE_DEFAULT
+};
 static int g_settingsSmoke;
 
 /* The frontend's share of the Options settings, as currently applied. */
@@ -503,7 +557,10 @@ static void sync_engine(void)
     if (!engine || !gui_backend_get_scan_preferences(&scan)) return;
     for (i = 0; i < gui_backend_engine_count() && i < xxwidgets_combobox_count(engine); ++i) {
         const char *id = gui_backend_engine_id(i);
-        if (id && !strcmp(id, scan.engine)) { (void)xxwidgets_widget_set_value(engine, (int)i); return; }
+        if (id && !strcmp(id, scan.engine)) {
+            (void)xxwidgets_widget_set_value(engine, (int)i);
+            return;
+        }
     }
 }
 
@@ -525,17 +582,14 @@ static xxwidgets_status apply_options(const gui_options_values *values)
     if (status != XXWIDGETS_OK) return status;
     gui_hex_view_set_options(&values->hex);
     status = xxwidgets_app_get_font_options(g_app, &fonts);
-    if (status == XXWIDGETS_OK && memcmp(&values->fonts, &fonts, sizeof(fonts)))
-        status = xxwidgets_app_set_font_options(g_app, &values->fonts);
+    if (status == XXWIDGETS_OK && memcmp(&values->fonts, &fonts, sizeof(fonts))) status = xxwidgets_app_set_font_options(g_app, &values->fonts);
     if (status == XXWIDGETS_OK) status = gui_frontend_apply_preferences(g_app, values);
     /* A new font or language: the panel's captions, its minimum (the window
      * grows to it, never shrinks) and its layout follow. */
     if (status == XXWIDGETS_OK && g_main) status = xxwidgets_die_main_panel_retranslate(g_main);
     if (status == XXWIDGETS_OK) {
-        SetWindowPos(native(g_window), values->appearance.stay_on_top ? HWND_TOPMOST : HWND_NOTOPMOST,
-                     0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-        if (g_main) (void)xxwidgets_file_name_bar_set_recent_available(xxwidgets_die_main_panel_file_name_bar(g_main),
-                                                                       values->file.save_recent_files);
+        SetWindowPos(native(g_window), values->appearance.stay_on_top ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        if (g_main) (void)xxwidgets_file_name_bar_set_recent_available(xxwidgets_die_main_panel_file_name_bar(g_main), values->file.save_recent_files);
         sync_engine();
         apply_loaded(g_loaded);
     }
@@ -565,7 +619,8 @@ static xxwidgets_status browse_database(xxwidgets_widget *dialog, const char *in
     WCHAR *wide = first ? xx_str_utf8_to_unicode(first) : NULL;
     xxwidgets_status status = XXWIDGETS_OK;
     (void)user;
-    *path = NULL; *accepted = 0;
+    *path = NULL;
+    *accepted = 0;
     if (wide && lstrlenW(wide) < MAX_PATH) lstrcpyW(start, wide);
     xx_str_wfree(wide);
     free(first);
@@ -584,8 +639,10 @@ static xxwidgets_status browse_database(xxwidgets_widget *dialog, const char *in
         size_t size = utf8 ? strlen(utf8) + 1 : 0;
         /* The form releases the chosen path with free(). */
         *path = utf8 ? (char *)malloc(size) : NULL;
-        if (*path) { memcpy(*path, utf8, size); *accepted = 1; }
-        else status = XXWIDGETS_OUT_OF_MEMORY;
+        if (*path) {
+            memcpy(*path, utf8, size);
+            *accepted = 1;
+        } else status = XXWIDGETS_OUT_OF_MEMORY;
         if (utf8) xx_str_free(utf8);
     }
     CoTaskMemFree(item);
@@ -603,7 +660,10 @@ static int do_settings(gui_options_page_id start)
     int accepted = 0, reloaded = 0, previous_context, previous_environment;
 
     status = current_options(&values);
-    if (status != XXWIDGETS_OK) { report_ui_error(CDIE_N_("Read interface fonts"), status); return -1; }
+    if (status != XXWIDGETS_OK) {
+        report_ui_error(CDIE_N_("Read interface fonts"), status);
+        return -1;
+    }
     /* The context menu needs the program path; without it the page is left out. */
     if (length && length < sizeof(executable) / sizeof(executable[0])) program = xx_str_unicode_to_utf8(executable);
     host.pages = (1u << GUI_OPTIONS_PAGE_COUNT) - 1u;
@@ -623,17 +683,29 @@ static int do_settings(gui_options_page_id start)
     host.browse = browse_database;
     g_optionsPage = start;
     status = gui_options_dialog(g_window, &host, &g_optionsPage, &values, &accepted, &reloaded);
-    if (status != XXWIDGETS_OK) { xx_str_free(program); report_ui_error(CDIE_N_("Open Options"), status); return -1; }
+    if (status != XXWIDGETS_OK) {
+        xx_str_free(program);
+        report_ui_error(CDIE_N_("Open Options"), status);
+        return -1;
+    }
 
     if (reloaded) {
         WCHAR text[160];
         clear_scan();
         status = refresh_panel_tags();
-        if (status != XXWIDGETS_OK) { xx_str_free(program); report_ui_error("Refresh signature tags", status); return -1; }
-        cdie_translation_swprintf(text, sizeof(text)/sizeof(text[0]), CDIE_N_(L"Database reloaded: %d signatures. Choose a file and press Scan."), gui_backend_signature_count());
+        if (status != XXWIDGETS_OK) {
+            xx_str_free(program);
+            report_ui_error("Refresh signature tags", status);
+            return -1;
+        }
+        cdie_translation_swprintf(text, sizeof(text) / sizeof(text[0]), CDIE_N_(L"Database reloaded: %d signatures. Choose a file and press Scan."),
+                                  gui_backend_signature_count());
         note_message_wide(text);
     }
-    if (!accepted) { xx_str_free(program); return 0; }
+    if (!accepted) {
+        xx_str_free(program);
+        return 0;
+    }
     if (program && !g_settingsSmoke && !g_memorySettings) {
         xxwidgets_context_config config = {"cdie", "Scan with cdie", "*", program, XXWIDGETS_CONTEXT_CURRENT_USER};
         char *directory = gui_frontend_executable_directory();
@@ -659,15 +731,17 @@ static int do_settings(gui_options_page_id start)
     /* Native integration can be denied by the OS. Keep the accepted model and
      * backend coherent, retaining the observed flags for failed changes. */
     status = apply_options(&values);
-    if (status != XXWIDGETS_OK) { report_ui_error("Apply options", status); return -1; }
+    if (status != XXWIDGETS_OK) {
+        report_ui_error("Apply options", status);
+        return -1;
+    }
     int saved = gui_settings_save(g_settings, &values, g_optionsPage);
     if (file_status != XXWIDGETS_OK) {
         char message[384];
-        xx_rt_snprintf(message, sizeof(message), "%s: %s%s", CDIE_TR("Options applied; File integration failed"),
-            gui_error_status_text(file_status), saved ? "" : CDIE_TR(" Options could not be saved for the next start."));
+        xx_rt_snprintf(message, sizeof(message), "%s: %s%s", CDIE_TR("Options applied; File integration failed"), gui_error_status_text(file_status),
+                       saved ? "" : CDIE_TR(" Options could not be saved for the next start."));
         show_error(message);
-    } else if (!saved)
-        show_error(CDIE_TR("Options applied, but they could not be saved for the next start."));
+    } else if (!saved) show_error(CDIE_TR("Options applied, but they could not be saved for the next start."));
     else if (!reloaded) note_message(CDIE_TR("Options applied."));
     return 1;
 }
@@ -689,7 +763,10 @@ static gui_update_result do_update_database(xxwidgets_widget *owner)
         xxwidgets_status status;
         clear_scan();
         status = refresh_panel_tags();
-        if (status != XXWIDGETS_OK) { report_ui_error("Refresh signature tags", status); return result; }
+        if (status != XXWIDGETS_OK) {
+            report_ui_error("Refresh signature tags", status);
+            return result;
+        }
     }
     note_message(message);
     /* gui_update_run shows failures and "up to date"; an installed database
@@ -731,12 +808,12 @@ static SIZE window_text_size(HWND handle, int wrap)
         HFONT font = (HFONT)SendMessageW(handle, WM_GETFONT, 0, 0);
         HGDIOBJ old = font ? SelectObject(dc, font) : NULL;
         UINT format = DT_CALCRECT | DT_EXPANDTABS | (wrap > 0 ? DT_WORDBREAK : DT_SINGLELINE);
-        if (GetClassNameW(handle, class_name, 16) && !lstrcmpiW(class_name, L"Static") &&
-            (GetWindowLongPtrW(handle, GWL_STYLE) & SS_NOPREFIX)) format |= DT_NOPREFIX;
+        if (GetClassNameW(handle, class_name, 16) && !lstrcmpiW(class_name, L"Static") && (GetWindowLongPtrW(handle, GWL_STYLE) & SS_NOPREFIX)) format |= DT_NOPREFIX;
         DrawTextW(dc, text, length, &bounds, format);
         if (old) SelectObject(dc, old);
         ReleaseDC(handle, dc);
-        size.cx = bounds.right; size.cy = bounds.bottom;
+        size.cx = bounds.right;
+        size.cy = bounds.bottom;
     }
     return size;
 }
@@ -757,26 +834,25 @@ static TEXTMETRICW control_font_metrics(xxwidgets_widget *widget)
 
 /* Another instance hands its file over; the panel's own layout and the
  * window minimum belong to xxwidgets (WM_GETMINMAXINFO in the backend). */
-static LRESULT CALLBACK window_subclass(HWND handle, UINT message, WPARAM wp, LPARAM lp,
-                                        UINT_PTR subclass_id, DWORD_PTR reference)
+static LRESULT CALLBACK window_subclass(HWND handle, UINT message, WPARAM wp, LPARAM lp, UINT_PTR subclass_id, DWORD_PTR reference)
 {
-    (void)subclass_id; (void)reference;
+    (void)subclass_id;
+    (void)reference;
     switch (message) {
-    case WM_COPYDATA: {
-        const COPYDATASTRUCT *data = (const COPYDATASTRUCT *)lp;
-        if (data && data->dwData == GUI_FRONTEND_COPYDATA_ID && data->cbData > 1 && data->cbData <= GUI_PREFERENCE_PATH_MAX &&
-            data->lpData && ((const char *)data->lpData)[data->cbData - 1] == 0 &&
-            !memchr(data->lpData, 0, data->cbData - 1)) {
-            if (xxwidgets_widget_set_text(g_path, (const char *)data->lpData) == XXWIDGETS_OK) {
-                gui_frontend_remember_file((const char *)data->lpData);
-                g_pending = ACTION_OPEN;
-                return TRUE;
+        case WM_COPYDATA: {
+            const COPYDATASTRUCT *data = (const COPYDATASTRUCT *)lp;
+            if (data && data->dwData == GUI_FRONTEND_COPYDATA_ID && data->cbData > 1 && data->cbData <= GUI_PREFERENCE_PATH_MAX && data->lpData &&
+                ((const char *)data->lpData)[data->cbData - 1] == 0 && !memchr(data->lpData, 0, data->cbData - 1)) {
+                if (xxwidgets_widget_set_text(g_path, (const char *)data->lpData) == XXWIDGETS_OK) {
+                    gui_frontend_remember_file((const char *)data->lpData);
+                    g_pending = ACTION_OPEN;
+                    return TRUE;
+                }
             }
+            return FALSE;
         }
-        return FALSE;
-    }
-    case WM_NCDESTROY: RemoveWindowSubclass(handle, window_subclass, 1); break;
-    default: break;
+        case WM_NCDESTROY: RemoveWindowSubclass(handle, window_subclass, 1); break;
+        default: break;
     }
     return DefSubclassProc(handle, message, wp, lp);
 }
@@ -796,8 +872,10 @@ static void do_open(void)
     char *path = read_path(CDIE_N_("Read file name"));
     if (!path) return;
     if (gui_frontend_scan_after_open()) do_scan();
-    else if (!path[0]) { MessageBeep(MB_ICONASTERISK); xxwidgets_widget_focus(g_path); }
-    else if (load_file(path)) gui_frontend_remember_file(path);
+    else if (!path[0]) {
+        MessageBeep(MB_ICONASTERISK);
+        xxwidgets_widget_focus(g_path);
+    } else if (load_file(path)) gui_frontend_remember_file(path);
     HeapFree(GetProcessHeap(), 0, path);
 }
 
@@ -827,22 +905,75 @@ static void do_browse(void);
 static xxwidgets_status current_options(gui_options_values *values);
 
 /* The hooks of the shared dispatcher (gui_main_actions.h). */
-static void hook_browse(void *user) { (void)user; do_browse(); }
-static void hook_recent(void *user) { (void)user; do_recent(); }
+static void hook_browse(void *user)
+{
+    (void)user;
+    do_browse();
+}
+static void hook_recent(void *user)
+{
+    (void)user;
+    do_recent();
+}
 /* Return in the path field opens it (spec 1.5), scanned when Options say so,
  * as on Linux and macOS. */
-static void hook_open_path(void *user) { (void)user; do_open(); }
+static void hook_open_path(void *user)
+{
+    (void)user;
+    do_open();
+}
 /* The dispatcher picked the type (g_fileTypes); do_scan scans with it. */
-static void hook_scan(void *user, int type_id) { (void)user; (void)type_id; do_scan(); }
-static void hook_report(void *user) { (void)user; do_report(); }
-static void hook_signatures(void *user) { (void)user; tree_button(g_signaturesButton); }
-static void hook_directory(void *user) { (void)user; tree_button(g_directoryButton); }
-static void hook_log(void *user) { (void)user; tree_button(g_logButton); }
-static void hook_update(void *user) { (void)user; (void)do_update_database(g_window); }
-static void hook_options(void *user, int page) { (void)user; (void)do_settings(page < 0 ? g_optionsPage : (gui_options_page_id)page); }
-static void hook_about(void *user) { (void)user; do_about(); }
-static void hook_exit(void *user) { (void)user; request_exit(); }
-static void hook_error(void *user, const char *text) { (void)user; show_error(text); }
+static void hook_scan(void *user, int type_id)
+{
+    (void)user;
+    (void)type_id;
+    do_scan();
+}
+static void hook_report(void *user)
+{
+    (void)user;
+    do_report();
+}
+static void hook_signatures(void *user)
+{
+    (void)user;
+    tree_button(g_signaturesButton);
+}
+static void hook_directory(void *user)
+{
+    (void)user;
+    tree_button(g_directoryButton);
+}
+static void hook_log(void *user)
+{
+    (void)user;
+    tree_button(g_logButton);
+}
+static void hook_update(void *user)
+{
+    (void)user;
+    (void)do_update_database(g_window);
+}
+static void hook_options(void *user, int page)
+{
+    (void)user;
+    (void)do_settings(page < 0 ? g_optionsPage : (gui_options_page_id)page);
+}
+static void hook_about(void *user)
+{
+    (void)user;
+    do_about();
+}
+static void hook_exit(void *user)
+{
+    (void)user;
+    request_exit();
+}
+static void hook_error(void *user, const char *text)
+{
+    (void)user;
+    show_error(text);
+}
 
 /* Changes only: View/Advanced and Scan/Engine reach die.ini as Qt writes them. */
 static void hook_settings_changed(void *user)
@@ -850,18 +981,26 @@ static void hook_settings_changed(void *user)
     gui_options_values values;
     (void)user;
     if (!g_settings || current_options(&values) != XXWIDGETS_OK) return;
-    if (!gui_settings_save(g_settings, &values, g_optionsPage))
-        show_error(CDIE_TR("Options applied, but they could not be saved for the next start."));
+    if (!gui_settings_save(g_settings, &values, g_optionsPage)) show_error(CDIE_TR("Options applied, but they could not be saved for the next start."));
 }
 
 static void main_hooks(gui_main_hooks *hooks)
 {
     memset(hooks, 0, sizeof(*hooks));
-    hooks->browse = hook_browse; hooks->recent = hook_recent; hooks->open_path = hook_open_path;
-    hooks->scan = hook_scan; hooks->report = hook_report; hooks->signatures = hook_signatures;
-    hooks->directory = hook_directory; hooks->log = hook_log; hooks->update = hook_update;
-    hooks->options = hook_options; hooks->about = hook_about; hooks->exit = hook_exit;
-    hooks->settings_changed = hook_settings_changed; hooks->error = hook_error;
+    hooks->browse = hook_browse;
+    hooks->recent = hook_recent;
+    hooks->open_path = hook_open_path;
+    hooks->scan = hook_scan;
+    hooks->report = hook_report;
+    hooks->signatures = hook_signatures;
+    hooks->directory = hook_directory;
+    hooks->log = hook_log;
+    hooks->update = hook_update;
+    hooks->options = hook_options;
+    hooks->about = hook_about;
+    hooks->exit = hook_exit;
+    hooks->settings_changed = hook_settings_changed;
+    hooks->error = hook_error;
     hooks->with_update = gui_update_supported();
     hooks->file_types = &g_fileTypes;
 }
@@ -881,8 +1020,7 @@ static void run_shortcut(gui_shortcut_action shortcut)
     gui_main_hooks hooks;
     char *path = read_path(CDIE_N_("Read file path"));
     main_hooks(&hooks);
-    if (!gui_main_run_shortcut(g_window, g_main, path ? path : "", shortcut, &hooks) && path && !path[0])
-        xxwidgets_widget_focus(g_path);
+    if (!gui_main_run_shortcut(g_window, g_main, path ? path : "", shortcut, &hooks) && path && !path[0]) xxwidgets_widget_focus(g_path);
     if (path) HeapFree(GetProcessHeap(), 0, path);
 }
 
@@ -903,7 +1041,8 @@ static void run_pending(int action)
 static void on_event(xxwidgets_app *app, const xxwidgets_event *event, void *user_data)
 {
     xxwidgets_die_action action;
-    (void)app; (void)user_data;
+    (void)app;
+    (void)user_data;
     if (event->type == XXWIDGETS_EVENT_CLOSE && event->widget == g_window) {
         request_exit();
         return;
@@ -921,28 +1060,27 @@ static void on_event(xxwidgets_app *app, const xxwidgets_event *event, void *use
     }
     if (g_main && xxwidgets_die_main_panel_handle_event(g_main, event, &action)) {
         switch (action.id) {
-        case XXWIDGETS_DIE_ACTION_NONE: break;
-        case XXWIDGETS_DIE_ACTION_ADVANCED_CHANGED:
-            /* The view is applied; storing it opens nothing. */
-            run_die_action(&action);
-            break;
-        case XXWIDGETS_DIE_ACTION_PATH_EDITED:
-            /* The types describe the last opened file: none is chosen for a
-             * newly typed path before it is opened. */
-            if (g_type) xxwidgets_widget_set_enabled(g_type, 0);
-            break;
-        default:
-            g_pendingDie = action;
-            g_pending = ACTION_DIE;
-            break;
+            case XXWIDGETS_DIE_ACTION_NONE: break;
+            case XXWIDGETS_DIE_ACTION_ADVANCED_CHANGED:
+                /* The view is applied; storing it opens nothing. */
+                run_die_action(&action);
+                break;
+            case XXWIDGETS_DIE_ACTION_PATH_EDITED:
+                /* The types describe the last opened file: none is chosen for a
+                 * newly typed path before it is opened. */
+                if (g_type) xxwidgets_widget_set_enabled(g_type, 0);
+                break;
+            default:
+                g_pendingDie = action;
+                g_pending = ACTION_DIE;
+                break;
         }
         return;
     }
     if (gui_tree_event(g_panel, event)) {
         /* S or ? on a result row: shown after polling returns. */
     } else if (event->type == XXWIDGETS_EVENT_CHANGE &&
-               (event->widget == g_flags || event->widget == g_databases ||
-                event->widget == g_includeTags || event->widget == g_excludeTags)) {
+               (event->widget == g_flags || event->widget == g_databases || event->widget == g_includeTags || event->widget == g_excludeTags)) {
         xxwidgets_status status = read_panel_options();
         if (status != XXWIDGETS_OK) report_ui_error(CDIE_N_("Read scan options"), status);
         else if (event->widget == g_includeTags || event->widget == g_excludeTags) hook_settings_changed(NULL);
@@ -954,7 +1092,8 @@ static void on_event(xxwidgets_app *app, const xxwidgets_event *event, void *use
 static int shortcut_allowed(xxwidgets_widget *window, int action, void *user)
 {
     gui_shortcut_action shortcut = gui_shortcuts_action(action, ACTION_SHORTCUT);
-    (void)window; (void)user;
+    (void)window;
+    (void)user;
     if (shortcut == GUI_SHORTCUT_REPORT) return IsWindowEnabled(native(g_reportButton)) != 0;
     if (shortcut == GUI_SHORTCUT_RECENT) return IsWindowEnabled(native(g_recent)) != 0;
     if (shortcut == GUI_SHORTCUT_UPDATE) return IsWindowEnabled(native(g_updateButton)) != 0;
@@ -965,15 +1104,14 @@ static int create_controls(void)
 {
     static xxwidgets_shortcut shortcuts[2 * GUI_SHORTCUT_COUNT];
     static char storage[1024];
-    static const xxwidgets_scan_panel_control_id facts[4] = {
-        XXWIDGETS_SCAN_PANEL_ENDIANNESS, XXWIDGETS_SCAN_PANEL_MODE, XXWIDGETS_SCAN_PANEL_ARCHITECTURE, XXWIDGETS_SCAN_PANEL_TYPE};
+    static const xxwidgets_scan_panel_control_id facts[4] = {XXWIDGETS_SCAN_PANEL_ENDIANNESS, XXWIDGETS_SCAN_PANEL_MODE, XXWIDGETS_SCAN_PANEL_ARCHITECTURE,
+                                                             XXWIDGETS_SCAN_PANEL_TYPE};
     xxwidgets_file_name_bar *bar;
     size_t count;
     int i;
     /* Update database is in the right column above Shortcuts (Q2), disabled
      * without an updater; the tag filters stay in the scan bar (Q3). */
-    if (xxwidgets_die_main_panel_create(g_window, XXWIDGETS_DIE_MAIN_PANEL_SHOW_UPDATE | XXWIDGETS_DIE_MAIN_PANEL_TAG_FILTERS,
-                                        &g_main) != XXWIDGETS_OK) return 0;
+    if (xxwidgets_die_main_panel_create(g_window, XXWIDGETS_DIE_MAIN_PANEL_SHOW_UPDATE | XXWIDGETS_DIE_MAIN_PANEL_TAG_FILTERS, &g_main) != XXWIDGETS_OK) return 0;
     bar = xxwidgets_die_main_panel_file_name_bar(g_main);
     g_header = xxwidgets_die_main_panel_file_header(g_main);
     g_panel = xxwidgets_die_main_panel_scan_panel(g_main);
@@ -1007,19 +1145,17 @@ static int create_controls(void)
     g_options = xxwidgets_side_panel_control(g_side, XXWIDGETS_DIE_SIDE_OPTIONS);
     g_aboutButton = xxwidgets_side_panel_control(g_side, XXWIDGETS_DIE_SIDE_ABOUT);
     g_exit = xxwidgets_side_panel_control(g_side, XXWIDGETS_DIE_SIDE_EXIT);
-    if (!g_path || !g_recent || !g_browse || !g_type || !g_flags || !g_databases || !g_scan || !g_reportButton || !g_results ||
-        !g_signaturesButton || !g_directoryButton || !g_logButton || !g_msec ||
-        !g_flagLabel || !g_databaseLabel || !g_includeTags || !g_excludeTags ||
-        !g_includeTagsLabel || !g_excludeTagsLabel || !g_advanced || !g_updateButton || !g_shortcutsButton ||
-        !g_options || !g_aboutButton || !g_exit || sync_panel_options() != XXWIDGETS_OK) return 0;
-    if (gui_update_supported() &&
-        xxwidgets_side_panel_set_item_enabled(g_side, XXWIDGETS_DIE_SIDE_UPDATE, 1) != XXWIDGETS_OK) return 0;
+    if (!g_path || !g_recent || !g_browse || !g_type || !g_flags || !g_databases || !g_scan || !g_reportButton || !g_results || !g_signaturesButton ||
+        !g_directoryButton || !g_logButton || !g_msec || !g_flagLabel || !g_databaseLabel || !g_includeTags || !g_excludeTags || !g_includeTagsLabel ||
+        !g_excludeTagsLabel || !g_advanced || !g_updateButton || !g_shortcutsButton || !g_options || !g_aboutButton || !g_exit || sync_panel_options() != XXWIDGETS_OK)
+        return 0;
+    if (gui_update_supported() && xxwidgets_side_panel_set_item_enabled(g_side, XXWIDGETS_DIE_SIDE_UPDATE, 1) != XXWIDGETS_OK) return 0;
     if (!SetWindowSubclass(native(g_window), window_subclass, 1, 0)) return 0;
     if (xxwidgets_window_set_accept_file_drops(g_window, 1) != XXWIDGETS_OK) return 0;
     /* One shortcut table for the three desktop frontends (gui_shortcuts.c):
      * every key the old buttons had keeps working, the tools' too. */
-    count = gui_shortcuts_bindings(gui_shortcuts_platform(), ACTION_SHORTCUT, gui_update_supported(), shortcuts,
-                                   sizeof(shortcuts) / sizeof(shortcuts[0]), storage, sizeof(storage));
+    count = gui_shortcuts_bindings(gui_shortcuts_platform(), ACTION_SHORTCUT, gui_update_supported(), shortcuts, sizeof(shortcuts) / sizeof(shortcuts[0]), storage,
+                                   sizeof(storage));
     if (!count || xxwidgets_window_set_shortcut_filter(g_window, shortcut_allowed, NULL) != XXWIDGETS_OK) return 0;
     return xxwidgets_window_set_shortcuts(g_window, shortcuts, count) == XXWIDGETS_OK;
 }
@@ -1050,11 +1186,11 @@ static ULONGLONG g_smokeDeadline;
 static int g_smokeTimedOut, g_smokeSeen, g_smokeChecked, g_smokeNestedSeen, g_smokeNestedChecked, g_smokeWait;
 static int g_smokeEscape, g_smokeOptional, g_smokeFontSized = 1;
 static size_t g_smokePicker;
-static const WCHAR *g_smokeExpect;      /* a cell the step's table must hold */
-static const char *g_smokeExpectText;   /* what a text dialog must show */
-static const WCHAR *g_smokeExpectPart;  /* or part of it */
-static WCHAR g_smokeFolder[MAX_PATH];   /* scratch folder holding g_smokeElf */
-static WCHAR g_smokeElf[MAX_PATH];      /* an ELF with dynamic symbols */
+static const WCHAR *g_smokeExpect;     /* a cell the step's table must hold */
+static const char *g_smokeExpectText;  /* what a text dialog must show */
+static const WCHAR *g_smokeExpectPart; /* or part of it */
+static WCHAR g_smokeFolder[MAX_PATH];  /* scratch folder holding g_smokeElf */
+static WCHAR g_smokeElf[MAX_PATH];     /* an ELF with dynamic symbols */
 #define SMOKE_STEP_MS 60000
 
 static void smoke_write(const char *text)
@@ -1077,9 +1213,12 @@ static int smoke_fail_at(unsigned int line, HWND window, HWND control)
     WCHAR title[96] = L"", class_name[32] = L"", caption[96] = L"";
     if (!g_smokeFailed) {
         if (window) GetWindowTextW(window, title, 96);
-        if (control) { GetClassNameW(control, class_name, 32); GetWindowTextW(control, caption, 96); }
-        wsprintfA(text, "cdie GUI smoke check failed at main_gui.c:%u (action %d, window \"%ls\", control %ls \"%ls\")\r\n",
-                  line, g_smokeAction, title, class_name, caption);
+        if (control) {
+            GetClassNameW(control, class_name, 32);
+            GetWindowTextW(control, caption, 96);
+        }
+        wsprintfA(text, "cdie GUI smoke check failed at main_gui.c:%u (action %d, window \"%ls\", control %ls \"%ls\")\r\n", line, g_smokeAction, title, class_name,
+                  caption);
         smoke_write(text);
     }
     g_smokeFailed = 1;
@@ -1099,8 +1238,8 @@ static int smoke_modal_setup(void)
     xxwidgets_rect bounds = {1, 1, 24, 4};
     if (xxwidgets_widget_create(g_app, NULL, XXWIDGETS_WINDOW, "Enabled modality smoke sibling", bounds, &g_smokeEnabledSibling) != XXWIDGETS_OK ||
         xxwidgets_widget_create(g_app, NULL, XXWIDGETS_WINDOW, "Disabled modality smoke sibling", bounds, &g_smokeDisabledSibling) != XXWIDGETS_OK ||
-        xxwidgets_widget_set_enabled(g_smokeDisabledSibling, 0) != XXWIDGETS_OK ||
-        !IsWindowEnabled(native(g_smokeEnabledSibling)) || IsWindowEnabled(native(g_smokeDisabledSibling))) {
+        xxwidgets_widget_set_enabled(g_smokeDisabledSibling, 0) != XXWIDGETS_OK || !IsWindowEnabled(native(g_smokeEnabledSibling)) ||
+        IsWindowEnabled(native(g_smokeDisabledSibling))) {
         smoke_modal_cleanup();
         return 0;
     }
@@ -1110,16 +1249,64 @@ static int smoke_modal_setup(void)
 
 /* Step actions. 0 closes a text dialog; 4..18 are the Features page and the
  * tool dialogs; 20 on name the remaining flows. */
-enum { SMOKE_REPORT = 0, SMOKE_FEATURES_CANCEL = 4, SMOKE_FEATURES_OK, SMOKE_FEATURES_DEFAULT,
-       SMOKE_FILE_INFORMATION, SMOKE_ENTROPY, SMOKE_HASH, SMOKE_STRINGS, SMOKE_HEX_VIEW, SMOKE_DISASM, SMOKE_MEMORY_MAP,
-       SMOKE_IMPORTS, SMOKE_EXPORTS, SMOKE_RESOURCES, SMOKE_SYMBOLS, SMOKE_EXTRACTOR };
-enum { SMOKE_SCAN_CANCEL = 20, SMOKE_SCAN_OK, SMOKE_FONTS_CANCEL, SMOKE_FONTS_OK, SMOKE_FILE_CANCEL, SMOKE_SIGNATURES_CANCEL, SMOKE_ABOUT,
-       SMOKE_SIGNATURE, SMOKE_HEX_CANCEL, SMOKE_HEX_OK,
-       SMOKE_OPTIONS_ESCAPE, SMOKE_OPTIONS_CLOSE, SMOKE_ABOUT_ESCAPE, SMOKE_ABOUT_CLOSE, SMOKE_SCAN_COLORS,
-       SMOKE_STRINGS_CONFIG, SMOKE_DISK_CANCEL, SMOKE_STRINGS_FILE, SMOKE_PAGE_CANCEL, SMOKE_COLORS_OK, SMOKE_SCAN_MISSING_DB,
-       SMOKE_PICKERS, SMOKE_LOG, SMOKE_INFO, SMOKE_DIRECTORY, SMOKE_RECENT, SMOKE_RECENT_EMPTY, SMOKE_SIGNATURE_CONFIRM,
-       SMOKE_UPDATE_CANCEL, SMOKE_UPDATE_FAILED, SMOKE_PROGRESS_CANCEL, SMOKE_TOOL_RESIZE, SMOKE_UNEXPECTED, SMOKE_TOOL_INNER,
-       SMOKE_SCAN_PAGE, SMOKE_UPDATE_QUESTION, SMOKE_MAIN_LAYOUT, SMOKE_SHORTCUTS };
+enum {
+    SMOKE_REPORT = 0,
+    SMOKE_FEATURES_CANCEL = 4,
+    SMOKE_FEATURES_OK,
+    SMOKE_FEATURES_DEFAULT,
+    SMOKE_FILE_INFORMATION,
+    SMOKE_ENTROPY,
+    SMOKE_HASH,
+    SMOKE_STRINGS,
+    SMOKE_HEX_VIEW,
+    SMOKE_DISASM,
+    SMOKE_MEMORY_MAP,
+    SMOKE_IMPORTS,
+    SMOKE_EXPORTS,
+    SMOKE_RESOURCES,
+    SMOKE_SYMBOLS,
+    SMOKE_EXTRACTOR
+};
+enum {
+    SMOKE_SCAN_CANCEL = 20,
+    SMOKE_SCAN_OK,
+    SMOKE_FONTS_CANCEL,
+    SMOKE_FONTS_OK,
+    SMOKE_FILE_CANCEL,
+    SMOKE_SIGNATURES_CANCEL,
+    SMOKE_ABOUT,
+    SMOKE_SIGNATURE,
+    SMOKE_HEX_CANCEL,
+    SMOKE_HEX_OK,
+    SMOKE_OPTIONS_ESCAPE,
+    SMOKE_OPTIONS_CLOSE,
+    SMOKE_ABOUT_ESCAPE,
+    SMOKE_ABOUT_CLOSE,
+    SMOKE_SCAN_COLORS,
+    SMOKE_STRINGS_CONFIG,
+    SMOKE_DISK_CANCEL,
+    SMOKE_STRINGS_FILE,
+    SMOKE_PAGE_CANCEL,
+    SMOKE_COLORS_OK,
+    SMOKE_SCAN_MISSING_DB,
+    SMOKE_PICKERS,
+    SMOKE_LOG,
+    SMOKE_INFO,
+    SMOKE_DIRECTORY,
+    SMOKE_RECENT,
+    SMOKE_RECENT_EMPTY,
+    SMOKE_SIGNATURE_CONFIRM,
+    SMOKE_UPDATE_CANCEL,
+    SMOKE_UPDATE_FAILED,
+    SMOKE_PROGRESS_CANCEL,
+    SMOKE_TOOL_RESIZE,
+    SMOKE_UNEXPECTED,
+    SMOKE_TOOL_INNER,
+    SMOKE_SCAN_PAGE,
+    SMOKE_UPDATE_QUESTION,
+    SMOKE_MAIN_LAYOUT,
+    SMOKE_SHORTCUTS
+};
 static const WCHAR *g_smokeAnswer; /* SMOKE_UPDATE_QUESTION: the button to press */
 static const WCHAR *g_smokePage;
 static int g_smokePageState, g_smokeContextChecked;
@@ -1168,8 +1355,9 @@ static BOOL CALLBACK smoke_find_label(HWND child, LPARAM data)
 {
     smoke_search *search = (smoke_search *)data;
     WCHAR class_name[16], text[512];
-    if (!IsWindowVisible(child) || !GetClassNameW(child, class_name, 16) || lstrcmpiW(class_name, L"Static") ||
-        !GetWindowTextW(child, text, 512) || !wcsstr(text, search->text)) return TRUE;
+    if (!IsWindowVisible(child) || !GetClassNameW(child, class_name, 16) || lstrcmpiW(class_name, L"Static") || !GetWindowTextW(child, text, 512) ||
+        !wcsstr(text, search->text))
+        return TRUE;
     search->found = child;
     return FALSE;
 }
@@ -1218,8 +1406,8 @@ static int smoke_native_dialog(HWND window)
 static int smoke_dialog_window(HWND window)
 {
     WCHAR class_name[64];
-    return smoke_native_dialog(window) || (GetClassNameW(window, class_name, 64) && lstrlenW(class_name) > 17 &&
-        CompareStringOrdinal(class_name, 17, L"xxwidgets_window_", 17, FALSE) == CSTR_EQUAL);
+    return smoke_native_dialog(window) ||
+           (GetClassNameW(window, class_name, 64) && lstrlenW(class_name) > 17 && CompareStringOrdinal(class_name, 17, L"xxwidgets_window_", 17, FALSE) == CSTR_EQUAL);
 }
 
 static void smoke_cancel(HWND window)
@@ -1267,8 +1455,7 @@ static int smoke_text_fits(HWND control)
     }
     if (!lstrcmpiW(class_name, L"Static")) {
         LONG_PTR type = style & SS_TYPEMASK;
-        if ((type != SS_LEFT && type != SS_CENTER && type != SS_RIGHT && type != SS_LEFTNOWORDWRAP) ||
-            (style & (SS_ELLIPSISMASK | WS_VSCROLL | WS_HSCROLL))) return 1;
+        if ((type != SS_LEFT && type != SS_CENTER && type != SS_RIGHT && type != SS_LEFTNOWORDWRAP) || (style & (SS_ELLIPSISMASK | WS_VSCROLL | WS_HSCROLL))) return 1;
         size = window_text_size(control, type == SS_LEFTNOWORDWRAP ? 0 : client.right);
         return size.cx <= client.right && size.cy <= client.bottom;
     }
@@ -1280,8 +1467,7 @@ static int smoke_frame(HWND control)
 {
     WCHAR class_name[32];
     if (!GetClassNameW(control, class_name, 32)) return 0;
-    return !lstrcmpiW(class_name, WC_TABCONTROLW) ||
-        (!lstrcmpiW(class_name, L"Button") && (GetWindowLongPtrW(control, GWL_STYLE) & BS_TYPEMASK) == BS_GROUPBOX);
+    return !lstrcmpiW(class_name, WC_TABCONTROLW) || (!lstrcmpiW(class_name, L"Button") && (GetWindowLongPtrW(control, GWL_STYLE) & BS_TYPEMASK) == BS_GROUPBOX);
 }
 
 /* A native drop-down list is as tall as its font needs, a few pixels more
@@ -1313,8 +1499,8 @@ typedef struct smoke_layout {
 static BOOL CALLBACK smoke_layout_child(HWND child, LPARAM data)
 {
     smoke_layout *layout = (smoke_layout *)data;
-    if (GetParent(child) == layout->dialog && IsWindowVisible(child) &&
-        layout->count < sizeof(layout->children) / sizeof(layout->children[0])) layout->children[layout->count++] = child;
+    if (GetParent(child) == layout->dialog && IsWindowVisible(child) && layout->count < sizeof(layout->children) / sizeof(layout->children[0]))
+        layout->children[layout->count++] = child;
     return TRUE;
 }
 
@@ -1330,42 +1516,39 @@ static int smoke_check_dialog(HWND dialog, int native_dialog, int retry)
     HWND focus = GetFocus();
     size_t i, j;
     int small_screen;
-    layout.dialog = dialog; layout.count = 0;
-    ZeroMemory(&monitor, sizeof(monitor)); monitor.cbSize = sizeof(monitor);
-    if (!IsWindowVisible(dialog) || !GetWindowRect(dialog, &bounds) || !GetClientRect(dialog, &client) ||
-        bounds.right <= bounds.left || bounds.bottom <= bounds.top || client.right <= 0 || client.bottom <= 0)
+    layout.dialog = dialog;
+    layout.count = 0;
+    ZeroMemory(&monitor, sizeof(monitor));
+    monitor.cbSize = sizeof(monitor);
+    if (!IsWindowVisible(dialog) || !GetWindowRect(dialog, &bounds) || !GetClientRect(dialog, &client) || bounds.right <= bounds.left || bounds.bottom <= bounds.top ||
+        client.right <= 0 || client.bottom <= 0)
         return smoke_fail_at(__LINE__, dialog, NULL);
     if (!GetMonitorInfoW(MonitorFromWindow(dialog, MONITOR_DEFAULTTONEAREST), &monitor)) return smoke_fail_at(__LINE__, dialog, NULL);
     /* A work area smaller than the dialog's layout (Options needs about 742 px
      * at 96 DPI; a 1366x768 screen has less): the backend holds a resizable
      * window to the work area and its content cannot fit. That says nothing
      * about the dialog, so it is reported and its layout is not checked. */
-    small_screen = bounds.right - bounds.left >= monitor.rcWork.right - monitor.rcWork.left ||
-        bounds.bottom - bounds.top >= monitor.rcWork.bottom - monitor.rcWork.top;
+    small_screen = bounds.right - bounds.left >= monitor.rcWork.right - monitor.rcWork.left || bounds.bottom - bounds.top >= monitor.rcWork.bottom - monitor.rcWork.top;
     if (small_screen) {
         char text[256];
         WCHAR title[64] = L"";
         GetWindowTextW(dialog, title, 64);
-        wsprintfA(text, "GUI smoke: known issue: \"%ls\" (%ldx%ld) does not fit the work area (%ldx%ld); its layout is not checked", title,
-                  bounds.right - bounds.left, bounds.bottom - bounds.top, monitor.rcWork.right - monitor.rcWork.left,
-                  monitor.rcWork.bottom - monitor.rcWork.top);
+        wsprintfA(text, "GUI smoke: known issue: \"%ls\" (%ldx%ld) does not fit the work area (%ldx%ld); its layout is not checked", title, bounds.right - bounds.left,
+                  bounds.bottom - bounds.top, monitor.rcWork.right - monitor.rcWork.left, monitor.rcWork.bottom - monitor.rcWork.top);
         smoke_trace(text);
-    } else if (bounds.left < monitor.rcWork.left || bounds.top < monitor.rcWork.top ||
-        bounds.right > monitor.rcWork.right || bounds.bottom > monitor.rcWork.bottom) {
+    } else if (bounds.left < monitor.rcWork.left || bounds.top < monitor.rcWork.top || bounds.right > monitor.rcWork.right || bounds.bottom > monitor.rcWork.bottom) {
         char text[160];
-        wsprintfA(text, "dialog (%ld,%ld)-(%ld,%ld) outside the work area (%ld,%ld)-(%ld,%ld)\r\n", bounds.left, bounds.top,
-                  bounds.right, bounds.bottom, monitor.rcWork.left, monitor.rcWork.top, monitor.rcWork.right, monitor.rcWork.bottom);
+        wsprintfA(text, "dialog (%ld,%ld)-(%ld,%ld) outside the work area (%ld,%ld)-(%ld,%ld)\r\n", bounds.left, bounds.top, bounds.right, bounds.bottom,
+                  monitor.rcWork.left, monitor.rcWork.top, monitor.rcWork.right, monitor.rcWork.bottom);
         smoke_write(text);
         return smoke_fail_at(__LINE__, dialog, NULL);
     }
     /* A layout-only pass can run in a headless session with no thread focus.
      * Interactive dialog steps still require focus to remain in the dialog. */
-    if (g_smokeAction != SMOKE_MAIN_LAYOUT && smoke_focus_known() &&
-        (!focus || (focus != dialog && !IsChild(dialog, focus)))) {
+    if (g_smokeAction != SMOKE_MAIN_LAYOUT && smoke_focus_known() && (!focus || (focus != dialog && !IsChild(dialog, focus)))) {
         char text[160];
         if (retry) return -1;
-        wsprintfA(text, "focus %p, active %p, foreground %p, dialog %p\r\n", (void *)focus, (void *)GetActiveWindow(),
-                  (void *)GetForegroundWindow(), (void *)dialog);
+        wsprintfA(text, "focus %p, active %p, foreground %p, dialog %p\r\n", (void *)focus, (void *)GetActiveWindow(), (void *)GetForegroundWindow(), (void *)dialog);
         smoke_write(text);
         return smoke_fail_at(__LINE__, dialog, focus);
     }
@@ -1376,8 +1559,7 @@ static int smoke_check_dialog(HWND dialog, int native_dialog, int retry)
         MapWindowPoints(NULL, dialog, (POINT *)&a, 2);
         if (a.left < 0 || a.top < 0 || a.right > client.right || a.bottom > client.bottom) {
             char text[160];
-            wsprintfA(text, "control (%ld,%ld)-(%ld,%ld) outside the client area %ldx%ld\r\n", a.left, a.top, a.right, a.bottom,
-                      client.right, client.bottom);
+            wsprintfA(text, "control (%ld,%ld)-(%ld,%ld) outside the client area %ldx%ld\r\n", a.left, a.top, a.right, a.bottom, client.right, client.bottom);
             smoke_write(text);
             return smoke_fail_at(__LINE__, dialog, layout.children[i]);
         }
@@ -1396,8 +1578,7 @@ static int smoke_check_dialog(HWND dialog, int native_dialog, int retry)
             MapWindowPoints(NULL, dialog, (POINT *)&b, 2);
             if (IntersectRect(&overlap, &a, &b) && !smoke_combo_overflow(layout.children[i], &a, layout.children[j], &b, &overlap)) {
                 char text[200];
-                wsprintfA(text, "controls (%ld,%ld)-(%ld,%ld) and (%ld,%ld)-(%ld,%ld) overlap\r\n", a.left, a.top, a.right, a.bottom,
-                          b.left, b.top, b.right, b.bottom);
+                wsprintfA(text, "controls (%ld,%ld)-(%ld,%ld) and (%ld,%ld)-(%ld,%ld) overlap\r\n", a.left, a.top, a.right, a.bottom, b.left, b.top, b.right, b.bottom);
                 smoke_write(text);
                 return smoke_fail_at(__LINE__, layout.children[i], layout.children[j]);
             }
@@ -1407,10 +1588,10 @@ static int smoke_check_dialog(HWND dialog, int native_dialog, int retry)
 }
 
 /* Each Options page and a control that only that page has. */
-static const WCHAR *const g_smokeOptionsPages[][2] = {
-    {L"Appearance", L"Stay on top"}, {L"File", L"Save last directory"}, {L"Fonts", L"Table views"},
-    {L"Features", L"CPU acceleration"}, {L"Scan", L"Deep scan"}, {L"Signatures", L"Search signatures"},
-    {L"Hex", L"Choose font"}, {L"Disasm", L"Uppercase"}, {L"Online tools", L"VirusTotal API key"}, {L"Info", L"Info database"}};
+static const WCHAR *const g_smokeOptionsPages[][2] = {{L"Appearance", L"Stay on top"},    {L"File", L"Save last directory"}, {L"Fonts", L"Table views"},
+                                                      {L"Features", L"CPU acceleration"}, {L"Scan", L"Deep scan"},           {L"Signatures", L"Search signatures"},
+                                                      {L"Hex", L"Choose font"},           {L"Disasm", L"Uppercase"},         {L"Online tools", L"VirusTotal API key"},
+                                                      {L"Info", L"Info database"}};
 
 /* Native pickers reached from Options pages: the page, its button, for a
  * folder picker the instruction it must show for that page, and the title
@@ -1418,10 +1599,12 @@ static const WCHAR *const g_smokeOptionsPages[][2] = {
 typedef struct smoke_picker {
     const WCHAR *page, *button, *instruction, *title;
 } smoke_picker;
-static const smoke_picker g_smokePickers[] = {
-    {L"Scan", L"Browse...", L"Select the database folder", NULL}, {L"Info", L"Browse...", L"Select the info database folder", NULL},
-    {L"Appearance", L"Choose translation...", NULL, L"Choose translation"}, {L"Fonts", L"Choose", NULL, NULL},
-    {L"Hex", L"Choose font", NULL, NULL}, {L"Disasm", L"Choose font...", NULL, NULL}};
+static const smoke_picker g_smokePickers[] = {{L"Scan", L"Browse...", L"Select the database folder", NULL},
+                                              {L"Info", L"Browse...", L"Select the info database folder", NULL},
+                                              {L"Appearance", L"Choose translation...", NULL, L"Choose translation"},
+                                              {L"Fonts", L"Choose", NULL, NULL},
+                                              {L"Hex", L"Choose font", NULL, NULL},
+                                              {L"Disasm", L"Choose font...", NULL, NULL}};
 
 static int smoke_select_page(HWND window, const WCHAR *page)
 {
@@ -1474,7 +1657,10 @@ static void smoke_click(HWND window, const WCHAR *text)
     if (button && IsWindowEnabled(window) && IsWindowEnabled(button)) {
         if (g_smokeApplicationModal) {
             SetFocus(button);
-            if (GetFocus() != button && smoke_focus_known()) { smoke_fail_at(__LINE__, window, button); return; }
+            if (GetFocus() != button && smoke_focus_known()) {
+                smoke_fail_at(__LINE__, window, button);
+                return;
+            }
         }
         SendMessageW(button, BM_CLICK, 0, 0);
     } else smoke_fail_at(__LINE__, window, button);
@@ -1507,7 +1693,10 @@ static BOOL CALLBACK smoke_find_cell(HWND child, LPARAM data)
         for (column = 0; column < (columns > 0 ? columns : 1); ++column) {
             text[0] = 0;
             ListView_GetItemText(child, row, column, text, 256);
-            if (!lstrcmpW(text, cell->text)) { cell->found = 1; return FALSE; }
+            if (!lstrcmpW(text, cell->text)) {
+                cell->found = 1;
+                return FALSE;
+            }
         }
     return TRUE;
 }
@@ -1548,8 +1737,7 @@ static BOOL CALLBACK smoke_strings_rows(HWND child, LPARAM data)
     WCHAR class_name[32], text[256];
     int column;
     GetClassNameW(child, class_name, 32);
-    if (lstrcmpW(class_name, WC_LISTVIEWW) || ListView_GetItemCount(child) != 1 ||
-        ListView_GetNextItem(child, -1, LVNI_SELECTED) != 0) return TRUE;
+    if (lstrcmpW(class_name, WC_LISTVIEWW) || ListView_GetItemCount(child) != 1 || ListView_GetNextItem(child, -1, LVNI_SELECTED) != 0) return TRUE;
     header = ListView_GetHeader(child);
     if (!header || !(GetWindowLongPtrW(header, GWL_STYLE) & HDS_FILTERBAR) || Header_GetItemCount(header) != 7) return TRUE;
     for (column = 0; column < 7; ++column) {
@@ -1566,8 +1754,8 @@ static BOOL CALLBACK smoke_text_view(HWND child, LPARAM data)
 {
     WCHAR class_name[16];
     LONG_PTR style = GetWindowLongPtrW(child, GWL_STYLE);
-    if (!GetClassNameW(child, class_name, 16) || lstrcmpiW(class_name, L"Edit") || !IsWindowVisible(child) ||
-        !(style & ES_MULTILINE) || !(style & ES_READONLY)) return TRUE;
+    if (!GetClassNameW(child, class_name, 16) || lstrcmpiW(class_name, L"Edit") || !IsWindowVisible(child) || !(style & ES_MULTILINE) || !(style & ES_READONLY))
+        return TRUE;
     *(HWND *)data = child;
     return FALSE;
 }
@@ -1585,8 +1773,12 @@ static int smoke_text_equals(HWND edit, const char *expected)
             while (*a == '\r') ++a;
             while (*b == '\r') ++b;
             if (*a != *b) break;
-            if (!*a) { same = 1; break; }
-            ++a; ++b;
+            if (!*a) {
+                same = 1;
+                break;
+            }
+            ++a;
+            ++b;
         }
     }
     xx_str_free(shown);
@@ -1624,8 +1816,7 @@ static BOOL CALLBACK smoke_optimization_children(HWND child, LPARAM data)
         else if (!controls[1]) controls[1] = child;
     }
     GetWindowTextW(child, text, 32);
-    if (!lstrcmpiW(class_name, L"BUTTON") &&
-        (GetWindowLongPtrW(child, GWL_STYLE) & BS_TYPEMASK) == BS_AUTOCHECKBOX) {
+    if (!lstrcmpiW(class_name, L"BUTTON") && (GetWindowLongPtrW(child, GWL_STYLE) & BS_TYPEMASK) == BS_AUTOCHECKBOX) {
         if (!lstrcmpW(text, L"Use SSE2")) controls[2] = child;
         else if (!lstrcmpW(text, L"Use AVX2")) controls[3] = child;
         else if (!lstrcmpW(text, L"Use SSE4.2")) controls[4] = child;
@@ -1702,8 +1893,7 @@ static BOOL smoke_nested(HWND window)
     if ((g_smokeAction == SMOKE_SCAN_COLORS || g_smokeAction == SMOKE_COLORS_OK) && g_smokePhase == 1) {
         if (lstrcmpW(title, L"Colors") || ++g_smokeNestedSeen < 3) return lstrcmpW(title, L"Colors") != 0;
         if (g_smokeAction == SMOKE_COLORS_OK && (checked = smoke_check_dialog(window, 0, g_smokeNestedSeen < 50)) < 0) return FALSE;
-        if (IsWindowEnabled(g_smokeNestedParent) || !IsWindowEnabled(window) ||
-            IsWindowEnabled(native(g_window)) || IsWindowEnabled(native(g_smokeEnabledSibling)) ||
+        if (IsWindowEnabled(g_smokeNestedParent) || !IsWindowEnabled(window) || IsWindowEnabled(native(g_window)) || IsWindowEnabled(native(g_smokeEnabledSibling)) ||
             IsWindowEnabled(native(g_smokeDisabledSibling)) || !smoke_child(window, L"Button", L"Cancel", 1))
             smoke_fail_at(__LINE__, window, NULL);
         g_smokePhase = 2;
@@ -1712,9 +1902,8 @@ static BOOL smoke_nested(HWND window)
             /* The category table, the editors and the preview; OK keeps them for Options. */
             HWND table = NULL;
             EnumChildWindows(window, smoke_information_fields, (LPARAM)&table);
-            if (!checked || !table || ListView_GetItemCount(table) < 2 ||
-                !smoke_child(window, L"Button", L"Dark appearance", 1) || !smoke_child(window, L"Button", L"Apply color", 1) ||
-                !smoke_child(window, L"Button", L"Default", 1) || !smoke_child(window, WC_TREEVIEWW, NULL, 1)) {
+            if (!checked || !table || ListView_GetItemCount(table) < 2 || !smoke_child(window, L"Button", L"Dark appearance", 1) ||
+                !smoke_child(window, L"Button", L"Apply color", 1) || !smoke_child(window, L"Button", L"Default", 1) || !smoke_child(window, WC_TREEVIEWW, NULL, 1)) {
                 smoke_fail_at(__LINE__, window, table);
                 PostMessageW(window, WM_CLOSE, 0, 0);
             } else smoke_click(window, L"OK");
@@ -1728,8 +1917,8 @@ static BOOL smoke_nested(HWND window)
             /* Only the custom database is offered here; no caption names an extra one. */
             smoke_scan_page page = {0, 0};
             EnumChildWindows(window, smoke_scan_page_child, (LPARAM)&page);
-            if (!checked || !smoke_child(window, L"Button", L"Deep scan", 1) || !smoke_child(window, L"Button", L"Custom database", 1) ||
-                page.extra) smoke_fail_at(__LINE__, window, NULL);
+            if (!checked || !smoke_child(window, L"Button", L"Deep scan", 1) || !smoke_child(window, L"Button", L"Custom database", 1) || page.extra)
+                smoke_fail_at(__LINE__, window, NULL);
         }
         smoke_click(window, L"Cancel");
         g_smokePhase = 2;
@@ -1737,13 +1926,11 @@ static BOOL smoke_nested(HWND window)
     }
     if (g_smokeAction == SMOKE_SIGNATURE_CONFIRM && g_smokePhase == 2) {
         HWND discard;
-        if (lstrcmpW(title, L"Unsaved signature") || !IsWindowEnabled(window) || ++g_smokeNestedSeen < 3)
-            return lstrcmpW(title, L"Unsaved signature") != 0;
+        if (lstrcmpW(title, L"Unsaved signature") || !IsWindowEnabled(window) || ++g_smokeNestedSeen < 3) return lstrcmpW(title, L"Unsaved signature") != 0;
         /* Discarding is opt-in: Cancel keeps the edited document. */
         discard = smoke_child(window, L"Button", L"Discard the unsaved signature changes", 1);
         if ((checked = smoke_check_dialog(window, 0, g_smokeNestedSeen < 50)) < 0) return FALSE;
-        if (!checked || !discard || SendMessageW(discard, BM_GETCHECK, 0, 0) == BST_CHECKED)
-            smoke_fail_at(__LINE__, window, discard);
+        if (!checked || !discard || SendMessageW(discard, BM_GETCHECK, 0, 0) == BST_CHECKED) smoke_fail_at(__LINE__, window, discard);
         smoke_click(window, L"Cancel");
         g_smokePhase = 3;
         return FALSE;
@@ -1777,8 +1964,7 @@ static BOOL smoke_nested(HWND window)
             /* The folder picker opens on the folder in the page's field and
              * says which database it is for. */
             WCHAR selected[MAX_PATH], expected[MAX_PATH];
-            if (!GetLongPathNameW(g_browseSelection, selected, MAX_PATH) || !GetLongPathNameW(g_smokeFolder, expected, MAX_PATH) ||
-                lstrcmpiW(selected, expected)) {
+            if (!GetLongPathNameW(g_browseSelection, selected, MAX_PATH) || !GetLongPathNameW(g_smokeFolder, expected, MAX_PATH) || lstrcmpiW(selected, expected)) {
                 if (g_smokeNestedSeen < 60) return FALSE;
                 smoke_fail_at(__LINE__, window, NULL);
             }
@@ -1830,9 +2016,8 @@ static BOOL CALLBACK smoke_windows(HWND window, LPARAM data)
     {
         /* A trailing '*' matches any rest, e.g. a signature's file name. */
         int length = lstrlenW(g_smokeTitle);
-        if (length && g_smokeTitle[length - 1] == L'*'
-                ? CompareStringOrdinal(title, min(lstrlenW(title), length - 1), g_smokeTitle, length - 1, FALSE) != CSTR_EQUAL
-                : lstrcmpW(title, g_smokeTitle) != 0)
+        if (length && g_smokeTitle[length - 1] == L'*' ? CompareStringOrdinal(title, min(lstrlenW(title), length - 1), g_smokeTitle, length - 1, FALSE) != CSTR_EQUAL
+                                                       : lstrcmpW(title, g_smokeTitle) != 0)
             return TRUE;
     }
     if (IsWindowEnabled(native(g_window))) return TRUE;
@@ -1901,8 +2086,7 @@ static BOOL CALLBACK smoke_windows(HWND window, LPARAM data)
             /* The dialog applies Defaults after the current poll returns. A
              * second WM_TIMER can arrive first under load, so wait until the
              * two comboboxes expose the reset before checking the flags. */
-            if (!smoke_selected_size(optimization[0], L"64 KiB") ||
-                !smoke_selected_size(optimization[1], L"64 KiB")) return FALSE;
+            if (!smoke_selected_size(optimization[0], L"64 KiB") || !smoke_selected_size(optimization[1], L"64 KiB")) return FALSE;
             if (
 #if !CDIE_GUI_ARM_TARGET
                 (SendMessageW(optimization[2], BM_GETCHECK, 0, 0) == BST_CHECKED) != capabilities.sse2 ||
@@ -1933,12 +2117,9 @@ static BOOL CALLBACK smoke_windows(HWND window, LPARAM data)
         }
         if (!gui_backend_get_optimization_options(&current) ||
 #if !CDIE_GUI_ARM_TARGET
-            !!IsWindowEnabled(optimization[2]) != capabilities.sse2 ||
-            !!IsWindowEnabled(optimization[3]) != capabilities.avx2 ||
-            !!IsWindowEnabled(optimization[4]) != capabilities.sse42 ||
-            !!IsWindowEnabled(optimization[5]) != capabilities.aes ||
-            !!IsWindowEnabled(optimization[6]) != capabilities.sha ||
-            !!IsWindowEnabled(optimization[7]) != capabilities.vpclmulqdq ||
+            !!IsWindowEnabled(optimization[2]) != capabilities.sse2 || !!IsWindowEnabled(optimization[3]) != capabilities.avx2 ||
+            !!IsWindowEnabled(optimization[4]) != capabilities.sse42 || !!IsWindowEnabled(optimization[5]) != capabilities.aes ||
+            !!IsWindowEnabled(optimization[6]) != capabilities.sha || !!IsWindowEnabled(optimization[7]) != capabilities.vpclmulqdq ||
             (SendMessageW(optimization[2], BM_GETCHECK, 0, 0) == BST_CHECKED) != current.use_sse2 ||
             (SendMessageW(optimization[3], BM_GETCHECK, 0, 0) == BST_CHECKED) != current.use_avx2 ||
             (SendMessageW(optimization[4], BM_GETCHECK, 0, 0) == BST_CHECKED) != current.use_sse42 ||
@@ -1946,16 +2127,13 @@ static BOOL CALLBACK smoke_windows(HWND window, LPARAM data)
             (SendMessageW(optimization[6], BM_GETCHECK, 0, 0) == BST_CHECKED) != current.use_sha ||
             (SendMessageW(optimization[7], BM_GETCHECK, 0, 0) == BST_CHECKED) != current.use_vpclmulqdq ||
 #else
-            !!IsWindowEnabled(optimization[8]) != capabilities.neon ||
-            !!IsWindowEnabled(optimization[9]) != capabilities.arm_crc32 ||
-            !!IsWindowEnabled(optimization[10]) != capabilities.arm_crypto ||
-            !!IsWindowEnabled(optimization[11]) != capabilities.arm_dotprod ||
-                !!IsWindowEnabled(optimization[12]) != capabilities.arm_pmull ||
-            (SendMessageW(optimization[8], BM_GETCHECK, 0, 0) == BST_CHECKED) != current.use_neon ||
+            !!IsWindowEnabled(optimization[8]) != capabilities.neon || !!IsWindowEnabled(optimization[9]) != capabilities.arm_crc32 ||
+            !!IsWindowEnabled(optimization[10]) != capabilities.arm_crypto || !!IsWindowEnabled(optimization[11]) != capabilities.arm_dotprod ||
+            !!IsWindowEnabled(optimization[12]) != capabilities.arm_pmull || (SendMessageW(optimization[8], BM_GETCHECK, 0, 0) == BST_CHECKED) != current.use_neon ||
             (SendMessageW(optimization[9], BM_GETCHECK, 0, 0) == BST_CHECKED) != current.use_arm_crc32 ||
             (SendMessageW(optimization[10], BM_GETCHECK, 0, 0) == BST_CHECKED) != current.use_arm_crypto ||
             (SendMessageW(optimization[11], BM_GETCHECK, 0, 0) == BST_CHECKED) != current.use_arm_dotprod ||
-                (SendMessageW(optimization[12], BM_GETCHECK, 0, 0) == BST_CHECKED) != current.use_arm_pmull ||
+            (SendMessageW(optimization[12], BM_GETCHECK, 0, 0) == BST_CHECKED) != current.use_arm_pmull ||
 #endif
             !smoke_select_size(window, optimization[0], g_settingsSmoke == SETTINGS_SMOKE_CANCEL ? L"4 KiB" : L"1 KiB") ||
             !smoke_select_size(window, optimization[1], g_settingsSmoke == SETTINGS_SMOKE_CANCEL ? L"8 KiB" : L"2 KiB")) {
@@ -1963,8 +2141,7 @@ static BOOL CALLBACK smoke_windows(HWND window, LPARAM data)
             SendMessageW(window, WM_CLOSE, 0, 0);
         } else {
             for (i = 2; i < 13; ++i)
-                if (optimization[i] && IsWindowVisible(optimization[i]) &&
-                    SendMessageW(optimization[i], BM_GETCHECK, 0, 0) == BST_CHECKED)
+                if (optimization[i] && IsWindowVisible(optimization[i]) && SendMessageW(optimization[i], BM_GETCHECK, 0, 0) == BST_CHECKED)
                     SendMessageW(optimization[i], BM_CLICK, 0, 0);
             if (g_smokeAction == SMOKE_FEATURES_DEFAULT) {
                 HWND context = smoke_child(window, L"Button", L"Add to context menu", 0);
@@ -1974,14 +2151,13 @@ static BOOL CALLBACK smoke_windows(HWND window, LPARAM data)
                 return FALSE;
             } else SendMessageW(optimization[g_smokeAction == SMOKE_FEATURES_OK ? 14 : 15], BM_CLICK, 0, 0);
         }
-optimization_done:;
+    optimization_done:;
     } else if (g_smokeAction == SMOKE_DISK_CANCEL) {
         HWND first = FindWindowExW(window, NULL, PROGRESS_CLASSW, NULL);
         HWND second = first ? FindWindowExW(window, first, PROGRESS_CLASSW, NULL) : NULL;
-        if (!first || !second || !IsWindowVisible(first) || !IsWindowVisible(second) ||
-            !smoke_child(window, L"Static", L"Destination:", 1) ||
-            !smoke_child(window, L"Static", L"Current file:", 1) ||
-            !smoke_child(window, L"Button", L"Cancel", 1)) smoke_fail_at(__LINE__, window, first);
+        if (!first || !second || !IsWindowVisible(first) || !IsWindowVisible(second) || !smoke_child(window, L"Static", L"Destination:", 1) ||
+            !smoke_child(window, L"Static", L"Current file:", 1) || !smoke_child(window, L"Button", L"Cancel", 1))
+            smoke_fail_at(__LINE__, window, first);
         smoke_click(window, L"Cancel");
     } else if (g_smokeAction == SMOKE_UPDATE_CANCEL || g_smokeAction == SMOKE_PROGRESS_CANCEL) {
         /* A worker's progress: bars, the elapsed time and Cancel, which stops it. */
@@ -1989,8 +2165,8 @@ optimization_done:;
         smoke_click(window, L"Cancel");
     } else if (g_smokeAction == SMOKE_UPDATE_QUESTION) {
         /* The question before an available update is installed: Yes and No. */
-        if (!smoke_label(window, L"Install it now?") || !smoke_child(window, L"Button", L"Yes", 1) ||
-            !smoke_child(window, L"Button", L"No", 1)) smoke_fail_at(__LINE__, window, NULL);
+        if (!smoke_label(window, L"Install it now?") || !smoke_child(window, L"Button", L"Yes", 1) || !smoke_child(window, L"Button", L"No", 1))
+            smoke_fail_at(__LINE__, window, NULL);
         smoke_click(window, g_smokeAnswer ? g_smokeAnswer : L"No");
     } else if (g_smokeAction == SMOKE_HASH || g_smokeAction == SMOKE_TOOL_RESIZE) {
         HWND rows = NULL;
@@ -2027,10 +2203,8 @@ optimization_done:;
             HWND unicode = smoke_child(window, L"Button", L"Unicode", 1);
             HWND links = smoke_child(window, L"Button", L"Links", 1);
             HWND regexp = smoke_child(window, L"Button", L"RegExp", 1);
-            if (!ansi || !unicode || !links || !regexp ||
-                SendMessageW(ansi, BM_GETCHECK, 0, 0) != BST_CHECKED ||
-                SendMessageW(unicode, BM_GETCHECK, 0, 0) != BST_CHECKED ||
-                !smoke_child(window, L"Edit", L"5", 1)) {
+            if (!ansi || !unicode || !links || !regexp || SendMessageW(ansi, BM_GETCHECK, 0, 0) != BST_CHECKED ||
+                SendMessageW(unicode, BM_GETCHECK, 0, 0) != BST_CHECKED || !smoke_child(window, L"Edit", L"5", 1)) {
                 smoke_fail_at(__LINE__, window, NULL);
                 PostMessageW(window, WM_CLOSE, 0, 0);
                 goto finished;
@@ -2060,11 +2234,8 @@ optimization_done:;
     } else if (g_smokeAction == SMOKE_EXTRACTOR) {
         HWND rows = NULL;
         EnumChildWindows(window, smoke_extractor_rows, (LPARAM)&rows);
-        if (!rows || Header_GetItemCount(ListView_GetHeader(rows)) != 9 ||
-            !smoke_child(window, L"Button", L"Scan", 1) ||
-            !smoke_child(window, L"Button", L"Dump all", 1) ||
-            !smoke_child(window, L"Button", L"Save", 1) ||
-            !smoke_child(window, L"Button", L"Deep scan", 1)) {
+        if (!rows || Header_GetItemCount(ListView_GetHeader(rows)) != 9 || !smoke_child(window, L"Button", L"Scan", 1) ||
+            !smoke_child(window, L"Button", L"Dump all", 1) || !smoke_child(window, L"Button", L"Save", 1) || !smoke_child(window, L"Button", L"Deep scan", 1)) {
             smoke_fail_at(__LINE__, window, rows);
             PostMessageW(window, WM_CLOSE, 0, 0);
             goto finished;
@@ -2072,7 +2243,11 @@ optimization_done:;
         /* The Escape pass checks the form only; the WM_CLOSE pass scans and filters. */
         if (!g_smokePhase && !g_smokeEscape) {
             HWND all = smoke_child(window, L"Button", L"All", 1);
-            if (!all) { smoke_fail_at(__LINE__, window, NULL); PostMessageW(window, WM_CLOSE, 0, 0); goto finished; }
+            if (!all) {
+                smoke_fail_at(__LINE__, window, NULL);
+                PostMessageW(window, WM_CLOSE, 0, 0);
+                goto finished;
+            }
             if (SendMessageW(all, BM_GETCHECK, 0, 0) != BST_CHECKED) smoke_click(window, L"All");
             g_smokePhase = 1;
             smoke_click(window, L"Scan");
@@ -2086,12 +2261,17 @@ optimization_done:;
                 HDITEMW item;
                 NMHEADERW change;
                 ListView_GetItemText(rows, 0, 1, g_smokeExtractorOffset, 32);
-                filter.pszText = g_smokeExtractorOffset; filter.cchTextMax = 31;
-                ZeroMemory(&item, sizeof(item)); item.mask = HDI_FILTER;
-                item.type = HDFT_ISSTRING; item.pvFilter = &filter;
+                filter.pszText = g_smokeExtractorOffset;
+                filter.cchTextMax = 31;
+                ZeroMemory(&item, sizeof(item));
+                item.mask = HDI_FILTER;
+                item.type = HDFT_ISSTRING;
+                item.pvFilter = &filter;
                 if (!SendMessageW(header, HDM_SETITEMW, 1, (LPARAM)&item)) smoke_fail_at(__LINE__, window, header);
-                ZeroMemory(&change, sizeof(change)); change.hdr.hwndFrom = header;
-                change.hdr.code = HDN_FILTERCHANGE; change.iItem = 1;
+                ZeroMemory(&change, sizeof(change));
+                change.hdr.hwndFrom = header;
+                change.hdr.code = HDN_FILTERCHANGE;
+                change.iItem = 1;
                 g_smokePhase = 2;
                 SendMessageW(rows, WM_NOTIFY, 0, (LPARAM)&change);
                 return FALSE;
@@ -2116,8 +2296,7 @@ optimization_done:;
         if (!fields || (g_smokeExpect && !smoke_table_contains(window, g_smokeExpect))) smoke_fail_at(__LINE__, window, fields);
         smoke_close(window);
     } else if (g_smokeAction == SMOKE_OPTIONS_ESCAPE || g_smokeAction == SMOKE_OPTIONS_CLOSE) {
-        PostMessageW(window, g_smokeAction == SMOKE_OPTIONS_ESCAPE ? WM_KEYDOWN : WM_CLOSE,
-                     g_smokeAction == SMOKE_OPTIONS_ESCAPE ? VK_ESCAPE : 0, 0);
+        PostMessageW(window, g_smokeAction == SMOKE_OPTIONS_ESCAPE ? WM_KEYDOWN : WM_CLOSE, g_smokeAction == SMOKE_OPTIONS_ESCAPE ? VK_ESCAPE : 0, 0);
     } else if (g_smokeAction == SMOKE_SCAN_COLORS || g_smokeAction == SMOKE_COLORS_OK) {
         if (!g_smokePhase) {
             g_smokeNestedParent = window;
@@ -2133,8 +2312,8 @@ optimization_done:;
          * among them, the two folder rows, and no caption naming an extra one. */
         smoke_scan_page page = {0, 0};
         EnumChildWindows(window, smoke_scan_page_child, (LPARAM)&page);
-        if (page.checkboxes != 17 || page.extra || !smoke_child(window, L"Button", L"Custom database", 1) ||
-            !smoke_child(window, L"Static", L"Main database", 1) || !smoke_child(window, L"Static", L"Custom database folder", 1)) {
+        if (page.checkboxes != 17 || page.extra || !smoke_child(window, L"Button", L"Custom database", 1) || !smoke_child(window, L"Static", L"Main database", 1) ||
+            !smoke_child(window, L"Static", L"Custom database folder", 1)) {
             char text[96];
             wsprintfA(text, "Scan page: %d checkboxes, extra caption %d\r\n", page.checkboxes, page.extra);
             smoke_write(text);
@@ -2142,8 +2321,7 @@ optimization_done:;
         }
         smoke_click(window, L"Cancel");
     } else if (g_smokeAction == SMOKE_SCAN_CANCEL || g_smokeAction == SMOKE_SCAN_OK) {
-        static const WCHAR *const toggles[] = {L"All file types", L"Scan overlays", L"Scan resources",
-            L"Scan archive members", L"Deep scan"};
+        static const WCHAR *const toggles[] = {L"All file types", L"Scan overlays", L"Scan resources", L"Scan archive members", L"Deep scan"};
         size_t i;
         for (i = 0; i < sizeof(toggles) / sizeof(toggles[0]); ++i) smoke_click(window, toggles[i]);
         smoke_click(window, g_smokeAction == SMOKE_SCAN_OK ? L"OK" : L"Cancel");
@@ -2229,8 +2407,8 @@ optimization_done:;
         HWND text = NULL;
         EnumChildWindows(window, smoke_text_view, (LPARAM)&text);
         if (!text || !GetWindowTextLengthW(text) || !smoke_child(window, L"Button", L"Copy all", 1) ||
-            (g_smokeExpectText && !smoke_text_equals(text, g_smokeExpectText)) ||
-            (g_smokeExpectPart && !smoke_text_contains(text, g_smokeExpectPart))) smoke_fail_at(__LINE__, window, text);
+            (g_smokeExpectText && !smoke_text_equals(text, g_smokeExpectText)) || (g_smokeExpectPart && !smoke_text_contains(text, g_smokeExpectPart)))
+            smoke_fail_at(__LINE__, window, text);
         smoke_close(window);
     } else if (g_smokeAction == SMOKE_DIRECTORY) {
         HWND scan = smoke_child(window, L"Button", L"Scan", 1);
@@ -2261,17 +2439,21 @@ optimization_done:;
         HWND tree = smoke_child(window, WC_TREEVIEWW, NULL, 1);
         if (g_smokeAction == SMOKE_RECENT_EMPTY) {
             /* No history: a note and Close, nothing to pick. */
-            if (!smoke_child(window, L"Button", L"Close", 1) || smoke_child(window, L"Button", L"OK", 1) ||
-                !smoke_child(window, L"Static", L"No items.", 1) || (tree && TreeView_GetCount(tree))) smoke_fail_at(__LINE__, window, tree);
+            if (!smoke_child(window, L"Button", L"Close", 1) || smoke_child(window, L"Button", L"OK", 1) || !smoke_child(window, L"Static", L"No items.", 1) ||
+                (tree && TreeView_GetCount(tree)))
+                smoke_fail_at(__LINE__, window, tree);
             smoke_close(window);
         } else {
             HTREEITEM first = tree ? TreeView_GetRoot(tree) : NULL;
             WCHAR text[MAX_PATH] = L"";
             TVITEMW item;
             ZeroMemory(&item, sizeof(item));
-            item.mask = TVIF_TEXT; item.hItem = first; item.pszText = text; item.cchTextMax = MAX_PATH;
-            if (!first || !TreeView_GetItem(tree, &item) || !g_smokeExpect || lstrcmpiW(text, g_smokeExpect) ||
-                !smoke_child(window, L"Button", L"Cancel", 1) || !TreeView_SelectItem(tree, first)) {
+            item.mask = TVIF_TEXT;
+            item.hItem = first;
+            item.pszText = text;
+            item.cchTextMax = MAX_PATH;
+            if (!first || !TreeView_GetItem(tree, &item) || !g_smokeExpect || lstrcmpiW(text, g_smokeExpect) || !smoke_child(window, L"Button", L"Cancel", 1) ||
+                !TreeView_SelectItem(tree, first)) {
                 smoke_fail_at(__LINE__, window, tree);
                 PostMessageW(window, WM_CLOSE, 0, 0);
                 goto finished;
@@ -2280,12 +2462,11 @@ optimization_done:;
         }
     } else if (g_smokeAction == SMOKE_ABOUT || g_smokeAction == SMOKE_ABOUT_ESCAPE || g_smokeAction == SMOKE_ABOUT_CLOSE) {
         /* The Detect It Easy layout: picture, Info/Libraries tabs, Follow me buttons. */
-        if (!smoke_child(window, L"SysTabControl32", NULL, 1) || !smoke_child(window, L"Button", L"GitHub", 1) ||
-            !smoke_child(window, L"Button", L"Check updates", 1) || !smoke_child(window, L"Static", L"About image", 1))
+        if (!smoke_child(window, L"SysTabControl32", NULL, 1) || !smoke_child(window, L"Button", L"GitHub", 1) || !smoke_child(window, L"Button", L"Check updates", 1) ||
+            !smoke_child(window, L"Static", L"About image", 1))
             smoke_fail_at(__LINE__, window, NULL);
         if (g_smokeAction == SMOKE_ABOUT) smoke_click(window, L"OK");
-        else PostMessageW(window, g_smokeAction == SMOKE_ABOUT_ESCAPE ? WM_KEYDOWN : WM_CLOSE,
-                          g_smokeAction == SMOKE_ABOUT_ESCAPE ? VK_ESCAPE : 0, 0);
+        else PostMessageW(window, g_smokeAction == SMOKE_ABOUT_ESCAPE ? WM_KEYDOWN : WM_CLOSE, g_smokeAction == SMOKE_ABOUT_ESCAPE ? VK_ESCAPE : 0, 0);
     } else if (g_smokeAction == SMOKE_SIGNATURE) {
         /* S: the script in the signature editor, Run wired to the scanned file;
          * Open offers the file picker for an unmodified signature. */
@@ -2369,7 +2550,8 @@ static BOOL CALLBACK smoke_unexpected(HWND window, LPARAM data)
     HWND owner = GetWindow(window, GW_OWNER);
     (void)data;
     if (window == g_smokeDialog || !IsWindowVisible(window) || !smoke_dialog_window(window) ||
-        (!smoke_native_dialog(window) && (!owner || (owner != native(g_window) && owner != g_smokeDialog)))) return TRUE;
+        (!smoke_native_dialog(window) && (!owner || (owner != native(g_window) && owner != g_smokeDialog))))
+        return TRUE;
     smoke_fail_at(__LINE__, window, NULL);
     if (smoke_native_dialog(window)) smoke_cancel(window);
     else PostMessageW(window, WM_CLOSE, 0, 0);
@@ -2396,23 +2578,26 @@ static BOOL CALLBACK smoke_dump_window(HWND window, LPARAM data)
     if (!smoke_dialog_window(window)) return TRUE;
     GetClassNameW(window, class_name, 64);
     GetWindowTextW(window, title, 96);
-    wsprintfA(text, "  window %p %ls \"%ls\" owner %p visible %d enabled %d\r\n", (void *)window, class_name, title,
-              (void *)GetWindow(window, GW_OWNER), IsWindowVisible(window) != 0, IsWindowEnabled(window) != 0);
+    wsprintfA(text, "  window %p %ls \"%ls\" owner %p visible %d enabled %d\r\n", (void *)window, class_name, title, (void *)GetWindow(window, GW_OWNER),
+              IsWindowVisible(window) != 0, IsWindowEnabled(window) != 0);
     smoke_write(text);
     return TRUE;
 }
 
 static VOID CALLBACK smoke_tick(HWND window, UINT message, UINT_PTR timer, DWORD time)
 {
-    (void)window; (void)message; (void)timer; (void)time;
+    (void)window;
+    (void)message;
+    (void)timer;
+    (void)time;
     /* Before the step closes its dialog, a foreground elsewhere was taken by
      * another program; after that, it may be the close's own doing. */
     if (!g_smokeDone && !g_smokeForegroundLost && !smoke_foreground_ours()) {
         char text[160];
         DWORD process = 0;
         GetWindowThreadProcessId(GetForegroundWindow(), &process);
-        wsprintfA(text, "GUI smoke: process %lu took the foreground during action %d (phase %d, dialog %p)", (unsigned long)process,
-                  g_smokeAction, g_smokePhase, (void *)g_smokeDialog);
+        wsprintfA(text, "GUI smoke: process %lu took the foreground during action %d (phase %d, dialog %p)", (unsigned long)process, g_smokeAction, g_smokePhase,
+                  (void *)g_smokeDialog);
         smoke_trace(text);
         g_smokeForegroundLost = 1;
     }
@@ -2422,8 +2607,8 @@ static VOID CALLBACK smoke_tick(HWND window, UINT message, UINT_PTR timer, DWORD
         char text[160];
         g_smokeTimedOut = 1;
         smoke_fail_at(__LINE__, g_smokeDialog, NULL);
-        wsprintfA(text, "timed out: phase %d, item %d, nested parent %p, main %p\r\n", g_smokePhase, (int)g_smokePicker,
-                  (void *)g_smokeNestedParent, (void *)native(g_window));
+        wsprintfA(text, "timed out: phase %d, item %d, nested parent %p, main %p\r\n", g_smokePhase, (int)g_smokePicker, (void *)g_smokeNestedParent,
+                  (void *)native(g_window));
         smoke_write(text);
         EnumThreadWindows(GetCurrentThreadId(), smoke_dump_window, 0);
         xxwidgets_app_quit(g_app, 1);
@@ -2439,14 +2624,18 @@ static int smoke_begin_ex(const WCHAR *title, int action, int application_modal)
     if (!started) started = GetTickCount64();
     wsprintfA(trace, "GUI smoke dialog action %d at %u ms", action, (unsigned int)(GetTickCount64() - started));
     smoke_trace(trace);
-    g_smokeTitle = title; g_smokeAction = action;
-    g_smokePage = NULL; g_smokePageState = 0;
+    g_smokeTitle = title;
+    g_smokeAction = action;
+    g_smokePage = NULL;
+    g_smokePageState = 0;
     g_smokeDone = g_smokeFailed = g_smokePhase = 0;
     g_smokeTimedOut = g_smokeSeen = g_smokeChecked = g_smokeNestedSeen = g_smokeNestedChecked = g_smokeWait = 0;
     g_smokeEscape = g_smokeOptional = 0;
     g_smokePicker = 0;
-    g_smokeInner = NULL; g_smokeInnerCount = 0;
-    g_smokeExpect = g_smokeExpectPart = NULL; g_smokeExpectText = NULL;
+    g_smokeInner = NULL;
+    g_smokeInnerCount = 0;
+    g_smokeExpect = g_smokeExpectPart = NULL;
+    g_smokeExpectText = NULL;
     g_smokeNestedParent = g_smokeDialog = NULL;
     g_smokeDeadline = GetTickCount64() + SMOKE_STEP_MS;
     g_smokeForegroundLost = !smoke_foreground_ours();
@@ -2466,8 +2655,7 @@ static int smoke_begin_ex(const WCHAR *title, int action, int application_modal)
 /* Options, About and the text dialogs are application-modal. */
 static int smoke_begin(const WCHAR *title, int action)
 {
-    return smoke_begin_ex(title, action, !lstrcmpW(title, L"Options") || !lstrcmpW(title, L"About") ||
-        !lstrcmpW(title, L"Scan report") || !lstrcmpW(title, L"Log"));
+    return smoke_begin_ex(title, action, !lstrcmpW(title, L"Options") || !lstrcmpW(title, L"About") || !lstrcmpW(title, L"Scan report") || !lstrcmpW(title, L"Log"));
 }
 
 /* select = 1 picks the page from the list; 0 expects Options to open on it. */
@@ -2489,8 +2677,8 @@ static int smoke_finish(void)
     g_smokeTimer = 0;
     if (!g_smokeDone && !g_smokeOptional) smoke_fail_at(__LINE__, NULL, NULL);
     if (!IsWindowEnabled(native(g_window))) smoke_fail_at(__LINE__, native(g_window), NULL);
-    if (g_smokeApplicationModal && (!IsWindowEnabled(native(g_smokeEnabledSibling)) ||
-        IsWindowEnabled(native(g_smokeDisabledSibling)))) smoke_fail_at(__LINE__, NULL, NULL);
+    if (g_smokeApplicationModal && (!IsWindowEnabled(native(g_smokeEnabledSibling)) || IsWindowEnabled(native(g_smokeDisabledSibling))))
+        smoke_fail_at(__LINE__, NULL, NULL);
     focus = GetFocus();
     if (!g_smokeForegroundLost && !smoke_foreground_ours()) {
         /* The thread's own active window may still be the main window: the
@@ -2499,13 +2687,11 @@ static int smoke_finish(void)
         DWORD process = 0;
         HWND foreground = GetForegroundWindow();
         GetWindowThreadProcessId(foreground, &process);
-        wsprintfA(text, "the foreground left the program when the dialog closed: window %p of process %lu\r\n",
-                  (void *)foreground, (unsigned long)process);
+        wsprintfA(text, "the foreground left the program when the dialog closed: window %p of process %lu\r\n", (void *)foreground, (unsigned long)process);
         smoke_write(text);
         smoke_fail_at(__LINE__, native(g_window), focus);
     }
-    if (smoke_focus_known() && (!focus || (focus != native(g_window) && !IsChild(native(g_window), focus))))
-        smoke_fail_at(__LINE__, native(g_window), focus);
+    if (smoke_focus_known() && (!focus || (focus != native(g_window) && !IsChild(native(g_window), focus)))) smoke_fail_at(__LINE__, native(g_window), focus);
     EnumThreadWindows(GetCurrentThreadId(), smoke_leftover, (LPARAM)&leftover);
     if (leftover) smoke_fail_at(__LINE__, leftover, NULL);
     passed = !g_smokeFailed;
@@ -2569,7 +2755,8 @@ static xxwidgets_status smoke_disk_read(void *user, uint64_t offset, void *data,
 
 static xxwidgets_status smoke_disk_seek(xxwidgets_widget *widget, uint64_t offset, void *user)
 {
-    (void)widget; (void)user;
+    (void)widget;
+    (void)user;
     return offset == 0 ? XXWIDGETS_OK : XXWIDGETS_INVALID_ARGUMENT;
 }
 
@@ -2589,24 +2776,26 @@ static int smoke_disk_cancel(void)
     if (!GetTempPathW(MAX_PATH, temporary) || !GetTempFileNameW(temporary, L"cdw", 0, directory)) return 0;
     if (!DeleteFileW(directory) || !CreateDirectoryW(directory, NULL)) return 0;
     if (lstrlenW(directory) > MAX_PATH - 32) goto cleanup;
-    lstrcpyW(path, directory); lstrcatW(path, L"\\saved.bin");
-    lstrcpyW(pattern, directory); lstrcatW(pattern, L"\\*");
+    lstrcpyW(path, directory);
+    lstrcatW(path, L"\\saved.bin");
+    lstrcpyW(pattern, directory);
+    lstrcatW(pattern, L"\\*");
     file = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_TEMPORARY, NULL);
-    if (file == INVALID_HANDLE_VALUE || !WriteFile(file, sentinel, sizeof(sentinel), &transferred, NULL) ||
-        transferred != sizeof(sentinel)) goto cleanup;
-    CloseHandle(file); file = INVALID_HANDLE_VALUE;
+    if (file == INVALID_HANDLE_VALUE || !WriteFile(file, sentinel, sizeof(sentinel), &transferred, NULL) || transferred != sizeof(sentinel)) goto cleanup;
+    CloseHandle(file);
+    file = INVALID_HANDLE_VALUE;
     utf8 = xx_str_unicode_to_utf8(path);
     if (!utf8 || xxwidgets_widget_create(g_app, g_window, XXWIDGETS_HEXVIEW, "", (xxwidgets_rect){0, 0, 1, 1}, &hex) != XXWIDGETS_OK ||
-        xxwidgets_widget_set_visible(hex, 0) != XXWIDGETS_OK ||
-        xxwidgets_hexview_set_data(hex, page, sizeof(page)) != XXWIDGETS_OK ||
+        xxwidgets_widget_set_visible(hex, 0) != XXWIDGETS_OK || xxwidgets_hexview_set_data(hex, page, sizeof(page)) != XXWIDGETS_OK ||
         xxwidgets_hexview_set_source(hex, 4 * 1024 * 1024, smoke_disk_read, smoke_disk_seek, NULL) != XXWIDGETS_OK ||
-        xxwidgets_hexview_set_source_selection(hex, 0, 4 * 1024 * 1024) != XXWIDGETS_OK ||
-        !smoke_begin(L"Saving selected bytes", SMOKE_DISK_CANCEL)) goto cleanup;
+        xxwidgets_hexview_set_source_selection(hex, 0, 4 * 1024 * 1024) != XXWIDGETS_OK || !smoke_begin(L"Saving selected bytes", SMOKE_DISK_CANCEL))
+        goto cleanup;
     status = xxwidgets_hexview_save_selection(hex, utf8);
     passed = smoke_finish() && status == XXWIDGETS_OK;
     file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (file == INVALID_HANDLE_VALUE || !ReadFile(file, observed, sizeof(observed), &transferred, NULL) ||
-        transferred != sizeof(sentinel) || memcmp(observed, sentinel, sizeof(sentinel)) || GetFileSize(file, NULL) != sizeof(sentinel)) passed = 0;
+    if (file == INVALID_HANDLE_VALUE || !ReadFile(file, observed, sizeof(observed), &transferred, NULL) || transferred != sizeof(sentinel) ||
+        memcmp(observed, sentinel, sizeof(sentinel)) || GetFileSize(file, NULL) != sizeof(sentinel))
+        passed = 0;
     if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
     file = INVALID_HANDLE_VALUE;
     search = FindFirstFileW(pattern, &found);
@@ -2635,10 +2824,22 @@ static void smoke_put(unsigned char *data, size_t offset, uint64_t value, int by
  * (tests/test_symbols.py elf_exports(64, False, False)). */
 static int smoke_write_elf(const WCHAR *path)
 {
-    static const struct { const char *name; unsigned char info, other; unsigned short section; uint64_t value; } symbols[] = {
-        {"", 0, 0, 0, 0}, {"Direct", 0x12, 0, 3, 0x10}, {"Hidden", 0x12, 2, 3, 0x18}, {"Weak", 0x22, 3, 3, 0x20},
-        {"Local", 2, 0, 3, 0x28}, {"Need", 0x12, 0, 0, 0}, {"File", 0x14, 0, 3, 0}, {"Section", 0x13, 0, 3, 0},
-        {"Data", 0x11, 0, 3, 0x30}, {"Absolute", 0x10, 0, 0xfff1, 0x12345678}, {"Internal", 0x12, 1, 3, 0x38}};
+    static const struct {
+        const char *name;
+        unsigned char info, other;
+        unsigned short section;
+        uint64_t value;
+    } symbols[] = {{"", 0, 0, 0, 0},
+                   {"Direct", 0x12, 0, 3, 0x10},
+                   {"Hidden", 0x12, 2, 3, 0x18},
+                   {"Weak", 0x22, 3, 3, 0x20},
+                   {"Local", 2, 0, 3, 0x28},
+                   {"Need", 0x12, 0, 0, 0},
+                   {"File", 0x14, 0, 3, 0},
+                   {"Section", 0x13, 0, 3, 0},
+                   {"Data", 0x11, 0, 3, 0x30},
+                   {"Absolute", 0x10, 0, 0xfff1, 0x12345678},
+                   {"Internal", 0x12, 1, 3, 0x38}};
     static const unsigned char ident[] = {0x7f, 'E', 'L', 'F', 2, 1, 1};
     unsigned char data[0x1000] = {0};
     size_t i, strings = 1, count = sizeof(symbols) / sizeof(symbols[0]);
@@ -2646,11 +2847,23 @@ static int smoke_write_elf(const WCHAR *path)
     DWORD written = 0;
     BOOL ok;
     memcpy(data, ident, sizeof(ident));
-    smoke_put(data, 16, 3, 2); smoke_put(data, 18, 62, 2); smoke_put(data, 20, 1, 4); smoke_put(data, 24, 0x400000, 8);
-    smoke_put(data, 32, 64, 8); smoke_put(data, 40, 0x100, 8); smoke_put(data, 52, 64, 2); smoke_put(data, 54, 56, 2);
-    smoke_put(data, 58, 64, 2); smoke_put(data, 60, 4, 2);
-    smoke_put(data, 64, 1, 4); smoke_put(data, 68, 5, 4); smoke_put(data, 80, 0x400000, 8); smoke_put(data, 88, 0x400000, 8);
-    smoke_put(data, 96, 512, 8); smoke_put(data, 104, 512, 8); smoke_put(data, 112, 0x1000, 8);
+    smoke_put(data, 16, 3, 2);
+    smoke_put(data, 18, 62, 2);
+    smoke_put(data, 20, 1, 4);
+    smoke_put(data, 24, 0x400000, 8);
+    smoke_put(data, 32, 64, 8);
+    smoke_put(data, 40, 0x100, 8);
+    smoke_put(data, 52, 64, 2);
+    smoke_put(data, 54, 56, 2);
+    smoke_put(data, 58, 64, 2);
+    smoke_put(data, 60, 4, 2);
+    smoke_put(data, 64, 1, 4);
+    smoke_put(data, 68, 5, 4);
+    smoke_put(data, 80, 0x400000, 8);
+    smoke_put(data, 88, 0x400000, 8);
+    smoke_put(data, 96, 512, 8);
+    smoke_put(data, 104, 512, 8);
+    smoke_put(data, 112, 0x1000, 8);
     for (i = 0; i < count; ++i) {
         size_t entry = 0x300 + i * 24, length = strlen(symbols[i].name);
         if (length) {
@@ -2658,16 +2871,29 @@ static int smoke_write_elf(const WCHAR *path)
             memcpy(data + 0x700 + strings, symbols[i].name, length + 1);
             strings += length + 1;
         }
-        data[entry + 4] = symbols[i].info; data[entry + 5] = symbols[i].other;
+        data[entry + 4] = symbols[i].info;
+        data[entry + 5] = symbols[i].other;
         smoke_put(data, entry + 6, symbols[i].section, 2);
         smoke_put(data, entry + 8, symbols[i].value + (symbols[i].section == 3 ? 0x400000 : 0), 8);
     }
     /* .dynsym, .dynstr, .text */
-    smoke_put(data, 0x140 + 4, 11, 4); smoke_put(data, 0x140 + 24, 0x300, 8); smoke_put(data, 0x140 + 32, count * 24, 8);
-    smoke_put(data, 0x140 + 40, 2, 4); smoke_put(data, 0x140 + 44, 1, 4); smoke_put(data, 0x140 + 48, 8, 8); smoke_put(data, 0x140 + 56, 24, 8);
-    smoke_put(data, 0x180 + 4, 3, 4); smoke_put(data, 0x180 + 24, 0x700, 8); smoke_put(data, 0x180 + 32, strings, 8); smoke_put(data, 0x180 + 48, 1, 8);
-    smoke_put(data, 0x1c0 + 4, 1, 4); smoke_put(data, 0x1c0 + 8, 2, 8); smoke_put(data, 0x1c0 + 16, 0x400000, 8);
-    smoke_put(data, 0x1c0 + 24, 0x800, 8); smoke_put(data, 0x1c0 + 32, 0x80, 8); smoke_put(data, 0x1c0 + 48, 16, 8);
+    smoke_put(data, 0x140 + 4, 11, 4);
+    smoke_put(data, 0x140 + 24, 0x300, 8);
+    smoke_put(data, 0x140 + 32, count * 24, 8);
+    smoke_put(data, 0x140 + 40, 2, 4);
+    smoke_put(data, 0x140 + 44, 1, 4);
+    smoke_put(data, 0x140 + 48, 8, 8);
+    smoke_put(data, 0x140 + 56, 24, 8);
+    smoke_put(data, 0x180 + 4, 3, 4);
+    smoke_put(data, 0x180 + 24, 0x700, 8);
+    smoke_put(data, 0x180 + 32, strings, 8);
+    smoke_put(data, 0x180 + 48, 1, 8);
+    smoke_put(data, 0x1c0 + 4, 1, 4);
+    smoke_put(data, 0x1c0 + 8, 2, 8);
+    smoke_put(data, 0x1c0 + 16, 0x400000, 8);
+    smoke_put(data, 0x1c0 + 24, 0x800, 8);
+    smoke_put(data, 0x1c0 + 32, 0x80, 8);
+    smoke_put(data, 0x1c0 + 48, 16, 8);
     file = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (file == INVALID_HANDLE_VALUE) return 0;
     ok = WriteFile(file, data, sizeof(data), &written, NULL) && written == sizeof(data);
@@ -2681,8 +2907,8 @@ static int smoke_scratch_create(void)
 {
     WCHAR temporary[MAX_PATH];
     g_smokeFolder[0] = g_smokeElf[0] = 0;
-    if (!GetTempPathW(MAX_PATH, temporary) || !GetTempFileNameW(temporary, L"cdg", 0, g_smokeFolder) ||
-        !DeleteFileW(g_smokeFolder) || !CreateDirectoryW(g_smokeFolder, NULL)) {
+    if (!GetTempPathW(MAX_PATH, temporary) || !GetTempFileNameW(temporary, L"cdg", 0, g_smokeFolder) || !DeleteFileW(g_smokeFolder) ||
+        !CreateDirectoryW(g_smokeFolder, NULL)) {
         g_smokeFolder[0] = 0;
         return 0;
     }
@@ -2725,22 +2951,28 @@ static int smoke_collect_name(size_t parent, const char *text, const char *categ
     xxwidgets_tree_node shown;
     (void)category;
     /* "?" is pressed by row index: each row must be the shown tree's own. */
-    if (xxwidgets_treeview_get_node(g_results, list->count, &shown) != XXWIDGETS_OK || shown.parent != parent ||
-        !shown.text || !text || strcmp(shown.text, text)) {
+    if (xxwidgets_treeview_get_node(g_results, list->count, &shown) != XXWIDGETS_OK || shown.parent != parent || !shown.text || !text || strcmp(shown.text, text)) {
         list->failed = 1;
         return 0;
     }
     if (list->count == list->capacity) {
         size_t capacity = list->capacity ? list->capacity * 2 : 32;
         char **grown = (char **)realloc(list->names, capacity * sizeof(*grown));
-        if (!grown) { list->failed = 1; return 0; }
-        list->names = grown; list->capacity = capacity;
+        if (!grown) {
+            list->failed = 1;
+            return 0;
+        }
+        list->names = grown;
+        list->capacity = capacity;
     }
     list->names[list->count] = NULL;
     if (detection && detection->name) {
         size_t size = strlen(detection->name) + 1;
         list->names[list->count] = (char *)malloc(size);
-        if (!list->names[list->count]) { list->failed = 1; return 0; }
+        if (!list->names[list->count]) {
+            list->failed = 1;
+            return 0;
+        }
         memcpy(list->names[list->count], detection->name, size);
     }
     ++list->count;
@@ -2775,11 +3007,13 @@ static int smoke_info_fixture(const char *name, WCHAR *file)
     if (wide && folder && lstrlenW(g_smokeFolder) + lstrlenW(wide) + 7 < MAX_PATH) {
         wsprintfW(file, L"%s\\%s.html", g_smokeFolder, wide);
         handle = CreateFileW(file, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-        ok = handle != INVALID_HANDLE_VALUE && WriteFile(handle, html, sizeof(html) - 1, &written, NULL) &&
-            written == sizeof(html) - 1;
+        ok = handle != INVALID_HANDLE_VALUE && WriteFile(handle, html, sizeof(html) - 1, &written, NULL) && written == sizeof(html) - 1;
         if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle);
         ok = ok && gui_backend_set_info_path(folder);
-        if (!ok) { DeleteFileW(file); file[0] = 0; }
+        if (!ok) {
+            DeleteFileW(file);
+            file[0] = 0;
+        }
     }
     xx_str_wfree(wide);
     xx_str_free(folder);
@@ -2798,8 +3032,7 @@ static int smoke_info_mark(const char *executable)
     xxwidgets_event press = {0};
     gui_options_values values;
     int passed = 0;
-    if (!gui_backend_scan_tree(executable, 0, smoke_collect_name, &names, &report, &type, NULL, NULL) || names.failed || names.count != count)
-        goto finish;
+    if (!gui_backend_scan_tree(executable, 0, smoke_collect_name, &names, &report, &type, NULL, NULL) || names.failed || names.count != count) goto finish;
     for (node = 0; node < count; ++node)
         if ((xxwidgets_treeview_node_marks(g_results, node) & 2u) && names.names[node] && (info = gui_backend_info_text(names.names[node]))) break;
     if (node == count) {
@@ -2809,7 +3042,10 @@ static int smoke_info_mark(const char *executable)
         smoke_trace("GUI smoke: no bundled description for these detections; using a scratch info folder");
     }
     title = xx_str_utf8_to_unicode(names.names[node]);
-    press.type = XXWIDGETS_EVENT_CLICK; press.widget = g_results; press.value = (int)node; press.x = 1;
+    press.type = XXWIDGETS_EVENT_CLICK;
+    press.widget = g_results;
+    press.value = (int)node;
+    press.x = 1;
     if (!title || !gui_tree_event(g_panel, &press) || !smoke_begin_ex(title, SMOKE_INFO, 1)) goto finish;
     g_smokeExpectText = info;
     g_smokeEscape = 1;
@@ -2822,7 +3058,9 @@ finish:
         DeleteFileW(file);
     }
     xx_str_wfree(title);
-    gui_backend_free(info); gui_backend_free(report); gui_backend_free(type);
+    gui_backend_free(info);
+    gui_backend_free(report);
+    gui_backend_free(type);
     smoke_names_free(&names);
     return passed;
 }
@@ -2830,8 +3068,8 @@ finish:
 /* A local TCP port that takes connections into its backlog and never answers,
  * so an update request stalls until it is cancelled. Winsock comes from the
  * system at run time: the GUI links no network library of its own. */
-typedef int (PASCAL *smoke_close_socket_fn)(SOCKET);
-typedef int (PASCAL *smoke_cleanup_fn)(void);
+typedef int(PASCAL *smoke_close_socket_fn)(SOCKET);
+typedef int(PASCAL *smoke_cleanup_fn)(void);
 typedef struct smoke_listener {
     HMODULE library;
     SOCKET socket;
@@ -2845,16 +3083,18 @@ static void smoke_unlisten(smoke_listener *listener)
     if (listener->cleanup) listener->cleanup();
     if (listener->library) FreeLibrary(listener->library);
     listener->socket = INVALID_SOCKET;
-    listener->library = NULL; listener->cleanup = NULL; listener->close_socket = NULL;
+    listener->library = NULL;
+    listener->cleanup = NULL;
+    listener->close_socket = NULL;
 }
 
 static unsigned int smoke_listen(smoke_listener *listener)
 {
-    typedef int (PASCAL *startup_fn)(WORD, LPWSADATA);
-    typedef SOCKET (PASCAL *socket_fn)(int, int, int);
-    typedef int (PASCAL *bind_fn)(SOCKET, const struct sockaddr *, int);
-    typedef int (PASCAL *listen_fn)(SOCKET, int);
-    typedef int (PASCAL *name_fn)(SOCKET, struct sockaddr *, int *);
+    typedef int(PASCAL * startup_fn)(WORD, LPWSADATA);
+    typedef SOCKET(PASCAL * socket_fn)(int, int, int);
+    typedef int(PASCAL * bind_fn)(SOCKET, const struct sockaddr *, int);
+    typedef int(PASCAL * listen_fn)(SOCKET, int);
+    typedef int(PASCAL * name_fn)(SOCKET, struct sockaddr *, int *);
     startup_fn startup;
     socket_fn open_socket;
     bind_fn bind_socket;
@@ -2873,8 +3113,7 @@ static unsigned int smoke_listen(smoke_listener *listener)
     listen_socket = (listen_fn)GetProcAddress(listener->library, "listen");
     socket_name = (name_fn)GetProcAddress(listener->library, "getsockname");
     listener->close_socket = (smoke_close_socket_fn)GetProcAddress(listener->library, "closesocket");
-    if (!startup || !open_socket || !bind_socket || !listen_socket || !socket_name || !listener->close_socket ||
-        startup(MAKEWORD(2, 2), &data)) {
+    if (!startup || !open_socket || !bind_socket || !listen_socket || !socket_name || !listener->close_socket || startup(MAKEWORD(2, 2), &data)) {
         smoke_unlisten(listener);
         return 0;
     }
@@ -2884,8 +3123,8 @@ static unsigned int smoke_listen(smoke_listener *listener)
     /* 127.0.0.1 in network byte order; port 0 lets the system pick one. */
     address.sin_addr.s_addr = 0x0100007fu;
     listener->socket = open_socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (listener->socket == INVALID_SOCKET || bind_socket(listener->socket, (const struct sockaddr *)&address, sizeof(address)) ||
-        listen_socket(listener->socket, 4) || socket_name(listener->socket, (struct sockaddr *)&address, &length)) {
+    if (listener->socket == INVALID_SOCKET || bind_socket(listener->socket, (const struct sockaddr *)&address, sizeof(address)) || listen_socket(listener->socket, 4) ||
+        socket_name(listener->socket, (struct sockaddr *)&address, &length)) {
         smoke_unlisten(listener);
         return 0;
     }
@@ -2958,7 +3197,7 @@ static int smoke_zero_file(WCHAR *path, const WCHAR *name, LONGLONG length, int 
     file = CreateFileW(path, GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_TEMPORARY, NULL);
     size.QuadPart = length;
     ready = file != INVALID_HANDLE_VALUE && (!sparse || DeviceIoControl(file, FSCTL_SET_SPARSE, NULL, 0, NULL, 0, &bytes, NULL)) &&
-        SetFilePointerEx(file, size, NULL, FILE_BEGIN) && SetEndOfFile(file);
+            SetFilePointerEx(file, size, NULL, FILE_BEGIN) && SetEndOfFile(file);
     if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
     if (!ready) DeleteFileW(path);
     return ready;
@@ -3011,12 +3250,18 @@ static const struct smoke_tool {
     const WCHAR *title;
     int action, fixture;
     smoke_opener open;
-} g_smokeTools[] = {
-    {L"File Information", SMOKE_FILE_INFORMATION, 0, do_file_information}, {L"Entropy", SMOKE_ENTROPY, 0, do_entropy},
-    {L"Hash", SMOKE_HASH, 0, do_hash}, {L"Strings", SMOKE_STRINGS_FILE, 0, do_strings}, {L"Hex View", SMOKE_HEX_VIEW, 0, do_hex_view},
-    {L"Disasm", SMOKE_DISASM, 0, do_disasm}, {L"Memory Map", SMOKE_MEMORY_MAP, 0, do_memory_map}, {L"Imports", SMOKE_IMPORTS, 0, do_imports},
-    {L"Exports", SMOKE_EXPORTS, 1, do_exports}, {L"Resources", SMOKE_RESOURCES, 0, do_resources}, {L"Symbols", SMOKE_SYMBOLS, 1, do_symbols},
-    {L"Extractor", SMOKE_EXTRACTOR, 0, do_extractor}};
+} g_smokeTools[] = {{L"File Information", SMOKE_FILE_INFORMATION, 0, do_file_information},
+                    {L"Entropy", SMOKE_ENTROPY, 0, do_entropy},
+                    {L"Hash", SMOKE_HASH, 0, do_hash},
+                    {L"Strings", SMOKE_STRINGS_FILE, 0, do_strings},
+                    {L"Hex View", SMOKE_HEX_VIEW, 0, do_hex_view},
+                    {L"Disasm", SMOKE_DISASM, 0, do_disasm},
+                    {L"Memory Map", SMOKE_MEMORY_MAP, 0, do_memory_map},
+                    {L"Imports", SMOKE_IMPORTS, 0, do_imports},
+                    {L"Exports", SMOKE_EXPORTS, 1, do_exports},
+                    {L"Resources", SMOKE_RESOURCES, 0, do_resources},
+                    {L"Symbols", SMOKE_SYMBOLS, 1, do_symbols},
+                    {L"Extractor", SMOKE_EXTRACTOR, 0, do_extractor}};
 
 /* Every Options page, selected from the list, checked, then cancelled. */
 static int smoke_options_pages(void)
@@ -3087,23 +3332,25 @@ static int smoke_live(xxwidgets_widget *widget)
 static unsigned int smoke_view_controls(int advanced, int loaded)
 {
     xxwidgets_widget *always[] = {g_path, g_browse, g_results, g_advanced, g_shortcutsButton, g_options, g_aboutButton, g_exit};
-    xxwidgets_widget *with_file[] = {g_type, g_flags, g_databases, g_scan, g_signaturesButton, g_directoryButton, g_logButton,
-                                     g_facts[0], g_facts[1], g_facts[2], g_facts[3], g_msec};
-    xxwidgets_widget *hidden[] = {g_flagLabel, g_databaseLabel, g_includeTagsLabel, g_excludeTagsLabel,
-        xxwidgets_scan_panel_control(g_panel, XXWIDGETS_SCAN_PANEL_FILE_TYPE),
-        xxwidgets_scan_panel_control(g_panel, XXWIDGETS_SCAN_PANEL_FILE_TYPE_LABEL)};
-    xxwidgets_widget *base = xxwidgets_value_field_control(xxwidgets_file_header_field(g_header, XXWIDGETS_FILE_HEADER_BASE_ADDRESS),
-                                                           XXWIDGETS_VALUE_FIELD_VALUE);
-    xxwidgets_widget *entry = xxwidgets_value_field_control(xxwidgets_file_header_field(g_header, XXWIDGETS_FILE_HEADER_ENTRY_POINT),
-                                                            XXWIDGETS_VALUE_FIELD_VALUE);
-    xxwidgets_widget *size = xxwidgets_value_field_control(xxwidgets_file_header_field(g_header, XXWIDGETS_FILE_HEADER_FILE_SIZE),
-                                                           XXWIDGETS_VALUE_FIELD_VALUE);
+    xxwidgets_widget *with_file[] = {g_type,      g_flags,    g_databases, g_scan,     g_signaturesButton, g_directoryButton,
+                                     g_logButton, g_facts[0], g_facts[1],  g_facts[2], g_facts[3],         g_msec};
+    xxwidgets_widget *hidden[] = {g_flagLabel,
+                                  g_databaseLabel,
+                                  g_includeTagsLabel,
+                                  g_excludeTagsLabel,
+                                  xxwidgets_scan_panel_control(g_panel, XXWIDGETS_SCAN_PANEL_FILE_TYPE),
+                                  xxwidgets_scan_panel_control(g_panel, XXWIDGETS_SCAN_PANEL_FILE_TYPE_LABEL)};
+    xxwidgets_widget *base = xxwidgets_value_field_control(xxwidgets_file_header_field(g_header, XXWIDGETS_FILE_HEADER_BASE_ADDRESS), XXWIDGETS_VALUE_FIELD_VALUE);
+    xxwidgets_widget *entry = xxwidgets_value_field_control(xxwidgets_file_header_field(g_header, XXWIDGETS_FILE_HEADER_ENTRY_POINT), XXWIDGETS_VALUE_FIELD_VALUE);
+    xxwidgets_widget *size = xxwidgets_value_field_control(xxwidgets_file_header_field(g_header, XXWIDGETS_FILE_HEADER_FILE_SIZE), XXWIDGETS_VALUE_FIELD_VALUE);
     int checked = 0;
     size_t i;
-    for (i = 0; i < sizeof(always) / sizeof(always[0]); ++i) if (!smoke_live(always[i])) return __LINE__ * 100 + (unsigned int)i;
+    for (i = 0; i < sizeof(always) / sizeof(always[0]); ++i)
+        if (!smoke_live(always[i])) return __LINE__ * 100 + (unsigned int)i;
     for (i = 0; i < sizeof(with_file) / sizeof(with_file[0]); ++i)
         if (!smoke_shown(with_file[i]) || !IsWindowEnabled(native(with_file[i])) != !loaded) return __LINE__ * 100 + (unsigned int)i;
-    for (i = 0; i < sizeof(hidden) / sizeof(hidden[0]); ++i) if (smoke_shown(hidden[i])) return __LINE__ * 100 + (unsigned int)i;
+    for (i = 0; i < sizeof(hidden) / sizeof(hidden[0]); ++i)
+        if (smoke_shown(hidden[i])) return __LINE__ * 100 + (unsigned int)i;
     /* The tag filters stay in the scan bar (Q3); Update database is shown
      * above Shortcuts, enabled only with an updater (Q2). */
     if (!smoke_shown(g_includeTags) || !smoke_shown(g_excludeTags) || !smoke_shown(g_reportButton)) return __LINE__;
@@ -3112,20 +3359,27 @@ static unsigned int smoke_view_controls(int advanced, int loaded)
     /* Base address and Entry point belong to the Advanced view. */
     if (!base || !entry || smoke_shown(base) != advanced || smoke_shown(entry) != advanced) return __LINE__;
     if (xxwidgets_side_panel_get_checked(g_side, XXWIDGETS_DIE_SIDE_ADVANCED, &checked) != XXWIDGETS_OK || checked != advanced ||
-        xxwidgets_die_main_panel_get_advanced(g_main) != advanced || gui_frontend_advanced() != advanced) return __LINE__;
+        xxwidgets_die_main_panel_get_advanced(g_main) != advanced || gui_frontend_advanced() != advanced)
+        return __LINE__;
     {
         /* DIE's arrangement: the file name bar on top; the engine row over the
          * tree, the scan bar under it; the right column beside them, Update
          * database over Shortcuts, Options, About and Exit, in that order. */
         RECT path, fact, results, signatures, adv, update, shortcuts, options, about, exit;
-        GetWindowRect(native(g_path), &path); GetWindowRect(native(g_facts[0]), &fact);
-        GetWindowRect(native(g_results), &results); GetWindowRect(native(g_signaturesButton), &signatures);
-        GetWindowRect(native(g_advanced), &adv); GetWindowRect(native(g_updateButton), &update);
-        GetWindowRect(native(g_shortcutsButton), &shortcuts); GetWindowRect(native(g_options), &options);
-        GetWindowRect(native(g_aboutButton), &about); GetWindowRect(native(g_exit), &exit);
-        if (path.bottom > adv.top || path.bottom > fact.top || fact.bottom > results.top || results.bottom > signatures.top ||
-            results.right > adv.left || adv.bottom > update.top || update.bottom > shortcuts.top || shortcuts.bottom > options.top ||
-            options.bottom > about.top || about.bottom > exit.top || exit.left < results.right) return __LINE__;
+        GetWindowRect(native(g_path), &path);
+        GetWindowRect(native(g_facts[0]), &fact);
+        GetWindowRect(native(g_results), &results);
+        GetWindowRect(native(g_signaturesButton), &signatures);
+        GetWindowRect(native(g_advanced), &adv);
+        GetWindowRect(native(g_updateButton), &update);
+        GetWindowRect(native(g_shortcutsButton), &shortcuts);
+        GetWindowRect(native(g_options), &options);
+        GetWindowRect(native(g_aboutButton), &about);
+        GetWindowRect(native(g_exit), &exit);
+        if (path.bottom > adv.top || path.bottom > fact.top || fact.bottom > results.top || results.bottom > signatures.top || results.right > adv.left ||
+            adv.bottom > update.top || update.bottom > shortcuts.top || shortcuts.bottom > options.top || options.bottom > about.top || about.bottom > exit.top ||
+            exit.left < results.right)
+            return __LINE__;
     }
     return 0;
 }
@@ -3152,8 +3406,7 @@ static unsigned int smoke_views(int loaded)
     if ((code = smoke_view_controls(1, loaded)) != 0) return code;
     if (!smoke_main_layout(1)) return __LINE__;
     GetWindowRect(native(g_window), &advanced);
-    if (advanced.right - advanced.left < simple.right - simple.left || advanced.bottom - advanced.top < simple.bottom - simple.top)
-        return __LINE__;
+    if (advanced.right - advanced.left < simple.right - simple.left || advanced.bottom - advanced.top < simple.bottom - simple.top) return __LINE__;
     if (smoke_click_action(g_advanced, 1) != XXWIDGETS_DIE_ACTION_NONE) return __LINE__;
     if ((code = smoke_view_controls(0, loaded)) != 0) return code;
     if (!smoke_main_layout(1)) return __LINE__;
@@ -3196,16 +3449,29 @@ static int smoke_error_dialog(void)
  * the tools' keys too, so they stay reachable without their old buttons. */
 static int smoke_shortcut_keys(void)
 {
-    static const struct { UINT key; int control, shift; gui_shortcut_action action; } keys[] = {
-        {VK_F5, 0, 0, GUI_SHORTCUT_SCAN}, {'O', 1, 0, GUI_SHORTCUT_OPEN}, {VK_F1, 0, 0, GUI_SHORTCUT_ABOUT},
-        {VK_F2, 0, 0, GUI_SHORTCUT_OPTIONS}, {'D', 1, 1, GUI_SHORTCUT_DATABASE_PATHS}, {VK_F3, 0, 0, GUI_SHORTCUT_DATABASE_PATHS},
-        {VK_F4, 0, 0, GUI_SHORTCUT_FONTS},
-        {'I', 1, 0, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_FILE_INFORMATION}, {'E', 1, 0, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_ENTROPY},
-        {'H', 1, 0, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_HASH}, {'S', 1, 1, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_STRINGS},
-        {'X', 1, 1, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_HEX_VIEW}, {'A', 1, 1, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_DISASM},
-        {'M', 1, 0, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_MEMORY_MAP}, {'I', 1, 1, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_IMPORTS},
-        {'E', 1, 1, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_EXPORTS}, {'U', 1, 1, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_RESOURCES},
-        {'Y', 1, 1, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_SYMBOLS}, {'T', 1, 1, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_EXTRACTOR}};
+    static const struct {
+        UINT key;
+        int control, shift;
+        gui_shortcut_action action;
+    } keys[] = {{VK_F5, 0, 0, GUI_SHORTCUT_SCAN},
+                {'O', 1, 0, GUI_SHORTCUT_OPEN},
+                {VK_F1, 0, 0, GUI_SHORTCUT_ABOUT},
+                {VK_F2, 0, 0, GUI_SHORTCUT_OPTIONS},
+                {'D', 1, 1, GUI_SHORTCUT_DATABASE_PATHS},
+                {VK_F3, 0, 0, GUI_SHORTCUT_DATABASE_PATHS},
+                {VK_F4, 0, 0, GUI_SHORTCUT_FONTS},
+                {'I', 1, 0, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_FILE_INFORMATION},
+                {'E', 1, 0, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_ENTROPY},
+                {'H', 1, 0, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_HASH},
+                {'S', 1, 1, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_STRINGS},
+                {'X', 1, 1, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_HEX_VIEW},
+                {'A', 1, 1, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_DISASM},
+                {'M', 1, 0, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_MEMORY_MAP},
+                {'I', 1, 1, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_IMPORTS},
+                {'E', 1, 1, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_EXPORTS},
+                {'U', 1, 1, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_RESOURCES},
+                {'Y', 1, 1, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_SYMBOLS},
+                {'T', 1, 1, GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_EXTRACTOR}};
     size_t i;
     for (i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i)
         if (smoke_shortcut(keys[i].key, keys[i].control, keys[i].shift) != SHORTCUT_ACTION(keys[i].action)) {
@@ -3243,38 +3509,32 @@ static int run_smoke_steps(void)
     /* Its activation settles before the first dialog takes over. */
     for (ULONGLONG settled = GetTickCount64() + 300; GetTickCount64() < settled;) (void)xxwidgets_app_poll(g_app, 30);
     g_pending = ACTION_NONE;
-    if (!GetClassNameW(native(g_type), class_name, 32) || lstrcmpiW(class_name, L"COMBOBOX") ||
-        !GetClassNameW(native(g_flags), class_name, 32) || lstrcmpiW(class_name, L"COMBOBOX") ||
-        !GetClassNameW(native(g_databases), class_name, 32) || lstrcmpiW(class_name, L"COMBOBOX") ||
-        !GetClassNameW(native(g_includeTags), class_name, 32) || lstrcmpiW(class_name, L"COMBOBOX") ||
-        !GetClassNameW(native(g_excludeTags), class_name, 32) || lstrcmpiW(class_name, L"COMBOBOX")) return smoke_failed(__LINE__);
+    if (!GetClassNameW(native(g_type), class_name, 32) || lstrcmpiW(class_name, L"COMBOBOX") || !GetClassNameW(native(g_flags), class_name, 32) ||
+        lstrcmpiW(class_name, L"COMBOBOX") || !GetClassNameW(native(g_databases), class_name, 32) || lstrcmpiW(class_name, L"COMBOBOX") ||
+        !GetClassNameW(native(g_includeTags), class_name, 32) || lstrcmpiW(class_name, L"COMBOBOX") || !GetClassNameW(native(g_excludeTags), class_name, 32) ||
+        lstrcmpiW(class_name, L"COMBOBOX"))
+        return smoke_failed(__LINE__);
     /* No file yet: both views, the Advanced toggle, every control and the
      * layout (DIE_LOOK.md 3b.5). */
     if ((view = smoke_views(0)) != 0) return smoke_view_failed(__LINE__, view);
     if (!smoke_error_dialog()) return smoke_failed(__LINE__);
-    if (xxwidgets_widget_kind(g_results) != XXWIDGETS_TREEVIEW ||
-        xxwidgets_widget_kind(g_type) != XXWIDGETS_COMBOBOX ||
-        xxwidgets_widget_kind(g_flags) != XXWIDGETS_CHECKCOMBOBOX ||
-        xxwidgets_widget_kind(g_databases) != XXWIDGETS_CHECKCOMBOBOX ||
-        xxwidgets_widget_kind(g_includeTags) != XXWIDGETS_CHECKCOMBOBOX ||
-        xxwidgets_widget_kind(g_excludeTags) != XXWIDGETS_CHECKCOMBOBOX ||
-        xxwidgets_widget_kind(g_scan) != XXWIDGETS_BUTTON ||
-        xxwidgets_widget_kind(g_reportButton) != XXWIDGETS_BUTTON ||
-        xxwidgets_scan_panel_get_flags(g_panel, &flags) != XXWIDGETS_OK || flags != 7u ||
-        xxwidgets_scan_panel_get_databases(g_panel, &databases) != XXWIDGETS_OK || databases != XXWIDGETS_SCAN_DATABASE_CUSTOM ||
-        xxwidgets_scan_panel_set_results(g_panel, "Smoke file", &row, 1,
-            "Smoke report\nCompiler: Microsoft Visual C/C++ 19.29") != XXWIDGETS_OK ||
+    if (xxwidgets_widget_kind(g_results) != XXWIDGETS_TREEVIEW || xxwidgets_widget_kind(g_type) != XXWIDGETS_COMBOBOX ||
+        xxwidgets_widget_kind(g_flags) != XXWIDGETS_CHECKCOMBOBOX || xxwidgets_widget_kind(g_databases) != XXWIDGETS_CHECKCOMBOBOX ||
+        xxwidgets_widget_kind(g_includeTags) != XXWIDGETS_CHECKCOMBOBOX || xxwidgets_widget_kind(g_excludeTags) != XXWIDGETS_CHECKCOMBOBOX ||
+        xxwidgets_widget_kind(g_scan) != XXWIDGETS_BUTTON || xxwidgets_widget_kind(g_reportButton) != XXWIDGETS_BUTTON ||
+        xxwidgets_scan_panel_get_flags(g_panel, &flags) != XXWIDGETS_OK || flags != 7u || xxwidgets_scan_panel_get_databases(g_panel, &databases) != XXWIDGETS_OK ||
+        databases != XXWIDGETS_SCAN_DATABASE_CUSTOM ||
+        xxwidgets_scan_panel_set_results(g_panel, "Smoke file", &row, 1, "Smoke report\nCompiler: Microsoft Visual C/C++ 19.29") != XXWIDGETS_OK ||
         xxwidgets_scan_panel_count(g_panel) != 1 || TreeView_GetCount(native(g_results)) < 2 ||
-        xxwidgets_scan_panel_get_report(g_panel, NULL, 0, &report_length) != XXWIDGETS_OK ||
-        report_length <= 1) return smoke_failed(__LINE__);
+        xxwidgets_scan_panel_get_report(g_panel, NULL, 0, &report_length) != XXWIDGETS_OK || report_length <= 1)
+        return smoke_failed(__LINE__);
     if (gui_backend_signature_count() > 0) {
         SIZE_T include_size = 0, exclude_size = 0;
         char *include_tags, *exclude_tags;
         char status_text[512];
         size_t i, binary_index = SIZE_MAX;
         int type_id, binary_type = -1;
-        if (!xxwidgets_combobox_count(g_includeTags) ||
-            xxwidgets_combobox_count(g_includeTags) != xxwidgets_combobox_count(g_excludeTags) ||
+        if (!xxwidgets_combobox_count(g_includeTags) || xxwidgets_combobox_count(g_includeTags) != xxwidgets_combobox_count(g_excludeTags) ||
             xxwidgets_checkcombobox_set_checked(g_includeTags, 0, 1) != XXWIDGETS_OK ||
             xxwidgets_checkcombobox_set_checked(g_excludeTags, xxwidgets_combobox_count(g_excludeTags) - 1, 1) != XXWIDGETS_OK ||
             xxwidgets_scan_panel_get_include_tags(g_panel, NULL, 0, &include_size) != XXWIDGETS_OK || include_size <= 1 ||
@@ -3282,10 +3542,9 @@ static int run_smoke_steps(void)
             return smoke_failed(__LINE__);
         include_tags = (char *)HeapAlloc(GetProcessHeap(), 0, include_size);
         exclude_tags = (char *)HeapAlloc(GetProcessHeap(), 0, exclude_size);
-        if (!include_tags || !exclude_tags ||
-            xxwidgets_scan_panel_get_include_tags(g_panel, include_tags, include_size, NULL) != XXWIDGETS_OK ||
-            xxwidgets_scan_panel_get_exclude_tags(g_panel, exclude_tags, exclude_size, NULL) != XXWIDGETS_OK ||
-            !include_tags[0] || !exclude_tags[0] || !gui_backend_set_tag_filters(include_tags, exclude_tags)) {
+        if (!include_tags || !exclude_tags || xxwidgets_scan_panel_get_include_tags(g_panel, include_tags, include_size, NULL) != XXWIDGETS_OK ||
+            xxwidgets_scan_panel_get_exclude_tags(g_panel, exclude_tags, exclude_size, NULL) != XXWIDGETS_OK || !include_tags[0] || !exclude_tags[0] ||
+            !gui_backend_set_tag_filters(include_tags, exclude_tags)) {
             if (include_tags) HeapFree(GetProcessHeap(), 0, include_tags);
             if (exclude_tags) HeapFree(GetProcessHeap(), 0, exclude_tags);
             return smoke_failed(__LINE__);
@@ -3294,20 +3553,23 @@ static int run_smoke_steps(void)
         HeapFree(GetProcessHeap(), 0, exclude_tags);
         if (xxwidgets_checkcombobox_set_checked(g_includeTags, 0, 0) != XXWIDGETS_OK ||
             xxwidgets_checkcombobox_set_checked(g_excludeTags, xxwidgets_combobox_count(g_excludeTags) - 1, 0) != XXWIDGETS_OK ||
-            apply_panel_tag_filters() != XXWIDGETS_OK) return smoke_failed(__LINE__);
+            apply_panel_tag_filters() != XXWIDGETS_OK)
+            return smoke_failed(__LINE__);
         if (!SetWindowTextW(native(g_path), executable) || IsWindowEnabled(native(g_type))) return smoke_failed(__LINE__);
         smoke_trace("GUI smoke first self-scan");
         do_scan();
         smoke_trace("GUI smoke first self-scan complete");
-        if (xxwidgets_scan_panel_get_report(g_panel, NULL, 0, &report_length) != XXWIDGETS_OK ||
-            report_length <= 1 || !xxwidgets_scan_panel_count(g_panel) || TreeView_GetCount(native(g_results)) < 2 ||
-            selected_file_type(&type_id) != XXWIDGETS_OK || type_id != 0 ||
-            xxwidgets_combobox_count(g_type) < 3 || !IsWindowEnabled(native(g_type))) return smoke_failed(__LINE__);
+        if (xxwidgets_scan_panel_get_report(g_panel, NULL, 0, &report_length) != XXWIDGETS_OK || report_length <= 1 || !xxwidgets_scan_panel_count(g_panel) ||
+            TreeView_GetCount(native(g_results)) < 2 || selected_file_type(&type_id) != XXWIDGETS_OK || type_id != 0 || xxwidgets_combobox_count(g_type) < 3 ||
+            !IsWindowEnabled(native(g_type)))
+            return smoke_failed(__LINE__);
         for (i = 0; i < xxwidgets_combobox_count(g_type); ++i) {
             const xx_meta_string *record;
             if (xxwidgets_combobox_get_record(g_type, i, &record) != XXWIDGETS_OK) return smoke_failed(__LINE__);
             if (!lstrcmpiW(record->meta_string->data, L"Binary")) {
-                binary_index = i; binary_type = (int)record->var.val.u64; break;
+                binary_index = i;
+                binary_type = (int)record->var.val.u64;
+                break;
             }
         }
         if (binary_index == SIZE_MAX || binary_type <= 0) return smoke_failed(__LINE__);
@@ -3317,7 +3579,8 @@ static int run_smoke_steps(void)
         SendMessageW(native(g_type), CB_SETCURSEL, binary_index, 0);
         SendMessageW(native(g_window), WM_COMMAND, MAKEWPARAM(GetDlgCtrlID(native(g_type)), CBN_SELCHANGE), (LPARAM)native(g_type));
         if (g_pending != ACTION_DIE || g_pendingDie.id != XXWIDGETS_DIE_ACTION_FILE_TYPE || g_pendingDie.value != (int)binary_index ||
-            g_pendingDie.type_id != (uint64_t)binary_type) return smoke_failed(__LINE__);
+            g_pendingDie.type_id != (uint64_t)binary_type)
+            return smoke_failed(__LINE__);
         smoke_trace("GUI smoke binary self-scan");
         {
             int action = g_pending;
@@ -3326,8 +3589,8 @@ static int run_smoke_steps(void)
         }
         smoke_trace("GUI smoke binary self-scan complete");
         smoke_last_message(status_text, sizeof(status_text));
-        if (g_pending != ACTION_NONE || selected_file_type(&type_id) != XXWIDGETS_OK || type_id != binary_type ||
-            !strstr(status_text, "Scan complete (Binary)")) return smoke_failed(__LINE__);
+        if (g_pending != ACTION_NONE || selected_file_type(&type_id) != XXWIDGETS_OK || type_id != binary_type || !strstr(status_text, "Scan complete (Binary)"))
+            return smoke_failed(__LINE__);
         /* The preferred (most specific) type again: back to the type-0 scan. */
         SendMessageW(native(g_type), CB_SETCURSEL, g_fileTypes.preferred, 0);
         SendMessageW(native(g_window), WM_COMMAND, MAKEWPARAM(GetDlgCtrlID(native(g_type)), CBN_SELCHANGE), (LPARAM)native(g_type));
@@ -3339,20 +3602,24 @@ static int run_smoke_steps(void)
             run_pending(action);
         }
         smoke_trace("GUI smoke final self-scan complete");
-        if (g_pending != ACTION_NONE || selected_file_type(&type_id) != XXWIDGETS_OK || type_id != 0 ||
-            !xxwidgets_scan_panel_count(g_panel)) return smoke_failed(__LINE__);
+        if (g_pending != ACTION_NONE || selected_file_type(&type_id) != XXWIDGETS_OK || type_id != 0 || !xxwidgets_scan_panel_count(g_panel))
+            return smoke_failed(__LINE__);
         {
             /* DIE's S and ? columns: detection rows carry them; S opens the script. */
             size_t node, count = xxwidgets_treeview_count(g_results);
             xxwidgets_event press = {0};
-            for (node = 0; node < count && !(xxwidgets_treeview_node_marks(g_results, node) & 1u); ++node) {}
-            if (xxwidgets_treeview_mark_count(g_results) != 2 || node == count ||
-                lstrcmpA(xxwidgets_treeview_mark_label(g_results, 0), "S") || lstrcmpA(xxwidgets_treeview_mark_label(g_results, 1), "?") ||
-                !(xxwidgets_treeview_node_marks(g_results, node) & 2u) || xxwidgets_treeview_node_marks(g_results, 0))
+            for (node = 0; node < count && !(xxwidgets_treeview_node_marks(g_results, node) & 1u); ++node) {
+            }
+            if (xxwidgets_treeview_mark_count(g_results) != 2 || node == count || lstrcmpA(xxwidgets_treeview_mark_label(g_results, 0), "S") ||
+                lstrcmpA(xxwidgets_treeview_mark_label(g_results, 1), "?") || !(xxwidgets_treeview_node_marks(g_results, node) & 2u) ||
+                xxwidgets_treeview_node_marks(g_results, 0))
                 return smoke_failed(__LINE__);
             /* Strict: the backend now opens the picker on a start path with '/'. */
             static const smoke_inner open_picker[] = {{L"Open", L"Open DIE signature", NULL}};
-            press.type = XXWIDGETS_EVENT_CLICK; press.widget = g_results; press.value = (int)node; press.x = 0;
+            press.type = XXWIDGETS_EVENT_CLICK;
+            press.widget = g_results;
+            press.value = (int)node;
+            press.x = 0;
             if (!gui_tree_event(g_panel, &press) || !smoke_begin(L"Signatures", SMOKE_SIGNATURE)) return smoke_failed(__LINE__);
             g_smokeInner = open_picker;
             g_smokeInnerCount = 1;
@@ -3361,8 +3628,8 @@ static int run_smoke_steps(void)
         {
             /* The Signatures button opens the editor on the first signature; an
              * edited signature asks before Open discards it. */
-            if (smoke_click_action(g_signaturesButton, 1) != XXWIDGETS_DIE_ACTION_SIGNATURES ||
-                !smoke_begin(L"Signatures", SMOKE_SIGNATURE_CONFIRM) || gui_tree_process(g_window) != NULL || !smoke_finish())
+            if (smoke_click_action(g_signaturesButton, 1) != XXWIDGETS_DIE_ACTION_SIGNATURES || !smoke_begin(L"Signatures", SMOKE_SIGNATURE_CONFIRM) ||
+                gui_tree_process(g_window) != NULL || !smoke_finish())
                 return smoke_failed(__LINE__);
         }
         {
@@ -3375,8 +3642,9 @@ static int run_smoke_steps(void)
         g_smokeEscape = 1;
         if (gui_tree_process(g_window) != NULL || !smoke_finish()) return smoke_failed(__LINE__);
         /* Scan directory on the scratch folder, with a look at its Scan options. */
-        if (smoke_click_action(g_directoryButton, 1) != XXWIDGETS_DIE_ACTION_DIRECTORY ||
-            !smoke_begin(L"Scan directory", SMOKE_DIRECTORY) || gui_tree_process(g_window) != NULL || !smoke_finish()) return smoke_failed(__LINE__);
+        if (smoke_click_action(g_directoryButton, 1) != XXWIDGETS_DIE_ACTION_DIRECTORY || !smoke_begin(L"Scan directory", SMOKE_DIRECTORY) ||
+            gui_tree_process(g_window) != NULL || !smoke_finish())
+            return smoke_failed(__LINE__);
         {
             /* Recent files lists the scanned file; OK picks it. */
             char chosen[GUI_PREFERENCE_PATH_MAX] = "", *expected = xx_str_unicode_to_utf8(executable);
@@ -3395,50 +3663,46 @@ static int run_smoke_steps(void)
     /* Options > Scan offers the main and the custom database only. */
     if (!smoke_begin_page(L"Scan", SMOKE_SCAN_PAGE, 1) || do_settings(GUI_OPTIONS_FONTS) != 0 || !smoke_finish()) return smoke_failed(__LINE__);
     if (!smoke_begin_page(L"Scan", SMOKE_SCAN_CANCEL, 1) || do_settings(GUI_OPTIONS_FONTS) != 0 || !smoke_finish() || !g_bFlagDeep ||
-        gui_backend_get_scan_modes() != GUI_SCAN_OVERLAYS) return smoke_failed(__LINE__);
+        gui_backend_get_scan_modes() != GUI_SCAN_OVERLAYS)
+        return smoke_failed(__LINE__);
     if (xxwidgets_scan_panel_get_flags(g_panel, &flags) != XXWIDGETS_OK || flags != 7u) return smoke_failed(__LINE__);
     if (!smoke_begin_page(L"Scan", SMOKE_OPTIONS_ESCAPE, 0) || do_settings(GUI_OPTIONS_SCAN) != 0 || !smoke_finish()) return smoke_failed(__LINE__);
     if (!smoke_begin_page(L"Scan", SMOKE_OPTIONS_CLOSE, 0) || do_settings(GUI_OPTIONS_SCAN) != 0 || !smoke_finish()) return smoke_failed(__LINE__);
-    if (!smoke_begin_page(L"Scan", SMOKE_SCAN_OK, 0) || do_settings(GUI_OPTIONS_SCAN) != 1 || !smoke_finish() || g_bFlagDeep ||
-        g_optionsPage != GUI_OPTIONS_SCAN) return smoke_failed(__LINE__);
-    if (gui_backend_get_scan_modes() != (GUI_SCAN_ALL_TYPES | GUI_SCAN_RESOURCES | GUI_SCAN_ARCHIVES) ||
-        !gui_backend_set_scan_modes(GUI_SCAN_OVERLAYS)) return smoke_failed(__LINE__);
-    if (xxwidgets_scan_panel_get_flags(g_panel, &flags) != XXWIDGETS_OK || flags != 6u ||
-        xxwidgets_scan_panel_get_databases(g_panel, &databases) != XXWIDGETS_OK || databases != XXWIDGETS_SCAN_DATABASE_CUSTOM) return smoke_failed(__LINE__);
+    if (!smoke_begin_page(L"Scan", SMOKE_SCAN_OK, 0) || do_settings(GUI_OPTIONS_SCAN) != 1 || !smoke_finish() || g_bFlagDeep || g_optionsPage != GUI_OPTIONS_SCAN)
+        return smoke_failed(__LINE__);
+    if (gui_backend_get_scan_modes() != (GUI_SCAN_ALL_TYPES | GUI_SCAN_RESOURCES | GUI_SCAN_ARCHIVES) || !gui_backend_set_scan_modes(GUI_SCAN_OVERLAYS))
+        return smoke_failed(__LINE__);
+    if (xxwidgets_scan_panel_get_flags(g_panel, &flags) != XXWIDGETS_OK || flags != 6u || xxwidgets_scan_panel_get_databases(g_panel, &databases) != XXWIDGETS_OK ||
+        databases != XXWIDGETS_SCAN_DATABASE_CUSTOM)
+        return smoke_failed(__LINE__);
     {
         gui_backend_optimization_options before, after;
         gui_backend_optimization_capabilities capabilities;
-        if (!gui_backend_get_optimization_options(&before) ||
-            !gui_backend_get_optimization_capabilities(&capabilities) ||
+        if (!gui_backend_get_optimization_options(&before) || !gui_backend_get_optimization_capabilities(&capabilities) ||
             !smoke_begin_page(L"Features", SMOKE_FEATURES_CANCEL, 0) || do_settings(GUI_OPTIONS_OPTIMIZATION) != 0 || !smoke_finish() ||
-            !gui_backend_get_optimization_options(&after) ||
-            after.buffer_size != before.buffer_size || after.file_buffer_size != before.file_buffer_size ||
-            after.use_sse2 != before.use_sse2 || after.use_avx2 != before.use_avx2 ||
-            after.use_sse42 != before.use_sse42 || after.use_aes != before.use_aes || after.use_sha != before.use_sha ||
-            after.use_vpclmulqdq != before.use_vpclmulqdq || after.use_neon != before.use_neon ||
-            after.use_arm_crc32 != before.use_arm_crc32 || after.use_arm_crypto != before.use_arm_crypto ||
-            after.use_arm_dotprod != before.use_arm_dotprod || after.use_arm_pmull != before.use_arm_pmull) return smoke_failed(__LINE__);
+            !gui_backend_get_optimization_options(&after) || after.buffer_size != before.buffer_size || after.file_buffer_size != before.file_buffer_size ||
+            after.use_sse2 != before.use_sse2 || after.use_avx2 != before.use_avx2 || after.use_sse42 != before.use_sse42 || after.use_aes != before.use_aes ||
+            after.use_sha != before.use_sha || after.use_vpclmulqdq != before.use_vpclmulqdq || after.use_neon != before.use_neon ||
+            after.use_arm_crc32 != before.use_arm_crc32 || after.use_arm_crypto != before.use_arm_crypto || after.use_arm_dotprod != before.use_arm_dotprod ||
+            after.use_arm_pmull != before.use_arm_pmull)
+            return smoke_failed(__LINE__);
         if (!smoke_begin_page(L"Features", SMOKE_FEATURES_OK, 0) || do_settings(GUI_OPTIONS_OPTIMIZATION) != 1 || !smoke_finish() ||
-            !gui_backend_get_optimization_options(&after) ||
-            after.buffer_size != 1024 || after.file_buffer_size != 2048 ||
-            after.use_sse2 || after.use_avx2 || after.use_sse42 || after.use_aes || after.use_sha || after.use_vpclmulqdq ||
-            after.use_neon || after.use_arm_crc32 || after.use_arm_crypto || after.use_arm_dotprod || after.use_arm_pmull) return smoke_failed(__LINE__);
+            !gui_backend_get_optimization_options(&after) || after.buffer_size != 1024 || after.file_buffer_size != 2048 || after.use_sse2 || after.use_avx2 ||
+            after.use_sse42 || after.use_aes || after.use_sha || after.use_vpclmulqdq || after.use_neon || after.use_arm_crc32 || after.use_arm_crypto ||
+            after.use_arm_dotprod || after.use_arm_pmull)
+            return smoke_failed(__LINE__);
         if (!smoke_begin_page(L"Features", SMOKE_FEATURES_DEFAULT, 1) || do_settings(GUI_OPTIONS_HEX) != 1 || !smoke_finish() ||
-            !gui_backend_get_optimization_options(&after) ||
-            after.buffer_size != 65536 || after.file_buffer_size != 65536 ||
-            after.use_sse2 != capabilities.sse2 || after.use_avx2 != capabilities.avx2 ||
-            after.use_sse42 != capabilities.sse42 || after.use_aes != capabilities.aes ||
-            after.use_sha != capabilities.sha || after.use_vpclmulqdq != capabilities.vpclmulqdq ||
-            after.use_neon != capabilities.neon || after.use_arm_crc32 != capabilities.arm_crc32 ||
+            !gui_backend_get_optimization_options(&after) || after.buffer_size != 65536 || after.file_buffer_size != 65536 || after.use_sse2 != capabilities.sse2 ||
+            after.use_avx2 != capabilities.avx2 || after.use_sse42 != capabilities.sse42 || after.use_aes != capabilities.aes || after.use_sha != capabilities.sha ||
+            after.use_vpclmulqdq != capabilities.vpclmulqdq || after.use_neon != capabilities.neon || after.use_arm_crc32 != capabilities.arm_crc32 ||
             after.use_arm_crypto != capabilities.arm_crypto || after.use_arm_dotprod != capabilities.arm_dotprod || after.use_arm_pmull != capabilities.arm_pmull ||
-            !gui_backend_set_optimization_options(&before)) return smoke_failed(__LINE__);
+            !gui_backend_set_optimization_options(&before))
+            return smoke_failed(__LINE__);
     }
     /* The color editor owns a second modal loop; closing it must restore
      * Options while every other application window remains blocked. */
-    if (!smoke_begin_page(L"Scan", SMOKE_SCAN_COLORS, 0) ||
-        do_settings(GUI_OPTIONS_SCAN) != 0 || !smoke_finish()) return smoke_failed(__LINE__);
-    if (!smoke_begin_page(L"Scan", SMOKE_COLORS_OK, 0) ||
-        do_settings(GUI_OPTIONS_SCAN) != 0 || !smoke_finish()) return smoke_failed(__LINE__);
+    if (!smoke_begin_page(L"Scan", SMOKE_SCAN_COLORS, 0) || do_settings(GUI_OPTIONS_SCAN) != 0 || !smoke_finish()) return smoke_failed(__LINE__);
+    if (!smoke_begin_page(L"Scan", SMOKE_COLORS_OK, 0) || do_settings(GUI_OPTIONS_SCAN) != 0 || !smoke_finish()) return smoke_failed(__LINE__);
     if (!smoke_options_pages()) return smoke_failed(__LINE__);
     {
         /* A main database folder that does not exist is refused, and nothing changes. */
@@ -3467,18 +3731,19 @@ static int run_smoke_steps(void)
     }
     {
         xxwidgets_font_options before, after;
-        if (xxwidgets_app_get_font_options(g_app, &before) != XXWIDGETS_OK ||
-            !smoke_begin_page(L"Fonts", SMOKE_FONTS_CANCEL, 0) || do_settings(GUI_OPTIONS_FONTS) != 0 || !smoke_finish() ||
-            xxwidgets_app_get_font_options(g_app, &after) != XXWIDGETS_OK || memcmp(&before, &after, sizeof(before))) return smoke_failed(__LINE__);
+        if (xxwidgets_app_get_font_options(g_app, &before) != XXWIDGETS_OK || !smoke_begin_page(L"Fonts", SMOKE_FONTS_CANCEL, 0) || do_settings(GUI_OPTIONS_FONTS) != 0 ||
+            !smoke_finish() || xxwidgets_app_get_font_options(g_app, &after) != XXWIDGETS_OK || memcmp(&before, &after, sizeof(before)))
+            return smoke_failed(__LINE__);
         if (!smoke_begin_page(L"Fonts", SMOKE_FONTS_OK, 1) || do_settings(GUI_OPTIONS_SCAN) != 1 || !smoke_finish() ||
-            xxwidgets_app_get_font_options(g_app, &after) != XXWIDGETS_OK || !memcmp(&before, &after, sizeof(before))) return smoke_failed(__LINE__);
+            xxwidgets_app_get_font_options(g_app, &after) != XXWIDGETS_OK || !memcmp(&before, &after, sizeof(before)))
+            return smoke_failed(__LINE__);
         /* Two larger fonts: at 12 points every dialog is checked in full (text
          * and overlaps too); at 24 points, where the cells stop growing on a
          * common screen (an Options dialog must fit it), placement and focus. */
         for (unsigned int pass = 0; pass < 2; ++pass) {
             xxwidgets_font_options large = after;
-            xxwidgets_widget *buttons[] = {g_scan, g_options, g_aboutButton, g_reportButton, g_signaturesButton, g_directoryButton, g_logButton,
-                                           g_updateButton, g_shortcutsButton, g_exit};
+            xxwidgets_widget *buttons[] = {g_scan,      g_options,      g_aboutButton,     g_reportButton, g_signaturesButton, g_directoryButton,
+                                           g_logButton, g_updateButton, g_shortcutsButton, g_exit};
             RECT original, button_bounds;
             size_t i;
             large.fonts[XXWIDGETS_FONT_CONTROLS].point_size = pass ? 24 : 12;
@@ -3517,46 +3782,43 @@ static int run_smoke_steps(void)
             {
                 TEXTMETRICW metrics = control_font_metrics(g_scan);
                 RECT work, frame = {0, 0, 0, 0};
-                g_smokeFontSized = !pass && SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0) &&
-                    AdjustWindowRectEx(&frame, WS_OVERLAPPEDWINDOW, FALSE, 0) &&
-                    35 * (metrics.tmHeight + metrics.tmExternalLeading + 4) + frame.bottom - frame.top <= work.bottom - work.top &&
-                    120 * (metrics.tmAveCharWidth + 1) + frame.right - frame.left <= work.right - work.left;
+                g_smokeFontSized = !pass && SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0) && AdjustWindowRectEx(&frame, WS_OVERLAPPEDWINDOW, FALSE, 0) &&
+                                   35 * (metrics.tmHeight + metrics.tmExternalLeading + 4) + frame.bottom - frame.top <= work.bottom - work.top &&
+                                   120 * (metrics.tmAveCharWidth + 1) + frame.right - frame.left <= work.right - work.left;
                 if (!pass && !g_smokeFontSized) smoke_trace("GUI smoke: the 12 pt cells do not fit this screen; text is not measured");
             }
             {
                 gui_backend_optimization_options optimization_before, optimization_after;
-                if (!gui_backend_get_optimization_options(&optimization_before) ||
-                    !smoke_begin_page(L"Features", SMOKE_FEATURES_CANCEL, 0) || do_settings(GUI_OPTIONS_OPTIMIZATION) != 0 || !smoke_finish() ||
-                    !gui_backend_get_optimization_options(&optimization_after) ||
-                    optimization_after.buffer_size != optimization_before.buffer_size ||
-                    optimization_after.file_buffer_size != optimization_before.file_buffer_size ||
-                    optimization_after.use_sse2 != optimization_before.use_sse2 ||
-                    optimization_after.use_avx2 != optimization_before.use_avx2 ||
-                    optimization_after.use_sse42 != optimization_before.use_sse42 ||
-                    optimization_after.use_aes != optimization_before.use_aes ||
-                    optimization_after.use_sha != optimization_before.use_sha ||
-                    optimization_after.use_vpclmulqdq != optimization_before.use_vpclmulqdq ||
-                    optimization_after.use_neon != optimization_before.use_neon ||
-                    optimization_after.use_arm_crc32 != optimization_before.use_arm_crc32 ||
+                if (!gui_backend_get_optimization_options(&optimization_before) || !smoke_begin_page(L"Features", SMOKE_FEATURES_CANCEL, 0) ||
+                    do_settings(GUI_OPTIONS_OPTIMIZATION) != 0 || !smoke_finish() || !gui_backend_get_optimization_options(&optimization_after) ||
+                    optimization_after.buffer_size != optimization_before.buffer_size || optimization_after.file_buffer_size != optimization_before.file_buffer_size ||
+                    optimization_after.use_sse2 != optimization_before.use_sse2 || optimization_after.use_avx2 != optimization_before.use_avx2 ||
+                    optimization_after.use_sse42 != optimization_before.use_sse42 || optimization_after.use_aes != optimization_before.use_aes ||
+                    optimization_after.use_sha != optimization_before.use_sha || optimization_after.use_vpclmulqdq != optimization_before.use_vpclmulqdq ||
+                    optimization_after.use_neon != optimization_before.use_neon || optimization_after.use_arm_crc32 != optimization_before.use_arm_crc32 ||
                     optimization_after.use_arm_crypto != optimization_before.use_arm_crypto ||
                     optimization_after.use_arm_dotprod != optimization_before.use_arm_dotprod || optimization_after.use_arm_pmull != optimization_before.use_arm_pmull) {
                     g_smokeFontSized = 1;
                     return smoke_failed(__LINE__);
                 }
             }
-            if (!smoke_options_pages() || !smoke_begin(L"About", SMOKE_ABOUT_ESCAPE) ||
-                xxwidgets_about_dialog_show(g_about, g_window) != XXWIDGETS_OK || !smoke_finish() ||
-                !smoke_begin(L"Scan report", SMOKE_REPORT)) { g_smokeFontSized = 1; return smoke_failed(__LINE__); }
+            if (!smoke_options_pages() || !smoke_begin(L"About", SMOKE_ABOUT_ESCAPE) || xxwidgets_about_dialog_show(g_about, g_window) != XXWIDGETS_OK ||
+                !smoke_finish() || !smoke_begin(L"Scan report", SMOKE_REPORT)) {
+                g_smokeFontSized = 1;
+                return smoke_failed(__LINE__);
+            }
             status = xxwidgets_scan_panel_show_report(g_panel);
-            if (!smoke_finish() || status != XXWIDGETS_OK || !smoke_begin(L"Hash", SMOKE_HASH)) { g_smokeFontSized = 1; return smoke_failed(__LINE__); }
+            if (!smoke_finish() || status != XXWIDGETS_OK || !smoke_begin(L"Hash", SMOKE_HASH)) {
+                g_smokeFontSized = 1;
+                return smoke_failed(__LINE__);
+            }
             g_smokeEscape = 1;
             do_hash();
             g_smokeFontSized = 1;
             if (!smoke_finish()) return smoke_failed(__LINE__);
-            if (xxwidgets_app_set_font_options(g_app, &after) != XXWIDGETS_OK ||
-                xxwidgets_die_main_panel_retranslate(g_main) != XXWIDGETS_OK) return smoke_failed(__LINE__);
-            SetWindowPos(native(g_window), NULL, 0, 0, original.right - original.left,
-                original.bottom - original.top, SWP_NOMOVE | SWP_NOZORDER);
+            if (xxwidgets_app_set_font_options(g_app, &after) != XXWIDGETS_OK || xxwidgets_die_main_panel_retranslate(g_main) != XXWIDGETS_OK)
+                return smoke_failed(__LINE__);
+            SetWindowPos(native(g_window), NULL, 0, 0, original.right - original.left, original.bottom - original.top, SWP_NOMOVE | SWP_NOZORDER);
         }
         if (!smoke_begin_page(L"File", SMOKE_FILE_CANCEL, 0) || do_settings(GUI_OPTIONS_FILE) != 0 || !smoke_finish()) return smoke_failed(__LINE__);
     }
@@ -3588,7 +3850,9 @@ static int run_smoke_steps(void)
         if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
         utf8 = passed ? xx_str_unicode_to_utf8(path) : NULL;
         if (!utf8 || !smoke_begin(L"Strings", SMOKE_STRINGS_CONFIG)) {
-            xx_str_free(utf8); DeleteFileW(path); return smoke_failed(__LINE__);
+            xx_str_free(utf8);
+            DeleteFileW(path);
+            return smoke_failed(__LINE__);
         }
         status = gui_strings_show(g_window, utf8);
         passed = smoke_finish();
@@ -3623,8 +3887,11 @@ static int run_smoke_steps(void)
     {
         xx_symbol_record record = {0};
         xxwidgets_symbols_data snapshot;
-        record.name = "CDIESymbol"; record.file_name = "test.c"; record.kind = XX_SYMBOL_KIND_FUNCTION;
-        record.binding = XX_SYMBOL_BINDING_GLOBAL; record.address = UINT64_C(0x140001000);
+        record.name = "CDIESymbol";
+        record.file_name = "test.c";
+        record.kind = XX_SYMBOL_KIND_FUNCTION;
+        record.binding = XX_SYMBOL_BINDING_GLOBAL;
+        record.address = UINT64_C(0x140001000);
         snapshot = (xxwidgets_symbols_data){"synthetic fixture", "PE", 16, &record, 1};
         if (!smoke_begin(L"Symbols", SMOKE_SYMBOLS)) return smoke_failed(__LINE__);
         g_smokeExpect = L"CDIESymbol";
@@ -3653,8 +3920,8 @@ static int run_smoke_steps(void)
     }
     /* Each tool from its button's function again, closed with Escape. */
     for (size_t i = 0; i < sizeof(g_smokeTools) / sizeof(g_smokeTools[0]); ++i) {
-        if (!SetWindowTextW(native(g_path), g_smokeTools[i].fixture ? g_smokeElf : executable) ||
-            !smoke_begin(g_smokeTools[i].title, g_smokeTools[i].action)) return smoke_failed(__LINE__);
+        if (!SetWindowTextW(native(g_path), g_smokeTools[i].fixture ? g_smokeElf : executable) || !smoke_begin(g_smokeTools[i].title, g_smokeTools[i].action))
+            return smoke_failed(__LINE__);
         g_smokeEscape = 1;
         if (g_smokeTools[i].fixture) g_smokeExpect = L"Direct";
         g_smokeTools[i].open();
@@ -3665,10 +3932,13 @@ static int run_smoke_steps(void)
         /* The tools' own pickers and forms, each opened and cancelled, then Escape. */
         static const smoke_inner strings[] = {{L"Save", L"Save filtered strings as CSV", NULL}};
         static const smoke_inner map[] = {{L"Save", L"Save Memory Map", NULL}};
-        static const smoke_inner extractor[] = {{L"Options...", L"Extractor types", NULL}, {L"Save", L"Save extractor results", NULL},
-            {L"Dump all", NULL, NULL}};
-        static const struct { const WCHAR *title; smoke_opener open; const smoke_inner *inner; size_t count; } inner_tools[] = {
-            {L"Strings", do_strings, strings, 1}, {L"Memory Map", do_memory_map, map, 1}, {L"Extractor", do_extractor, extractor, 3}};
+        static const smoke_inner extractor[] = {{L"Options...", L"Extractor types", NULL}, {L"Save", L"Save extractor results", NULL}, {L"Dump all", NULL, NULL}};
+        static const struct {
+            const WCHAR *title;
+            smoke_opener open;
+            const smoke_inner *inner;
+            size_t count;
+        } inner_tools[] = {{L"Strings", do_strings, strings, 1}, {L"Memory Map", do_memory_map, map, 1}, {L"Extractor", do_extractor, extractor, 3}};
         for (size_t i = 0; i < sizeof(inner_tools) / sizeof(inner_tools[0]); ++i) {
             if (!smoke_begin(inner_tools[i].title, SMOKE_TOOL_INNER)) return smoke_failed(__LINE__);
             g_smokeEscape = 1;
@@ -3701,9 +3971,10 @@ static int run_smoke_steps(void)
         char *report;
         int passed;
         if (xxwidgets_scan_panel_get_report(g_panel, NULL, 0, &report_length) != XXWIDGETS_OK || report_length <= 1 ||
-            !(report = (char *)HeapAlloc(GetProcessHeap(), 0, report_length))) return smoke_failed(__LINE__);
+            !(report = (char *)HeapAlloc(GetProcessHeap(), 0, report_length)))
+            return smoke_failed(__LINE__);
         passed = xxwidgets_scan_panel_get_report(g_panel, report, report_length, NULL) == XXWIDGETS_OK &&
-            smoke_shortcut('R', 1, 1) == SHORTCUT_ACTION(GUI_SHORTCUT_REPORT) && smoke_begin(L"Scan report", SMOKE_REPORT);
+                 smoke_shortcut('R', 1, 1) == SHORTCUT_ACTION(GUI_SHORTCUT_REPORT) && smoke_begin(L"Scan report", SMOKE_REPORT);
         if (passed) {
             g_smokeExpectText = report;
             do_report();
@@ -3729,11 +4000,12 @@ static int run_smoke_steps(void)
          * the path stays. */
         WCHAR path[32768] = L"", slashed[32768];
         lstrcpyW(slashed, executable);
-        for (WCHAR *s = slashed; *s; ++s) if (*s == L'\\') *s = L'/';
+        for (WCHAR *s = slashed; *s; ++s)
+            if (*s == L'\\') *s = L'/';
         if (!SetWindowTextW(native(g_path), slashed) || !smoke_begin(L"Select a file to scan", SMOKE_REPORT)) return smoke_failed(__LINE__);
         do_browse();
-        if (!smoke_finish() || !GetWindowTextW(native(g_path), path, 32768) || lstrcmpW(path, slashed) ||
-            !SetWindowTextW(native(g_path), executable)) return smoke_failed(__LINE__);
+        if (!smoke_finish() || !GetWindowTextW(native(g_path), path, 32768) || lstrcmpW(path, slashed) || !SetWindowTextW(native(g_path), executable))
+            return smoke_failed(__LINE__);
     }
     {
         /* Recent files without history: a note and Close. */
@@ -3744,7 +4016,10 @@ static int run_smoke_steps(void)
         empty = saved;
         empty.file.recent_files[0] = 0;
         gui_preferences_set(&empty);
-        if (!smoke_begin(L"Recent files", SMOKE_RECENT_EMPTY)) { gui_preferences_set(&saved); return smoke_failed(__LINE__); }
+        if (!smoke_begin(L"Recent files", SMOKE_RECENT_EMPTY)) {
+            gui_preferences_set(&saved);
+            return smoke_failed(__LINE__);
+        }
         status = gui_frontend_recent_dialog(g_window, chosen, sizeof(chosen), &accepted);
         gui_preferences_set(&saved);
         if (!smoke_finish() || status != XXWIDGETS_OK || accepted) return smoke_failed(__LINE__);
@@ -3753,10 +4028,11 @@ static int run_smoke_steps(void)
     /* Last: the cancelled scan leaves the panel empty. */
     if (!smoke_progress_cancel()) return smoke_failed(__LINE__);
     /* Options and Recent files have keys; the report key needs a report. */
-    if (smoke_shortcut(VK_F2, 0, 0) != SHORTCUT_ACTION(GUI_SHORTCUT_OPTIONS) ||
-        smoke_shortcut('R', 1, 0) != SHORTCUT_ACTION(GUI_SHORTCUT_RECENT) || !smoke_shortcut_keys()) return smoke_failed(__LINE__);
-    if (xxwidgets_scan_panel_clear(g_panel) != XXWIDGETS_OK ||
-        xxwidgets_scan_panel_count(g_panel) != 0 || TreeView_GetCount(native(g_results)) != 0) return smoke_failed(__LINE__);
+    if (smoke_shortcut(VK_F2, 0, 0) != SHORTCUT_ACTION(GUI_SHORTCUT_OPTIONS) || smoke_shortcut('R', 1, 0) != SHORTCUT_ACTION(GUI_SHORTCUT_RECENT) ||
+        !smoke_shortcut_keys())
+        return smoke_failed(__LINE__);
+    if (xxwidgets_scan_panel_clear(g_panel) != XXWIDGETS_OK || xxwidgets_scan_panel_count(g_panel) != 0 || TreeView_GetCount(native(g_results)) != 0)
+        return smoke_failed(__LINE__);
     if (IsWindowEnabled(native(g_reportButton)) || smoke_shortcut('R', 1, 1) != ACTION_NONE) return smoke_failed(__LINE__);
     if (!smoke_begin_ex(L"Scan report", SMOKE_UNEXPECTED, 0)) return smoke_failed(__LINE__);
     g_smokeOptional = 1;
@@ -3777,25 +4053,36 @@ static int run_smoke(void)
 
 static int is_smoke_requested(void)
 {
-    int argc=0, requested=0;
-    WCHAR **args=CommandLineToArgvW(GetCommandLineW(),&argc);
+    int argc = 0, requested = 0;
+    WCHAR **args = CommandLineToArgvW(GetCommandLineW(), &argc);
     if (!args) return 0;
-    for (int i=1;i<argc;++i) {
-        if (!lstrcmpW(args[i],L"--")) break;
-        if (!lstrcmpW(args[i],L"--translation")) { ++i; continue; }
-        if (!lstrcmpW(args[i],L"--smoke-update")) { ++i; continue; }
-        if (!lstrcmpW(args[i],L"--smoke-test")) requested=1;
+    for (int i = 1; i < argc; ++i) {
+        if (!lstrcmpW(args[i], L"--")) break;
+        if (!lstrcmpW(args[i], L"--translation")) {
+            ++i;
+            continue;
+        }
+        if (!lstrcmpW(args[i], L"--smoke-update")) {
+            ++i;
+            continue;
+        }
+        if (!lstrcmpW(args[i], L"--smoke-test")) requested = 1;
     }
-    LocalFree(args); return requested;
+    LocalFree(args);
+    return requested;
 }
 
 /* --smoke-update installed|current|failed|box-current|ask-no|ask-yes: 1 + the
  * index of the expected result in g_updateSmokeResults, 0 when absent, -1
  * when malformed. The last three run with the main window as the owner, as
  * on macOS: the "No updates." box is closed, the question answered No or Yes. */
-static const gui_update_result g_updateSmokeResults[] = {GUI_UPDATE_INSTALLED, GUI_UPDATE_CURRENT, GUI_UPDATE_FAILED,
-                                                         GUI_UPDATE_CURRENT, GUI_UPDATE_CANCELLED, GUI_UPDATE_INSTALLED};
-enum { UPDATE_SMOKE_BOX_CURRENT = 4, UPDATE_SMOKE_ASK_NO, UPDATE_SMOKE_ASK_YES };
+static const gui_update_result g_updateSmokeResults[] = {GUI_UPDATE_INSTALLED, GUI_UPDATE_CURRENT,   GUI_UPDATE_FAILED,
+                                                         GUI_UPDATE_CURRENT,   GUI_UPDATE_CANCELLED, GUI_UPDATE_INSTALLED};
+enum {
+    UPDATE_SMOKE_BOX_CURRENT = 4,
+    UPDATE_SMOKE_ASK_NO,
+    UPDATE_SMOKE_ASK_YES
+};
 static int g_updateSmoke;
 
 static int update_smoke_requested(void)
@@ -3806,7 +4093,10 @@ static int update_smoke_requested(void)
     if (!args) return -1;
     for (int i = 1; i < argc; ++i) {
         if (!lstrcmpW(args[i], L"--")) break;
-        if (!lstrcmpW(args[i], L"--translation") || !lstrcmpW(args[i], L"--settings-smoke-test")) { ++i; continue; }
+        if (!lstrcmpW(args[i], L"--translation") || !lstrcmpW(args[i], L"--settings-smoke-test")) {
+            ++i;
+            continue;
+        }
         if (!lstrcmpW(args[i], L"--smoke-update")) {
             requested = -1;
             if (++i < argc) {
@@ -3831,8 +4121,7 @@ static int run_update_smoke(void)
     int passed, dialogs = 1;
     /* The startup text must not pass for the outcome. */
     g_lastMessage[0] = 0;
-    if (IsWindowEnabled(native(g_updateButton)) && smoke_click_action(g_updateButton, 0) != XXWIDGETS_DIE_ACTION_UPDATE)
-        return smoke_failed(__LINE__);
+    if (IsWindowEnabled(native(g_updateButton)) && smoke_click_action(g_updateButton, 0) != XXWIDGETS_DIE_ACTION_UPDATE) return smoke_failed(__LINE__);
     if (g_updateSmoke >= UPDATE_SMOKE_BOX_CURRENT) {
         xxwidgets_widget_set_visible(g_window, 1);
         /* The text dialog is application-modal; the question is owned by the main window only. */
@@ -3859,7 +4148,10 @@ static int settings_smoke_requested(void)
     if (!args) return -1;
     for (int i = 1; i < argc; ++i) {
         if (!lstrcmpW(args[i], L"--")) break;
-        if (!lstrcmpW(args[i], L"--translation") || !lstrcmpW(args[i], L"--smoke-update")) { ++i; continue; }
+        if (!lstrcmpW(args[i], L"--translation") || !lstrcmpW(args[i], L"--smoke-update")) {
+            ++i;
+            continue;
+        }
         if (!lstrcmpW(args[i], L"--settings-smoke-test")) {
             requested = -1;
             if (++i < argc) {
@@ -3895,17 +4187,17 @@ static int run_settings_smoke(void)
     xxwidgets_widget_set_visible(g_window, 1);
     if (g_settingsSmoke == SETTINGS_SMOKE_WRITE || g_settingsSmoke == SETTINGS_SMOKE_CANCEL) {
         int accepted = g_settingsSmoke == SETTINGS_SMOKE_WRITE;
-        if (!smoke_begin_page(L"Scan", accepted ? SMOKE_SCAN_OK : SMOKE_SCAN_CANCEL, 0) ||
-            do_settings(GUI_OPTIONS_SCAN) != accepted || !smoke_finish()) return smoke_failed(__LINE__);
-        if (!smoke_begin_page(L"Fonts", accepted ? SMOKE_FONTS_OK : SMOKE_FONTS_CANCEL, 0) ||
-            do_settings(GUI_OPTIONS_FONTS) != accepted || !smoke_finish()) return smoke_failed(__LINE__);
-        if (!smoke_begin_page(L"Hex", accepted ? SMOKE_HEX_OK : SMOKE_HEX_CANCEL, 0) ||
-            do_settings(GUI_OPTIONS_HEX) != accepted || !smoke_finish()) return smoke_failed(__LINE__);
-        if (!smoke_begin_page(L"Features", accepted ? SMOKE_FEATURES_OK : SMOKE_FEATURES_CANCEL, 0) ||
-            do_settings(GUI_OPTIONS_OPTIMIZATION) != accepted || !smoke_finish()) return smoke_failed(__LINE__);
-    } else if (g_settingsSmoke == SETTINGS_SMOKE_DEFAULT) {
-        if (!smoke_begin_page(L"Features", SMOKE_FEATURES_DEFAULT, 0) || do_settings(GUI_OPTIONS_OPTIMIZATION) != 1 || !smoke_finish())
+        if (!smoke_begin_page(L"Scan", accepted ? SMOKE_SCAN_OK : SMOKE_SCAN_CANCEL, 0) || do_settings(GUI_OPTIONS_SCAN) != accepted || !smoke_finish())
             return smoke_failed(__LINE__);
+        if (!smoke_begin_page(L"Fonts", accepted ? SMOKE_FONTS_OK : SMOKE_FONTS_CANCEL, 0) || do_settings(GUI_OPTIONS_FONTS) != accepted || !smoke_finish())
+            return smoke_failed(__LINE__);
+        if (!smoke_begin_page(L"Hex", accepted ? SMOKE_HEX_OK : SMOKE_HEX_CANCEL, 0) || do_settings(GUI_OPTIONS_HEX) != accepted || !smoke_finish())
+            return smoke_failed(__LINE__);
+        if (!smoke_begin_page(L"Features", accepted ? SMOKE_FEATURES_OK : SMOKE_FEATURES_CANCEL, 0) || do_settings(GUI_OPTIONS_OPTIMIZATION) != accepted ||
+            !smoke_finish())
+            return smoke_failed(__LINE__);
+    } else if (g_settingsSmoke == SETTINGS_SMOKE_DEFAULT) {
+        if (!smoke_begin_page(L"Features", SMOKE_FEATURES_DEFAULT, 0) || do_settings(GUI_OPTIONS_OPTIMIZATION) != 1 || !smoke_finish()) return smoke_failed(__LINE__);
     }
     if (current_options(&values) != XXWIDGETS_OK) return smoke_failed(__LINE__);
     directory = cdie_app_dir();
@@ -3925,17 +4217,24 @@ static int run_settings_smoke(void)
 
 static xxwidgets_status load_translation(size_t *line)
 {
-    int argc=0;
-    char *path=NULL, *stored_path=NULL;
-    xxwidgets_status status=XXWIDGETS_OK;
-    WCHAR **args=CommandLineToArgvW(GetCommandLineW(),&argc);
+    int argc = 0;
+    char *path = NULL, *stored_path = NULL;
+    xxwidgets_status status = XXWIDGETS_OK;
+    WCHAR **args = CommandLineToArgvW(GetCommandLineW(), &argc);
     if (!args) return XXWIDGETS_OUT_OF_MEMORY;
-    for (int i=1;i<argc;++i) {
-        if (!lstrcmpW(args[i],L"--")) break;
-        if (!lstrcmpW(args[i],L"--translation")) {
-            if (++i >= argc || !args[i][0]) { status=XXWIDGETS_INVALID_ARGUMENT; break; }
-            xx_str_free(path); path=xx_str_unicode_to_utf8(args[i]);
-            if (!path) { status=XXWIDGETS_OUT_OF_MEMORY; break; }
+    for (int i = 1; i < argc; ++i) {
+        if (!lstrcmpW(args[i], L"--")) break;
+        if (!lstrcmpW(args[i], L"--translation")) {
+            if (++i >= argc || !args[i][0]) {
+                status = XXWIDGETS_INVALID_ARGUMENT;
+                break;
+            }
+            xx_str_free(path);
+            path = xx_str_unicode_to_utf8(args[i]);
+            if (!path) {
+                status = XXWIDGETS_OUT_OF_MEMORY;
+                break;
+            }
         }
     }
     if (!path && !_wgetenv(L"CDIE_TRANSLATION")) stored_path = gui_frontend_stored_language(g_memorySettings);
@@ -3946,24 +4245,42 @@ static xxwidgets_status load_translation(size_t *line)
         if (status != XXWIDGETS_OK && stored_path) status = cdie_translation_open(g_app, NULL, line);
     }
     free(stored_path);
-    xx_str_free(path); LocalFree(args); return status;
+    xx_str_free(path);
+    LocalFree(args);
+    return status;
 }
 static int set_startup_file(void)
 {
-    int argc=0, has_file=0, positional=0;
-    WCHAR **args=CommandLineToArgvW(GetCommandLineW(),&argc);
+    int argc = 0, has_file = 0, positional = 0;
+    WCHAR **args = CommandLineToArgvW(GetCommandLineW(), &argc);
     if (!args) return 0;
-    for (int i=1;i<argc;++i) {
-        if (!positional && !lstrcmpW(args[i],L"--")) { positional=1; continue; }
-        if (!positional && !lstrcmpW(args[i],L"--translation")) { ++i; continue; }
-        if (!positional && !lstrcmpW(args[i],L"--smoke-test")) continue;
-        if (!positional && !lstrcmpW(args[i],L"--settings-smoke-test")) { ++i; continue; }
-        if (!positional && !lstrcmpW(args[i],L"--smoke-update")) { ++i; continue; }
-        char *path=xx_str_unicode_to_utf8(args[i]);
-        if (path) { has_file=xxwidgets_widget_set_text(g_path,path)==XXWIDGETS_OK; xx_str_free(path); }
+    for (int i = 1; i < argc; ++i) {
+        if (!positional && !lstrcmpW(args[i], L"--")) {
+            positional = 1;
+            continue;
+        }
+        if (!positional && !lstrcmpW(args[i], L"--translation")) {
+            ++i;
+            continue;
+        }
+        if (!positional && !lstrcmpW(args[i], L"--smoke-test")) continue;
+        if (!positional && !lstrcmpW(args[i], L"--settings-smoke-test")) {
+            ++i;
+            continue;
+        }
+        if (!positional && !lstrcmpW(args[i], L"--smoke-update")) {
+            ++i;
+            continue;
+        }
+        char *path = xx_str_unicode_to_utf8(args[i]);
+        if (path) {
+            has_file = xxwidgets_widget_set_text(g_path, path) == XXWIDGETS_OK;
+            xx_str_free(path);
+        }
         break;
     }
-    LocalFree(args); return has_file;
+    LocalFree(args);
+    return has_file;
 }
 
 int gui_run(void)
@@ -3989,31 +4306,41 @@ int gui_run(void)
     status = xxwidgets_app_create(&config, &g_app);
     if (status != XXWIDGETS_OK) return 1;
     {
-        size_t line=0;
-        status=load_translation(&line);
+        size_t line = 0;
+        status = load_translation(&line);
         if (status != XXWIDGETS_OK) {
             /* No smoke run ever waits on a modal box. */
             if (smoke || g_settingsSmoke || g_updateSmoke) smoke_failed(__LINE__);
-            else MessageBoxW(NULL,L"Cannot load PO translation. Check --translation FILE and CDIE_TRANSLATION.",L"cdie",MB_OK|MB_ICONERROR);
-            result=1; goto finish;
+            else MessageBoxW(NULL, L"Cannot load PO translation. Check --translation FILE and CDIE_TRANSLATION.", L"cdie", MB_OK | MB_ICONERROR);
+            result = 1;
+            goto finish;
         }
     }
     base = xx_str_utf8_to_unicode(gui_backend_app_title());
 #if defined(_WIN64) && CDIE_GUI_ARM_TARGET
-    cdie_translation_swprintf(title, sizeof(title)/sizeof(title[0]), CDIE_N_(L"%s (ARM64)"), base ? base : L"cdie");
+    cdie_translation_swprintf(title, sizeof(title) / sizeof(title[0]), CDIE_N_(L"%s (ARM64)"), base ? base : L"cdie");
 #elif defined(_WIN64)
-    cdie_translation_swprintf(title, sizeof(title)/sizeof(title[0]), CDIE_N_(L"%s (x64)"), base ? base : L"cdie");
+    cdie_translation_swprintf(title, sizeof(title) / sizeof(title[0]), CDIE_N_(L"%s (x64)"), base ? base : L"cdie");
 #else
-    cdie_translation_swprintf(title, sizeof(title)/sizeof(title[0]), CDIE_N_(L"%s (x86)"), base ? base : L"cdie");
+    cdie_translation_swprintf(title, sizeof(title) / sizeof(title[0]), CDIE_N_(L"%s (x86)"), base ? base : L"cdie");
 #endif
     if (base) xx_str_wfree(base);
     utf8_title = xx_str_unicode_to_utf8(title);
-    if (!utf8_title) { result = 1; goto finish; }
+    if (!utf8_title) {
+        result = 1;
+        goto finish;
+    }
     status = xxwidgets_widget_create(g_app, NULL, XXWIDGETS_WINDOW, utf8_title, bounds, &g_window);
     xx_str_free(utf8_title);
-    if (status != XXWIDGETS_OK) { result = 1; goto finish; }
+    if (status != XXWIDGETS_OK) {
+        result = 1;
+        goto finish;
+    }
     xxwidgets_widget_set_visible(g_window, 0);
-    if (!create_controls() || configure_about() != XXWIDGETS_OK) { result = 1; goto finish; }
+    if (!create_controls() || configure_about() != XXWIDGETS_OK) {
+        result = 1;
+        goto finish;
+    }
     {
         /* Standard sizes, so the shared handles need no cleanup. Dialogs take the owner's icons. */
         HICON large_icon = (HICON)LoadImageW(g_hInst, MAKEINTRESOURCEW(IDI_CDIE), IMAGE_ICON, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_SHARED);
@@ -4028,27 +4355,24 @@ int gui_run(void)
         int stored = 1, databases = 1;
         g_settings = gui_settings_open(g_memorySettings, &stored);
         if (g_settingsSmoke && (!stored || xx_settings_get_format(g_settings) != XX_SETTINGS_FORMAT_INI)) {
-            result = smoke_failed(__LINE__); goto finish;
+            result = smoke_failed(__LINE__);
+            goto finish;
         }
         status = current_options(&values);
         if (status == XXWIDGETS_OK) databases = gui_settings_load(g_settings, &values, &g_optionsPage);
         if (gui_backend_signature_count()) {
-            cdie_translation_swprintf(ready, sizeof(ready)/sizeof(ready[0]), CDIE_N_(L"Ready. %d signatures loaded. Choose a file or drag one here, then press Scan."),
-                      gui_backend_signature_count());
+            cdie_translation_swprintf(ready, sizeof(ready) / sizeof(ready[0]), CDIE_N_(L"Ready. %d signatures loaded. Choose a file or drag one here, then press Scan."),
+                                      gui_backend_signature_count());
             note_message_wide(ready);
-        } else
-            startup_error = CDIE_TR("Main signature database not found. Use Options > Scan to select the database folder.");
-        if (!databases)
-            startup_error = CDIE_TR("The saved signature folders cannot be loaded; the default ones are active.");
-        else if (!stored)
-            startup_error = CDIE_TR("Saved options cannot be read; the defaults are used.");
+        } else startup_error = CDIE_TR("Main signature database not found. Use Options > Scan to select the database folder.");
+        if (!databases) startup_error = CDIE_TR("The saved signature folders cannot be loaded; the default ones are active.");
+        else if (!stored) startup_error = CDIE_TR("Saved options cannot be read; the defaults are used.");
         if (status == XXWIDGETS_OK) status = apply_options(&values);
         if (status != XXWIDGETS_OK) report_ui_error("Apply saved options", status);
     }
     status = refresh_panel_tags();
     if (status != XXWIDGETS_OK) report_ui_error(CDIE_N_("Load signature tags"), status);
-    else if ((status = gui_main_restore_tag_filters(g_panel)) != XXWIDGETS_OK)
-        report_ui_error(CDIE_N_("Load tag filters"), status);
+    else if ((status = gui_main_restore_tag_filters(g_panel)) != XXWIDGETS_OK) report_ui_error(CDIE_N_("Load tag filters"), status);
     apply_flags_to_backend();
     {
         /* The stored view (View/Advanced, shared with Qt DIE), then Qt's
@@ -4059,17 +4383,32 @@ int gui_run(void)
         if (status == XXWIDGETS_OK) status = xxwidgets_widget_set_frame(g_window, (xxwidgets_rect){0, 0, width, height});
         /* set_frame emits no RESIZE: lay the panel out over the new client area. */
         if (status == XXWIDGETS_OK) status = xxwidgets_die_main_panel_layout(g_main);
-        if (status != XXWIDGETS_OK) { result = 1; goto finish; }
+        if (status != XXWIDGETS_OK) {
+            result = 1;
+            goto finish;
+        }
     }
-    if (smoke) { result = run_smoke(); goto finish; }
-    if (g_settingsSmoke) { result = run_settings_smoke(); goto finish; }
-    if (g_updateSmoke) { result = run_update_smoke(); goto finish; }
+    if (smoke) {
+        result = run_smoke();
+        goto finish;
+    }
+    if (g_settingsSmoke) {
+        result = run_settings_smoke();
+        goto finish;
+    }
+    if (g_updateSmoke) {
+        result = run_update_smoke();
+        goto finish;
+    }
     {
         int startup = set_startup_file();
         char path[GUI_PREFERENCE_PATH_MAX] = {0};
         (void)xxwidgets_widget_get_text(g_path, path, sizeof(path), NULL);
         int instance = gui_frontend_instance_start(g_window, path);
-        if (instance <= 0) { result = instance < 0 ? 1 : 0; goto finish; }
+        if (instance <= 0) {
+            result = instance < 0 ? 1 : 0;
+            goto finish;
+        }
         xxwidgets_widget_set_visible(g_window, 1);
         xxwidgets_widget_focus(g_path);
         /* No status line (Q1): what the start found wrong is said once the window shows. */
@@ -4080,13 +4419,17 @@ int gui_run(void)
     while (g_running) {
         int action;
         status = xxwidgets_app_poll(g_app, 30);
-        if (status != XXWIDGETS_OK) { result = 1; break; }
+        if (status != XXWIDGETS_OK) {
+            result = 1;
+            break;
+        }
         if (!g_running) break;
         {
             const char *message = gui_tree_process(g_window);
             if (message) show_error(message);
         }
-        action = g_pending; g_pending = ACTION_NONE;
+        action = g_pending;
+        g_pending = ACTION_NONE;
         /* All modal loops and scans start after returning from app_poll. */
         run_pending(action);
     }

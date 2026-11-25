@@ -90,8 +90,7 @@ static inline char *gui_error_file_text(const char *headline, const char *path, 
 
 /* Shows gui_error_file_text in a text dialog titled title. A shown message is
  * the action's whole result: OK, so no second error reaches the status bar. */
-static inline xxwidgets_status gui_error_show_file(xxwidgets_widget *owner, const char *title, const char *headline,
-    const char *path, const char *detail)
+static inline xxwidgets_status gui_error_show_file(xxwidgets_widget *owner, const char *title, const char *headline, const char *path, const char *detail)
 {
     char *text = gui_error_file_text(headline, path, detail);
     xxwidgets_status status = xxwidgets_text_dialog(owner, title, text ? text : detail && detail[0] ? detail : title);

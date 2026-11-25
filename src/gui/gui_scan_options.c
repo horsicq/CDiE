@@ -13,16 +13,55 @@
 #include "gui_error.h"
 
 /* Translated where shown; CDIE_N_ only marks them for the catalog. */
-static const char *const color_names[XX_SCAN_COLOR_COUNT] = {
-    CDIE_N_("Unknown"), CDIE_N_("Installer"), CDIE_N_("SFX"), CDIE_N_("Archive"), CDIE_N_("Protection"), CDIE_N_("PE tool"),
-    CDIE_N_("APK tool"), CDIE_N_("Operation system"), CDIE_N_("Virtual machine"), CDIE_N_("Platform"), CDIE_N_("DOS extender"),
-    CDIE_N_("Format"), CDIE_N_("Sign tool"), CDIE_N_("Certificate"), CDIE_N_("Licensing"), CDIE_N_("Language"),
-    CDIE_N_("Corrupted data"), CDIE_N_("Personal data"), CDIE_N_("Author"), CDIE_N_("Virus"), CDIE_N_("Trojan"), CDIE_N_("Malware"),
-    CDIE_N_("Debug"), CDIE_N_("Debug data"), CDIE_N_("Game engine"), CDIE_N_("Compiler"), CDIE_N_("Compressor"), CDIE_N_("Converter"),
-    CDIE_N_("Creator"), CDIE_N_("Data"), CDIE_N_("Database"), CDIE_N_("Document"), CDIE_N_("Generic"), CDIE_N_("Image"),
-    CDIE_N_("Installer data"), CDIE_N_("Library"), CDIE_N_("Linker"), CDIE_N_("Loader"), CDIE_N_("Obfuscator"), CDIE_N_("Overlay"),
-    CDIE_N_("Package"), CDIE_N_("Player"), CDIE_N_("Producer"), CDIE_N_("Protector data"), CDIE_N_("ROM"), CDIE_N_("SFX data"),
-    CDIE_N_("Source code"), CDIE_N_("Stub"), CDIE_N_("Tool")};
+static const char *const color_names[XX_SCAN_COLOR_COUNT] = {CDIE_N_("Unknown"),
+                                                             CDIE_N_("Installer"),
+                                                             CDIE_N_("SFX"),
+                                                             CDIE_N_("Archive"),
+                                                             CDIE_N_("Protection"),
+                                                             CDIE_N_("PE tool"),
+                                                             CDIE_N_("APK tool"),
+                                                             CDIE_N_("Operation system"),
+                                                             CDIE_N_("Virtual machine"),
+                                                             CDIE_N_("Platform"),
+                                                             CDIE_N_("DOS extender"),
+                                                             CDIE_N_("Format"),
+                                                             CDIE_N_("Sign tool"),
+                                                             CDIE_N_("Certificate"),
+                                                             CDIE_N_("Licensing"),
+                                                             CDIE_N_("Language"),
+                                                             CDIE_N_("Corrupted data"),
+                                                             CDIE_N_("Personal data"),
+                                                             CDIE_N_("Author"),
+                                                             CDIE_N_("Virus"),
+                                                             CDIE_N_("Trojan"),
+                                                             CDIE_N_("Malware"),
+                                                             CDIE_N_("Debug"),
+                                                             CDIE_N_("Debug data"),
+                                                             CDIE_N_("Game engine"),
+                                                             CDIE_N_("Compiler"),
+                                                             CDIE_N_("Compressor"),
+                                                             CDIE_N_("Converter"),
+                                                             CDIE_N_("Creator"),
+                                                             CDIE_N_("Data"),
+                                                             CDIE_N_("Database"),
+                                                             CDIE_N_("Document"),
+                                                             CDIE_N_("Generic"),
+                                                             CDIE_N_("Image"),
+                                                             CDIE_N_("Installer data"),
+                                                             CDIE_N_("Library"),
+                                                             CDIE_N_("Linker"),
+                                                             CDIE_N_("Loader"),
+                                                             CDIE_N_("Obfuscator"),
+                                                             CDIE_N_("Overlay"),
+                                                             CDIE_N_("Package"),
+                                                             CDIE_N_("Player"),
+                                                             CDIE_N_("Producer"),
+                                                             CDIE_N_("Protector data"),
+                                                             CDIE_N_("ROM"),
+                                                             CDIE_N_("SFX data"),
+                                                             CDIE_N_("Source code"),
+                                                             CDIE_N_("Stub"),
+                                                             CDIE_N_("Tool")};
 
 /* A portable editor keeps the color value explicit and supports system colors,
  * which cannot be represented by a native RGB picker alone. */
@@ -42,13 +81,15 @@ static void color_text(char text[8], uint32_t color)
 static int parse_color(const char *text, uint32_t *color)
 {
     uint32_t value = 0;
-    if (!text[0]) { *color = UINT32_MAX; return 1; }
+    if (!text[0]) {
+        *color = UINT32_MAX;
+        return 1;
+    }
     if (*text == '#') ++text;
     if (xx_rt_strlen(text) != 6) return 0;
     for (int i = 0; i < 6; ++i) {
         unsigned char c = (unsigned char)text[i];
-        unsigned int digit = c >= '0' && c <= '9' ? c - '0' :
-            c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : 16;
+        unsigned int digit = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : 16;
         if (digit > 15) return 0;
         value = value * 16 + digit;
     }
@@ -86,7 +127,8 @@ static xxwidgets_status palette_show(palette_page *page)
     xxwidgets_tree_node node = {SIZE_MAX, CDIE_TR(color_names[page->selected]), 0};
     xxwidgets_tree_color color = {record.foreground, record.background, record.foreground, record.background};
     xxwidgets_status status;
-    color_text(foreground, record.foreground); color_text(background, record.background);
+    color_text(foreground, record.foreground);
+    color_text(background, record.background);
     status = xxwidgets_widget_set_text(page->foreground, foreground);
     if (status == XXWIDGETS_OK) status = xxwidgets_widget_set_text(page->background, background);
     if (status == XXWIDGETS_OK) status = xxwidgets_treeview_set_colored_nodes(page->preview, &node, &color, 1);
@@ -99,8 +141,8 @@ static int palette_store(palette_page *page, char *error, size_t capacity)
     char foreground[16], background[16];
     xx_scan_color_record color;
     if (xxwidgets_widget_get_text(page->foreground, foreground, sizeof(foreground), NULL) != XXWIDGETS_OK ||
-        xxwidgets_widget_get_text(page->background, background, sizeof(background), NULL) != XXWIDGETS_OK ||
-        !parse_color(foreground, &color.foreground) || !parse_color(background, &color.background)) {
+        xxwidgets_widget_get_text(page->background, background, sizeof(background), NULL) != XXWIDGETS_OK || !parse_color(foreground, &color.foreground) ||
+        !parse_color(background, &color.background)) {
         if (error && capacity) xx_rt_snprintf(error, capacity, "%s", CDIE_TR("Enter #RRGGBB, or leave a color empty for the system default."));
         return 0;
     }
@@ -111,13 +153,13 @@ static int palette_store(palette_page *page, char *error, size_t capacity)
 static xxwidgets_status palette_destroy(void *state)
 {
     palette_page *page = state;
-    xxwidgets_widget *controls[] = {page->table, page->dark, page->foreground, page->background, page->set, page->note,
-        page->label_fg, page->label_bg, page->preview};
+    xxwidgets_widget *controls[] = {page->table, page->dark, page->foreground, page->background, page->set, page->note, page->label_fg, page->label_bg, page->preview};
     xxwidgets_status status = XXWIDGETS_OK;
-    for (size_t i = 0; i < sizeof(controls) / sizeof(controls[0]); ++i) if (controls[i]) {
-        xxwidgets_status cleanup = xxwidgets_widget_destroy(controls[i]);
-        if (status == XXWIDGETS_OK) status = cleanup;
-    }
+    for (size_t i = 0; i < sizeof(controls) / sizeof(controls[0]); ++i)
+        if (controls[i]) {
+            xxwidgets_status cleanup = xxwidgets_widget_destroy(controls[i]);
+            if (status == XXWIDGETS_OK) status = cleanup;
+        }
     xx_rt_free(page);
     return status;
 }
@@ -129,9 +171,11 @@ static xxwidgets_status palette_create(xxwidgets_widget *dialog, xxwidgets_rect 
     xxwidgets_app *app = xxwidgets_widget_app(dialog);
     xxwidgets_status status;
     if (!page) return XXWIDGETS_OUT_OF_MEMORY;
-    page->values = user; page->owner = dialog;
+    page->values = user;
+    page->owner = dialog;
     status = xxwidgets_table_create(dialog, (xxwidgets_rect){b.x, b.y, b.width, 15}, titles, 3, &page->table);
-#define PC(field, kind, text, px, py, pw, ph) if (status == XXWIDGETS_OK) status = xxwidgets_widget_create(app, dialog, kind, CDIE_TR(text), (xxwidgets_rect){b.x + (px), b.y + (py), pw, ph}, &page->field)
+#define PC(field, kind, text, px, py, pw, ph) \
+    if (status == XXWIDGETS_OK) status = xxwidgets_widget_create(app, dialog, kind, CDIE_TR(text), (xxwidgets_rect){b.x + (px), b.y + (py), pw, ph}, &page->field)
     PC(dark, XXWIDGETS_CHECKBOX, CDIE_N_("Dark appearance"), 0, 16, 24, 1);
     PC(label_fg, XXWIDGETS_LABEL, CDIE_N_("Foreground"), 0, 18, 14, 1);
     PC(foreground, XXWIDGETS_EDIT, "", 14, 18, 14, 1);
@@ -143,7 +187,10 @@ static xxwidgets_status palette_create(xxwidgets_widget *dialog, xxwidgets_rect 
 #undef PC
     if (status == XXWIDGETS_OK) status = palette_rows(page);
     if (status == XXWIDGETS_OK) status = palette_show(page);
-    if (status != XXWIDGETS_OK) { palette_destroy(page); return status; }
+    if (status != XXWIDGETS_OK) {
+        palette_destroy(page);
+        return status;
+    }
     *out = page;
     return XXWIDGETS_OK;
 }
@@ -163,8 +210,10 @@ static void palette_event(void *state, const xxwidgets_event *event)
         (void)xxwidgets_widget_set_value(page->dark, page->dark_mode);
         return;
     }
-    page->selected = selected; page->dark_mode = dark;
-    (void)palette_rows(page); (void)palette_show(page);
+    page->selected = selected;
+    page->dark_mode = dark;
+    (void)palette_rows(page);
+    (void)palette_show(page);
     (void)xxwidgets_widget_set_text(page->note, CDIE_TR("Empty = system color; otherwise enter #RRGGBB."));
 }
 
@@ -177,14 +226,26 @@ static xxwidgets_status palette_reset(void *state)
     return status == XXWIDGETS_OK ? palette_show(page) : status;
 }
 
-static int palette_apply(void *state, char *error, size_t capacity) { return palette_store(state, error, capacity); }
+static int palette_apply(void *state, char *error, size_t capacity)
+{
+    return palette_store(state, error, capacity);
+}
 
 /* The Scan page's checkboxes, in order: the six scan flags (xxwidgets bit
  * order), the custom database, the four expansion modes (GUI_SCAN_* bit
  * order), then the six behaviours of behavior() below. */
-enum { CHECK_FLAGS = 0, CHECK_CUSTOM = 6, CHECK_MODES = 7, CHECK_BEHAVIORS = 11, CHECK_COUNT = 17 };
+enum {
+    CHECK_FLAGS = 0,
+    CHECK_CUSTOM = 6,
+    CHECK_MODES = 7,
+    CHECK_BEHAVIORS = 11,
+    CHECK_COUNT = 17
+};
 /* One folder row per GUI_DB_* slot. */
-enum { PATH_COUNT = GUI_DB_COUNT, CONTROL_CAPACITY = 64 };
+enum {
+    PATH_COUNT = GUI_DB_COUNT,
+    CONTROL_CAPACITY = 64
+};
 typedef struct scan_page {
     gui_scan_page_values *values, edited;
     gui_database_preferences *databases;
@@ -220,18 +281,19 @@ static xxwidgets_status scan_fill(scan_page *page, const gui_scan_page_values *v
 {
     xxwidgets_status status = XXWIDGETS_OK;
     for (int i = 0; status == XXWIDGETS_OK && i < CHECK_COUNT; ++i) {
-        int value = i < CHECK_CUSTOM ? (int)((values->options.flags >> (i - CHECK_FLAGS)) & 1u) :
-            i == CHECK_CUSTOM ? (values->options.databases & XXWIDGETS_SCAN_DATABASE_CUSTOM) != 0 :
-            i < CHECK_BEHAVIORS ? (int)((values->modes >> (i - CHECK_MODES)) & 1u) : behavior(values, i - CHECK_BEHAVIORS);
+        int value = i < CHECK_CUSTOM      ? (int)((values->options.flags >> (i - CHECK_FLAGS)) & 1u)
+                    : i == CHECK_CUSTOM   ? (values->options.databases & XXWIDGETS_SCAN_DATABASE_CUSTOM) != 0
+                    : i < CHECK_BEHAVIORS ? (int)((values->modes >> (i - CHECK_MODES)) & 1u)
+                                          : behavior(values, i - CHECK_BEHAVIORS);
         status = xxwidgets_widget_set_value(page->checks[i], value);
     }
     if (status == XXWIDGETS_OK) status = xxwidgets_widget_set_value(page->engine, 0);
     if (status == XXWIDGETS_OK && page->databases) {
         const char *paths[PATH_COUNT] = {page->databases->main_path, page->databases->custom_path};
-        for (int i = 0; status == XXWIDGETS_OK && i < PATH_COUNT; ++i)
-            status = xxwidgets_widget_set_text(page->paths[i], reset_paths ? "" : paths[i]);
-        if (status == XXWIDGETS_OK) status = xxwidgets_widget_set_text(page->url, reset_paths ?
-            "https://github.com/horsicq/Detect-It-Easy/releases/tag/current-database" : page->databases->main_update_url);
+        for (int i = 0; status == XXWIDGETS_OK && i < PATH_COUNT; ++i) status = xxwidgets_widget_set_text(page->paths[i], reset_paths ? "" : paths[i]);
+        if (status == XXWIDGETS_OK)
+            status = xxwidgets_widget_set_text(
+                page->url, reset_paths ? "https://github.com/horsicq/Detect-It-Easy/releases/tag/current-database" : page->databases->main_update_url);
     }
     if (status == XXWIDGETS_OK) page->edited = *values;
     return status;
@@ -249,20 +311,38 @@ static xxwidgets_status scan_destroy(void *state)
     return status;
 }
 
-static xxwidgets_status scan_create_common(xxwidgets_widget *dialog, xxwidgets_rect b, gui_scan_page_values *values,
-    gui_scan_options_page_context *context, void **out)
+static xxwidgets_status scan_create_common(xxwidgets_widget *dialog, xxwidgets_rect b, gui_scan_page_values *values, gui_scan_options_page_context *context, void **out)
 {
-    static const char *const labels[CHECK_COUNT] = {CDIE_N_("Deep scan"), CDIE_N_("Heuristic scan"), CDIE_N_("Verbose"),
-        CDIE_N_("Aggressive scan"), CDIE_N_("Hide unknown"), CDIE_N_("Format result"), CDIE_N_("Custom database"),
-        CDIE_N_("All file types"), CDIE_N_("Scan overlays"), CDIE_N_("Scan resources"), CDIE_N_("Scan archive members"),
-        CDIE_N_("Scan after open"), CDIE_N_("Recursive scan"), CDIE_N_("Profiling"), CDIE_N_("Sort"), CDIE_N_("Use cache"), CDIE_N_("Highlight")};
+    static const char *const labels[CHECK_COUNT] = {CDIE_N_("Deep scan"),
+                                                    CDIE_N_("Heuristic scan"),
+                                                    CDIE_N_("Verbose"),
+                                                    CDIE_N_("Aggressive scan"),
+                                                    CDIE_N_("Hide unknown"),
+                                                    CDIE_N_("Format result"),
+                                                    CDIE_N_("Custom database"),
+                                                    CDIE_N_("All file types"),
+                                                    CDIE_N_("Scan overlays"),
+                                                    CDIE_N_("Scan resources"),
+                                                    CDIE_N_("Scan archive members"),
+                                                    CDIE_N_("Scan after open"),
+                                                    CDIE_N_("Recursive scan"),
+                                                    CDIE_N_("Profiling"),
+                                                    CDIE_N_("Sort"),
+                                                    CDIE_N_("Use cache"),
+                                                    CDIE_N_("Highlight")};
     static const char *const path_labels[PATH_COUNT] = {CDIE_N_("Main database"), CDIE_N_("Custom database folder")};
     scan_page *page = xx_rt_calloc(1, sizeof(*page));
     xxwidgets_status status = XXWIDGETS_OK;
     int half = (b.width - 2) / 2;
     if (!page) return XXWIDGETS_OUT_OF_MEMORY;
-    page->owner = dialog; page->values = values; page->pending_browse = -1;
-    if (context) { page->databases = context->databases; page->callbacks = context->callbacks; page->user = context->user; }
+    page->owner = dialog;
+    page->values = values;
+    page->pending_browse = -1;
+    if (context) {
+        page->databases = context->databases;
+        page->callbacks = context->callbacks;
+        page->user = context->user;
+    }
     for (int i = 0; status == XXWIDGETS_OK && i < CHECK_COUNT; ++i)
         status = control(page, XXWIDGETS_CHECKBOX, labels[i], (xxwidgets_rect){b.x + (i & 1) * (half + 2), b.y + i / 2, half, 1}, &page->checks[i]);
     if (status == XXWIDGETS_OK) status = control(page, XXWIDGETS_LABEL, CDIE_N_("Scan engine"), (xxwidgets_rect){b.x, b.y + 10, 14, 1}, NULL);
@@ -273,21 +353,29 @@ static xxwidgets_status scan_create_common(xxwidgets_widget *dialog, xxwidgets_r
         xx_str_w_s names[1] = {{0}};
         for (size_t i = 0; i < 1 && status == XXWIDGETS_OK; ++i) {
             names[i].data = xx_str_utf8_to_unicode(engines[i]);
-            if (!names[i].data) { status = XXWIDGETS_OUT_OF_MEMORY; break; }
-            names[i].length = wcslen(names[i].data); names[i].capacity = names[i].length + 1; names[i].is_view = true;
-            records[i].meta_string = &names[i]; records[i].var.type = XX_VAR_TYPE_UINT64; records[i].var.val.u64 = i;
+            if (!names[i].data) {
+                status = XXWIDGETS_OUT_OF_MEMORY;
+                break;
+            }
+            names[i].length = wcslen(names[i].data);
+            names[i].capacity = names[i].length + 1;
+            names[i].is_view = true;
+            records[i].meta_string = &names[i];
+            records[i].var.type = XX_VAR_TYPE_UINT64;
+            records[i].var.val.u64 = i;
         }
         if (status == XXWIDGETS_OK) status = xxwidgets_combobox_set_records(page->engine, records, 1);
         for (size_t i = 0; i < 1; ++i) xx_str_free_unicode(names[i].data);
     }
     if (status == XXWIDGETS_OK) status = control(page, XXWIDGETS_BUTTON, CDIE_N_("Colors..."), (xxwidgets_rect){b.x + b.width - 18, b.y + 10, 18, 1}, &page->colors);
-    if (status == XXWIDGETS_OK) status = control(page, XXWIDGETS_LABEL,
-        CDIE_N_("Recursive: resource/overlay children."), (xxwidgets_rect){b.x, b.y + 11, b.width, 1}, NULL);
+    if (status == XXWIDGETS_OK)
+        status = control(page, XXWIDGETS_LABEL, CDIE_N_("Recursive: resource/overlay children."), (xxwidgets_rect){b.x, b.y + 11, b.width, 1}, NULL);
     if (page->databases) {
         for (int i = 0; status == XXWIDGETS_OK && i < PATH_COUNT; ++i) {
             status = control(page, XXWIDGETS_LABEL, path_labels[i], (xxwidgets_rect){b.x, b.y + 12 + i * 2, b.width, 1}, NULL);
             if (status == XXWIDGETS_OK) status = control(page, XXWIDGETS_EDIT, "", (xxwidgets_rect){b.x, b.y + 13 + i * 2, b.width - 12, 1}, &page->paths[i]);
-            if (status == XXWIDGETS_OK) status = control(page, XXWIDGETS_BUTTON, CDIE_N_("Browse..."), (xxwidgets_rect){b.x + b.width - 11, b.y + 13 + i * 2, 11, 1}, &page->browse[i]);
+            if (status == XXWIDGETS_OK)
+                status = control(page, XXWIDGETS_BUTTON, CDIE_N_("Browse..."), (xxwidgets_rect){b.x + b.width - 11, b.y + 13 + i * 2, 11, 1}, &page->browse[i]);
             if (status == XXWIDGETS_OK && !page->callbacks.browse) status = xxwidgets_widget_set_enabled(page->browse[i], 0);
         }
         if (status == XXWIDGETS_OK) status = control(page, XXWIDGETS_LABEL, CDIE_N_("DIE database update URL"), (xxwidgets_rect){b.x, b.y + 16, b.width, 1}, NULL);
@@ -306,22 +394,28 @@ static xxwidgets_status scan_create_common(xxwidgets_widget *dialog, xxwidgets_r
             if (status == XXWIDGETS_OK) status = xxwidgets_widget_set_enabled(path, 0);
             if (status == XXWIDGETS_OK) status = xxwidgets_widget_set_enabled(url, 0);
         }
-        if (status == XXWIDGETS_OK) status = control(page, XXWIDGETS_LABEL, CDIE_N_("Profiling: total scan duration and detection count in Log."),
-            (xxwidgets_rect){b.x, b.y + 27, b.width, 1}, &page->notice);
-        if (status == XXWIDGETS_OK) status = control(page, XXWIDGETS_LABEL,
-            CDIE_N_("Empty folders use defaults. Open page only browses; Update database installs."),
-            (xxwidgets_rect){b.x, b.y + 28, b.width, 1}, NULL);
-    }
-    else if (status == XXWIDGETS_OK) status = control(page, XXWIDGETS_LABEL, CDIE_N_("Profiling: total scan duration and detection count in Log."),
-        (xxwidgets_rect){b.x, b.y + 12, b.width, 1}, &page->notice);
+        if (status == XXWIDGETS_OK)
+            status = control(page, XXWIDGETS_LABEL, CDIE_N_("Profiling: total scan duration and detection count in Log."), (xxwidgets_rect){b.x, b.y + 27, b.width, 1},
+                             &page->notice);
+        if (status == XXWIDGETS_OK)
+            status = control(page, XXWIDGETS_LABEL, CDIE_N_("Empty folders use defaults. Open page only browses; Update database installs."),
+                             (xxwidgets_rect){b.x, b.y + 28, b.width, 1}, NULL);
+    } else if (status == XXWIDGETS_OK)
+        status = control(page, XXWIDGETS_LABEL, CDIE_N_("Profiling: total scan duration and detection count in Log."), (xxwidgets_rect){b.x, b.y + 12, b.width, 1},
+                         &page->notice);
     if (status == XXWIDGETS_OK) status = scan_fill(page, values, 0);
-    if (status != XXWIDGETS_OK) { scan_destroy(page); return status; }
+    if (status != XXWIDGETS_OK) {
+        scan_destroy(page);
+        return status;
+    }
     *out = page;
     return XXWIDGETS_OK;
 }
 
 static xxwidgets_status scan_create(xxwidgets_widget *dialog, xxwidgets_rect b, void *user, void **out)
-{ return scan_create_common(dialog, b, user, NULL, out); }
+{
+    return scan_create_common(dialog, b, user, NULL, out);
+}
 static xxwidgets_status scan_create_ex(xxwidgets_widget *dialog, xxwidgets_rect b, void *user, void **out)
 {
     gui_scan_options_page_context *context = user;
@@ -334,7 +428,8 @@ static void scan_event(void *state, const xxwidgets_event *event)
     if (event->type != XXWIDGETS_EVENT_CLICK) return;
     if (event->widget == page->colors) page->pending_colors = 1;
     if (event->widget == page->update) page->pending_update = 1;
-    for (int i = 0; i < PATH_COUNT; ++i) if (event->widget == page->browse[i]) page->pending_browse = i;
+    for (int i = 0; i < PATH_COUNT; ++i)
+        if (event->widget == page->browse[i]) page->pending_browse = i;
 }
 
 static int valid_url(const char *url)
@@ -342,7 +437,8 @@ static int valid_url(const char *url)
     if (xx_rt_strncmp(url, "https://", 8) && xx_rt_strncmp(url, "http://", 7)) return 0;
     const char *host = url + (url[4] == 's' ? 8 : 7);
     if (!*host || *host == '/' || *host == ' ' || *host == '?') return 0;
-    for (const unsigned char *p = (const unsigned char *)url; *p; ++p) if (*p <= 32 || *p == 127) return 0;
+    for (const unsigned char *p = (const unsigned char *)url; *p; ++p)
+        if (*p <= 32 || *p == 127) return 0;
     return 1;
 }
 
@@ -386,11 +482,21 @@ static xxwidgets_status scan_process(void *state)
         xxwidgets_options_page definition = {0};
         int accepted = 0;
         page->pending_colors = 0;
-        definition.title = CDIE_TR("Category colors"); definition.width = 66; definition.height = 24;
-        definition.create = palette_create; definition.event = palette_event; definition.reset = palette_reset;
-        definition.validate = palette_apply; definition.apply = palette_apply; definition.destroy = palette_destroy; definition.user = &edited;
+        definition.title = CDIE_TR("Category colors");
+        definition.width = 66;
+        definition.height = 24;
+        definition.create = palette_create;
+        definition.event = palette_event;
+        definition.reset = palette_reset;
+        definition.validate = palette_apply;
+        definition.apply = palette_apply;
+        definition.destroy = palette_destroy;
+        definition.user = &edited;
         xxwidgets_status status = xxwidgets_options_pages_dialog(page->owner, CDIE_TR("Colors"), &definition, 1, NULL, &accepted);
-        if (status == XXWIDGETS_OK && accepted) { page->edited.colors = edited.colors; page->edited.dark_colors = edited.dark_colors; }
+        if (status == XXWIDGETS_OK && accepted) {
+            page->edited.colors = edited.colors;
+            page->edited.dark_colors = edited.dark_colors;
+        }
         return status == XXWIDGETS_OK ? status : scan_child_error(page, CDIE_N_("Cannot open Colors."), status);
     }
     return XXWIDGETS_OK;
@@ -404,7 +510,8 @@ static xxwidgets_status scan_reset(void *state)
     defaults.modes = GUI_SCAN_MODES_DEFAULT;
     defaults.scan_after_open = defaults.recursive = defaults.sort = defaults.highlight = 1;
     xx_rt_memcpy(defaults.engine, "die", 4);
-    xx_scan_color_options_init(&defaults.colors, 0); xx_scan_color_options_init(&defaults.dark_colors, 1);
+    xx_scan_color_options_init(&defaults.colors, 0);
+    xx_scan_color_options_init(&defaults.dark_colors, 1);
     return status == XXWIDGETS_OK ? scan_fill(page, &defaults, 1) : status;
 }
 
@@ -421,9 +528,12 @@ static int scan_read(scan_page *page, gui_scan_page_values *values, gui_database
             else if (i < CHECK_BEHAVIORS) values->modes |= 1u << (i - CHECK_MODES);
         }
     }
-    values->scan_after_open = controls[CHECK_BEHAVIORS]; values->recursive = controls[CHECK_BEHAVIORS + 1];
-    values->profiling = controls[CHECK_BEHAVIORS + 2]; values->sort = controls[CHECK_BEHAVIORS + 3];
-    values->use_cache = controls[CHECK_BEHAVIORS + 4]; values->highlight = controls[CHECK_BEHAVIORS + 5];
+    values->scan_after_open = controls[CHECK_BEHAVIORS];
+    values->recursive = controls[CHECK_BEHAVIORS + 1];
+    values->profiling = controls[CHECK_BEHAVIORS + 2];
+    values->sort = controls[CHECK_BEHAVIORS + 3];
+    values->use_cache = controls[CHECK_BEHAVIORS + 4];
+    values->highlight = controls[CHECK_BEHAVIORS + 5];
     if (xxwidgets_widget_get_value(page->engine, &engine) != XXWIDGETS_OK || engine < 0 || (size_t)engine >= gui_backend_engine_count()) goto invalid;
     xx_rt_snprintf(values->engine, sizeof(values->engine), "%s", gui_backend_engine_id((size_t)engine));
     if (page->databases && databases) {
@@ -445,12 +555,10 @@ invalid:
 
 void gui_scan_options_database_error(int slot, int missing, const char *path, char *error, size_t capacity)
 {
-    static const char *const absent[PATH_COUNT] = {CDIE_N_("The main database folder does not exist: %s"),
-        CDIE_N_("The custom database folder does not exist: %s")};
+    static const char *const absent[PATH_COUNT] = {CDIE_N_("The main database folder does not exist: %s"), CDIE_N_("The custom database folder does not exist: %s")};
     if (!error || !capacity) return;
     if (missing && slot >= 0 && slot < PATH_COUNT) cdie_translation_snprintf(error, capacity, absent[slot], path ? path : "");
-    else if (path && path[0])
-        cdie_translation_snprintf(error, capacity, CDIE_N_("No signatures could be loaded from %s. Choose a Detect It Easy db folder."), path);
+    else if (path && path[0]) cdie_translation_snprintf(error, capacity, CDIE_N_("No signatures could be loaded from %s. Choose a Detect It Easy db folder."), path);
     else cdie_translation_snprintf(error, capacity, "%s", CDIE_TR("No signatures could be loaded from the default database folder."));
 }
 
@@ -491,9 +599,17 @@ xxwidgets_status gui_scan_options_page(xxwidgets_options_page *page, const char 
 {
     if (!page || !title || !values || (values->modes & ~GUI_SCAN_MODES_MASK)) return XXWIDGETS_INVALID_ARGUMENT;
     xx_rt_memset(page, 0, sizeof(*page));
-    page->title = title; page->width = 80; page->height = 13;
-    page->create = scan_create; page->event = scan_event; page->process = scan_process;
-    page->reset = scan_reset; page->validate = scan_validate; page->apply = scan_apply; page->destroy = scan_destroy; page->user = values;
+    page->title = title;
+    page->width = 80;
+    page->height = 13;
+    page->create = scan_create;
+    page->event = scan_event;
+    page->process = scan_process;
+    page->reset = scan_reset;
+    page->validate = scan_validate;
+    page->apply = scan_apply;
+    page->destroy = scan_destroy;
+    page->user = values;
     return XXWIDGETS_OK;
 }
 xxwidgets_status gui_scan_options_page_ex(xxwidgets_options_page *page, const char *title, gui_scan_options_page_context *context)
@@ -501,7 +617,9 @@ xxwidgets_status gui_scan_options_page_ex(xxwidgets_options_page *page, const ch
     if (!context || !context->values) return XXWIDGETS_INVALID_ARGUMENT;
     xxwidgets_status status = gui_scan_options_page(page, title, context->values);
     if (status == XXWIDGETS_OK) {
-        page->create = scan_create_ex; page->user = context; page->height = context->databases ? 29 : 13;
+        page->create = scan_create_ex;
+        page->user = context;
+        page->height = context->databases ? 29 : 13;
     }
     return status;
 }

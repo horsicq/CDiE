@@ -20,8 +20,7 @@ typedef enum cdie_output_format {
  * NULL/Info or NAME[#FIELD], optionally qualified as PE::NAME, ELF::NAME or
  * MACHO::NAME (fat table names are MACHO:: too). Output and error are runtime
  * allocations released with xx_rt_free. Failure never returns partial output. */
-int cdie_file_info(const char *path, const char *selector, int inventory,
-    cdie_output_format output, char **text, char **error);
+int cdie_file_info(const char *path, const char *selector, int inventory, cdie_output_format output, char **text, char **error);
 
 /* Synchronous native walker. Callbacks borrow records until they return and
  * may stop traversal by returning zero. No widget access is performed here;
@@ -32,15 +31,14 @@ typedef struct cdie_file_info_visitor {
     int (*field)(const xx_data_struct_record *record, void *user);
     int (*end_structure)(void *user);
 } cdie_file_info_visitor;
-int cdie_file_info_visit(const char *path, const char *selector, int inventory,
-    const cdie_file_info_visitor *visitor, void *user, xx_pd_struct *progress, char **error);
+int cdie_file_info_visit(const char *path, const char *selector, int inventory, const cdie_file_info_visitor *visitor, void *user, xx_pd_struct *progress, char **error);
 
 /* As cdie_file_info_visit, which passes CDIE_FILE_INFO_SLICE_AUTO. For a fat
  * Mach-O, slice is the fat_arch index of the slice to open; AUTO takes the
  * first slice built for the architecture cdie runs as, else the first slice.
  * An index past the table fails; thin files and other formats ignore it. */
 #define CDIE_FILE_INFO_SLICE_AUTO (-1)
-int cdie_file_info_visit_slice(const char *path, int slice, const char *selector, int inventory,
-    const cdie_file_info_visitor *visitor, void *user, xx_pd_struct *progress, char **error);
+int cdie_file_info_visit_slice(const char *path, int slice, const char *selector, int inventory, const cdie_file_info_visitor *visitor, void *user,
+                               xx_pd_struct *progress, char **error);
 
 #endif

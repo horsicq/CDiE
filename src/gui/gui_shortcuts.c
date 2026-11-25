@@ -83,8 +83,8 @@ static char *store_text(char *storage, size_t storage_size, size_t *used, const 
     return copy;
 }
 
-size_t gui_shortcuts_bindings(gui_shortcut_platform platform, int action_base, int with_update, xxwidgets_shortcut *out, size_t capacity,
-                              char *storage, size_t storage_size)
+size_t gui_shortcuts_bindings(gui_shortcut_platform platform, int action_base, int with_update, xxwidgets_shortcut *out, size_t capacity, char *storage,
+                              size_t storage_size)
 {
     size_t i, count = 0, used = 0;
     if (!out || !storage || !storage_size || (int)platform < 0 || platform >= GUI_SHORTCUTS_PLATFORM_COUNT) return 0;
@@ -117,8 +117,7 @@ gui_shortcut_action gui_shortcuts_action(int value, int action_base)
     return (gui_shortcut_action)action;
 }
 
-size_t gui_shortcuts_dialog_entries(gui_shortcut_platform platform, int with_update, xxwidgets_shortcut_entry *out, size_t capacity,
-                                    char *storage, size_t storage_size)
+size_t gui_shortcuts_dialog_entries(gui_shortcut_platform platform, int with_update, xxwidgets_shortcut_entry *out, size_t capacity, char *storage, size_t storage_size)
 {
     size_t i, count = 0, used = 0;
     if (!out || !storage || !storage_size || (int)platform < 0 || platform >= GUI_SHORTCUTS_PLATFORM_COUNT) return 0;
@@ -136,11 +135,17 @@ size_t gui_shortcuts_dialog_entries(gui_shortcut_platform platform, int with_upd
             const char *text = key;
             key += length;
             if (*key == ';') ++key;
-            if (length && text[0] == '@') { ++text; --length; }
+            if (length && text[0] == '@') {
+                ++text;
+                --length;
+            }
             if (!length) continue;
             /* Room for the separator, the key and the terminator. */
             if (length + (pieces ? 2u : 0u) >= storage_size - used) return 0;
-            if (pieces) { storage[used++] = ','; storage[used++] = ' '; }
+            if (pieces) {
+                storage[used++] = ',';
+                storage[used++] = ' ';
+            }
             memcpy(storage + used, text, length);
             used += length;
             ++pieces;

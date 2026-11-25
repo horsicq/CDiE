@@ -18,11 +18,11 @@ typedef struct result_group {
 
 static int same_group(const xx_scan_record *a, const xx_scan_record *b)
 {
-    return a->scan_id == b->scan_id && a->parent_id == b->parent_id && a->scan_part == b->scan_part &&
-        a->file_type == b->file_type && a->offset == b->offset && a->size == b->size &&
-        (a->scan_part != XX_SCAN_PART_ARCHIVE ||
-         (a->archive_offset == b->archive_offset && a->archive_size == b->archive_size && a->archive_compressed == b->archive_compressed &&
-          !strcmp(a->archive_member ? a->archive_member : "", b->archive_member ? b->archive_member : "")));
+    return a->scan_id == b->scan_id && a->parent_id == b->parent_id && a->scan_part == b->scan_part && a->file_type == b->file_type && a->offset == b->offset &&
+           a->size == b->size &&
+           (a->scan_part != XX_SCAN_PART_ARCHIVE ||
+            (a->archive_offset == b->archive_offset && a->archive_size == b->archive_size && a->archive_compressed == b->archive_compressed &&
+             !strcmp(a->archive_member ? a->archive_member : "", b->archive_member ? b->archive_member : "")));
 }
 static int emit_record(const xx_scan_record *record, size_t parent, gui_backend_tree_fn callback, void *user)
 {
@@ -44,7 +44,8 @@ static int emit_record(const xx_scan_record *record, size_t parent, gui_backend_
     detection.name = record->name ? record->name : "Unknown";
     detection.signature = record->source_ref;
     ok = label && callback(parent, label, type, &detection, user);
-    xx_rt_free(label); xx_rt_free(type);
+    xx_rt_free(label);
+    xx_rt_free(type);
     return ok;
 }
 
@@ -64,8 +65,11 @@ int gui_result_tree_emit(const xx_scan_result *result, int hide_unknown, gui_bac
             if (!first_input) first_input = record;
             else if (record->file_type != first_input->file_type) multiple_formats = 1;
         }
-        for (j = 0; j < group_count; ++j) if (same_group(record, groups[j].record)) break;
-        if (j == group_count) { groups[group_count++].record = record; }
+        for (j = 0; j < group_count; ++j)
+            if (same_group(record, groups[j].record)) break;
+        if (j == group_count) {
+            groups[group_count++].record = record;
+        }
         if (record->parent_id && (record->scan_part == XX_SCAN_PART_OVERLAY || record->scan_part == XX_SCAN_PART_INPUT)) has_overlay = 1;
     }
     while (emitted < group_count) {
@@ -97,19 +101,20 @@ int gui_result_tree_emit(const xx_scan_result *result, int hide_unknown, gui_bac
                 xx_buf_init(&text);
                 if (record->scan_part == XX_SCAN_PART_ARCHIVE) {
                     xx_buf_appendf(&text, "Archive member: %s: %s [Packed offset = 0x%llx, Packed size = 0x%llx, %s offset = 0x%llx, Size = 0x%llx]",
-                        record->archive_member ? record->archive_member : "", format,
-                        (unsigned long long)record->archive_offset, (unsigned long long)record->archive_size,
-                        record->archive_compressed ? "Member" : "Input", (unsigned long long)record->offset,
-                        (unsigned long long)record->size);
+                                   record->archive_member ? record->archive_member : "", format, (unsigned long long)record->archive_offset,
+                                   (unsigned long long)record->archive_size, record->archive_compressed ? "Member" : "Input", (unsigned long long)record->offset,
+                                   (unsigned long long)record->size);
                 } else if (!record->parent_id && record->scan_part == XX_SCAN_PART_INPUT) {
                     xx_buf_appendf(&text, "Format: %s", format);
                 } else {
-                    xx_buf_appendf(&text, "%s: %s [Offset = 0x%08llx,Size = 0x%llx]",
-                        record->scan_part == XX_SCAN_PART_RESOURCE ? "Resource" : "Overlay", format,
-                        (unsigned long long)record->offset, (unsigned long long)record->size);
+                    xx_buf_appendf(&text, "%s: %s [Offset = 0x%08llx,Size = 0x%llx]", record->scan_part == XX_SCAN_PART_RESOURCE ? "Resource" : "Overlay", format,
+                                   (unsigned long long)record->offset, (unsigned long long)record->size);
                 }
                 label = xx_buf_detach(&text, NULL);
-                if (!label) { ok = 0; goto done; }
+                if (!label) {
+                    ok = 0;
+                    goto done;
+                }
                 ok = callback(parent, label, "", NULL, user);
                 xx_rt_free(label);
                 if (!ok) goto done;
@@ -121,12 +126,19 @@ int gui_result_tree_emit(const xx_scan_result *result, int hide_unknown, gui_bac
                 /* A legacy flat overlay summary is replaced by the actual
                  * child scan when the engine supplies one. */
                 if (has_overlay && !child->parent_id && child->type && !strcmp(child->type, "Overlay")) continue;
-                if (!emit_record(child, groups[i].node, callback, user)) { ok = 0; goto done; }
+                if (!emit_record(child, groups[i].node, callback, user)) {
+                    ok = 0;
+                    goto done;
+                }
                 ++next_node;
             }
-            groups[i].emitted = 1; ++emitted;
+            groups[i].emitted = 1;
+            ++emitted;
         }
-        if (emitted == before) { ok = 0; goto done; }
+        if (emitted == before) {
+            ok = 0;
+            goto done;
+        }
     }
     ok = 1;
 done:

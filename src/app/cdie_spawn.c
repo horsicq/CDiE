@@ -100,10 +100,8 @@ static void spawn_error(char *pError, size_t nErrorSize, DWORD nCode)
     char *pText = NULL;
 
     if (!pError || !nErrorSize) return;
-    nLength = FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, nCode, 0, sText,
-                             (DWORD)(sizeof(sText) / sizeof(sText[0])), NULL);
-    while (nLength && (sText[nLength - 1] == L'\r' || sText[nLength - 1] == L'\n' || sText[nLength - 1] == L' ' ||
-                       sText[nLength - 1] == L'.')) {
+    nLength = FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, nCode, 0, sText, (DWORD)(sizeof(sText) / sizeof(sText[0])), NULL);
+    while (nLength && (sText[nLength - 1] == L'\r' || sText[nLength - 1] == L'\n' || sText[nLength - 1] == L' ' || sText[nLength - 1] == L'.')) {
         --nLength;
     }
     if (nLength) {
@@ -261,8 +259,7 @@ int cdie_spawn_wait(const char *pPath, const char *const ppArgv[], int *pExitCod
         pAttributes = (LPPROC_THREAD_ATTRIBUTE_LIST)xx_rt_malloc(nAttributesSize);
         if (pAttributes && InitializeProcThreadAttributeList(pAttributes, 1, 0, &nAttributesSize)) {
             bAttributesLive = 1;
-            if (UpdateProcThreadAttribute(pAttributes, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, aInherit,
-                                          (SIZE_T)nInherit * sizeof(HANDLE), NULL, NULL)) {
+            if (UpdateProcThreadAttribute(pAttributes, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, aInherit, (SIZE_T)nInherit * sizeof(HANDLE), NULL, NULL)) {
                 si.StartupInfo.cb = sizeof(si);
                 si.lpAttributeList = pAttributes;
                 nFlags |= EXTENDED_STARTUPINFO_PRESENT;
@@ -277,8 +274,7 @@ int cdie_spawn_wait(const char *pPath, const char *const ppArgv[], int *pExitCod
     if (GetConsoleCP() == 0) nFlags |= CREATE_NO_WINDOW;
 
     SetConsoleCtrlHandler(spawn_on_control, TRUE);
-    if (CreateProcessW((LPCWSTR)pWidePath, (LPWSTR)pWideLine, NULL, NULL, nInherit ? TRUE : FALSE, nFlags, NULL, NULL,
-                       &si.StartupInfo, &pi)) {
+    if (CreateProcessW((LPCWSTR)pWidePath, (LPWSTR)pWideLine, NULL, NULL, nInherit ? TRUE : FALSE, nFlags, NULL, NULL, &si.StartupInfo, &pi)) {
         /* The child has its own copies now. */
         for (i = 0; i < 3; ++i) {
             if (aOwned[i]) CloseHandle(aOwned[i]);

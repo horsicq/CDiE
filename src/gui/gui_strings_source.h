@@ -10,8 +10,8 @@ xxwidgets_status gui_strings_source_open(const char *path, xx_pd_struct *progres
 /* Configured extraction follows DIE's ANSI alphabet and UTF-16LE Unicode.
  * Configuration searches build a private candidate and publish it atomically;
  * the public source/model addresses and user pointer stay stable. */
-xxwidgets_status gui_strings_source_open_options(const char *path, const xxwidgets_strings_search_options *options,
-    xx_pd_struct *progress, gui_strings_source **out, char **error);
+xxwidgets_status gui_strings_source_open_options(const char *path, const xxwidgets_strings_search_options *options, xx_pd_struct *progress, gui_strings_source **out,
+                                                 char **error);
 const char *gui_strings_source_error(const gui_strings_source *source);
 xxwidgets_status gui_strings_source_generated(uint64_t count, xx_pd_struct *progress, gui_strings_source **out, char **error);
 xxwidgets_strings_source *gui_strings_source_model(gui_strings_source *source);

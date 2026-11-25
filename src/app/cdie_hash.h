@@ -5,7 +5,9 @@
 #define CDIE_HASH_COUNT 4
 /* Whole-file digests, lowercase hexadecimal. No parser/signature dependency.
  * Results and errors use xx_rt allocations. Failures return no partial result. */
-typedef struct cdie_hash_entry { char algorithm[8], value[65]; } cdie_hash_entry;
+typedef struct cdie_hash_entry {
+    char algorithm[8], value[65];
+} cdie_hash_entry;
 typedef struct cdie_hash_data {
     uint64_t size;
     cdie_hash_entry entries[CDIE_HASH_COUNT];

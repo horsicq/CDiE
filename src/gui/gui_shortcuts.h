@@ -12,7 +12,7 @@
 
 typedef enum gui_shortcut_action {
     GUI_SHORTCUT_NONE = 0,
-    GUI_SHORTCUT_OPEN,           /* the file chooser */
+    GUI_SHORTCUT_OPEN, /* the file chooser */
     GUI_SHORTCUT_EXIT,
     GUI_SHORTCUT_SCAN,
     GUI_SHORTCUT_RECENT,
@@ -50,8 +50,8 @@ const char *gui_shortcuts_keys(gui_shortcut_action action, gui_shortcut_platform
  * gets two bindings. with_update 0 leaves Update database out. The sequences
  * point into storage (storage_size bytes). Returns how many were written, or
  * 0 when out or storage is too small. */
-size_t gui_shortcuts_bindings(gui_shortcut_platform platform, int action_base, int with_update, xxwidgets_shortcut *out, size_t capacity,
-                              char *storage, size_t storage_size);
+size_t gui_shortcuts_bindings(gui_shortcut_platform platform, int action_base, int with_update, xxwidgets_shortcut *out, size_t capacity, char *storage,
+                              size_t storage_size);
 
 /* Maps a SHORTCUT event value back: the action, or NONE when value is not
  * action_base + a valid action. */
@@ -61,8 +61,7 @@ gui_shortcut_action gui_shortcuts_action(int value, int action_base);
  * the cdie catalog) and the keys as shown, several joined with ", ". with_update
  * 0 leaves Update database out. Strings point into storage. Returns the row
  * count, 0 when out or storage is too small. */
-size_t gui_shortcuts_dialog_entries(gui_shortcut_platform platform, int with_update, xxwidgets_shortcut_entry *out, size_t capacity,
-                                    char *storage, size_t storage_size);
+size_t gui_shortcuts_dialog_entries(gui_shortcut_platform platform, int with_update, xxwidgets_shortcut_entry *out, size_t capacity, char *storage, size_t storage_size);
 
 /* Opens the read-only Shortcuts dialog over owner for this platform. */
 xxwidgets_status gui_shortcuts_show(xxwidgets_widget *owner, int with_update);

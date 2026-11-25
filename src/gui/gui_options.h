@@ -58,8 +58,8 @@ void gui_preferences_set(const gui_options_values *values);
  * folder that is missing or does not load is reported on the Scan page;
  * Cancel/Escape/close preserve values and database/optimization state.
  * databases_reloaded reports a successfully committed database change. */
-xxwidgets_status gui_options_dialog(xxwidgets_widget *owner, const gui_options_host *host, gui_options_page_id *page,
-                                    gui_options_values *values, int *accepted, int *databases_reloaded);
+xxwidgets_status gui_options_dialog(xxwidgets_widget *owner, const gui_options_host *host, gui_options_page_id *page, gui_options_values *values, int *accepted,
+                                    int *databases_reloaded);
 
 /* Database folder pickers. Scan (signatures) and Info both call host->browse;
  * while it runs, gui_options_browse_page() names the asking page, so one

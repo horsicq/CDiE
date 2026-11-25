@@ -114,7 +114,10 @@ char *cdie_app_dir(void)
         char *utf8, *result;
         if (!wide) return NULL;
         length = GetModuleFileNameW(NULL, wide, capacity);
-        if (!length) { xx_rt_free(wide); return NULL; }
+        if (!length) {
+            xx_rt_free(wide);
+            return NULL;
+        }
         if (length < capacity) {
             wide[length] = 0;
             utf8 = xx_rt_utf16_to_utf8(wide);
@@ -238,8 +241,7 @@ void cdie_find_files(const char *pPath, xx_list_t *pList, int bRecursive)
     nCount = xx_list_count(&entries);
 
     if (nCount > 1) {
-        xx_rt_qsort(xx_list_at(&entries, 0), nCount, sizeof(xx_fs_entry_t *),
-                    cdie_entry_name_cmp);
+        xx_rt_qsort(xx_list_at(&entries, 0), nCount, sizeof(xx_fs_entry_t *), cdie_entry_name_cmp);
     }
 
     for (i = 0; i < nCount; i++) {

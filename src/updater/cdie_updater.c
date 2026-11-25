@@ -313,7 +313,8 @@ static char *upd_redact_url(const char *pUrl)
 
     if (!pScheme) return upd_dup(pUrl);
     pAuthority = pScheme + 3;
-    for (pEnd = pAuthority; *pEnd && *pEnd != '/' && *pEnd != '?' && *pEnd != '#'; ++pEnd) {}
+    for (pEnd = pAuthority; *pEnd && *pEnd != '/' && *pEnd != '?' && *pEnd != '#'; ++pEnd) {
+    }
     for (p = pAuthority; p < pEnd; ++p) {
         if (*p == '@') pAt = p;
     }
@@ -448,7 +449,8 @@ static void upd_lenient_ini(const char *pPath, char **ppMain, char **ppUrl)
             *pEquals = 0;
             for (p = pEquals; p > pLine && upd_is_space(p[-1]); --p) p[-1] = 0;
             xx_rt_snprintf(sKey, sizeof(sKey), "%s%s%s", sSection, sSection[0] ? "/" : "", pLine);
-            for (p = sKey; *p; ++p) if (*p == '\\') *p = '/';
+            for (p = sKey; *p; ++p)
+                if (*p == '\\') *p = '/';
             while (upd_is_space(*pValue)) ++pValue;
             nValue = xx_rt_strlen(pValue);
             while (nValue && upd_is_space(pValue[nValue - 1])) pValue[--nValue] = 0;
@@ -530,8 +532,7 @@ cdie_update_status cdie_update_config_load_settings(cdie_update_config *pConfig,
         upd_lenient_ini(xx_settings_get_location(pStore), &pMain, &pUrl);
     } else {
         if (pError && nErrorSize) {
-            xx_rt_snprintf(pError, nErrorSize, "Cannot read the settings in %s",
-                           pConfig->settings_location ? pConfig->settings_location : "the native store");
+            xx_rt_snprintf(pError, nErrorSize, "Cannot read the settings in %s", pConfig->settings_location ? pConfig->settings_location : "the native store");
         }
         xx_settings_destroy(pStore);
         return CDIE_UPDATE_ERROR_ARGUMENT;
@@ -813,8 +814,8 @@ static cdie_update_status upd_query_source(const cdie_update_config *pConfig, cd
                 xx_str_free(pDirect);
                 pInfo->remote_size = pAsset->size;
                 pInfo->remote_time = pAsset->updated_at;
-                xx_rt_snprintf(pInfo->remote_asset, sizeof(pInfo->remote_asset), "%lld:%lld:%lld", (long long)pAsset->id,
-                               (long long)pAsset->size, (long long)pAsset->updated_at);
+                xx_rt_snprintf(pInfo->remote_asset, sizeof(pInfo->remote_asset), "%lld:%lld:%lld", (long long)pAsset->id, (long long)pAsset->size,
+                               (long long)pAsset->updated_at);
                 if (pChecksum) {
                     char *pChecksumUrl = pChecksum->download_url ? NULL : xx_github_release_download_url(&release_url, release.tag, pChecksumName);
                     result = upd_fetch_md5(pGh, pChecksum->download_url ? pChecksum->download_url : pChecksumUrl, 1, pInfo, pInfo->remote_md5);
@@ -886,9 +887,9 @@ static cdie_update_status upd_query_source(const cdie_update_config *pConfig, cd
  * else -- a mistyped -D, a project's own "db" folder -- is refused. */
 static int upd_looks_like_database(const char *pPath)
 {
-    static const char *const ppTypes[] = {"Binary", "COM", "MSDOS", "NE", "LE", "LX", "PE", "ELF", "MACH", "MACHOFAT", "Archive", "ZIP",
-                                          "JAR", "APK", "IPA", "DEX", "NPM", "Amiga", "AtariST", "DOS16M", "DOS4G", "PDF", "CFBF",
-                                          "Image", "JPEG", "PNG", "RAR", "ISO9660", "JavaClass", "PYC"};
+    static const char *const ppTypes[] = {"Binary",  "COM", "MSDOS", "NE",    "LE",   "LX",  "PE",  "ELF",     "MACH",      "MACHOFAT",
+                                          "Archive", "ZIP", "JAR",   "APK",   "IPA",  "DEX", "NPM", "Amiga",   "AtariST",   "DOS16M",
+                                          "DOS4G",   "PDF", "CFBF",  "Image", "JPEG", "PNG", "RAR", "ISO9660", "JavaClass", "PYC"};
     xx_list_t entries;
     size_t i;
     size_t j;
@@ -1000,13 +1001,11 @@ static cdie_update_status upd_check_target(cdie_update_info *pInfo, const char *
      * copy of the user's own rules, so it is never replaced, even when -D
      * names it. */
     if (upd_is_extra_folder(pPath)) {
-        upd_message(pInfo, "Refusing to replace %s: cdie no longer uses the extra database; -D names the main database folder (db)",
-                    pPath);
+        upd_message(pInfo, "Refusing to replace %s: cdie no longer uses the extra database; -D names the main database folder (db)", pPath);
         return CDIE_UPDATE_ERROR_ARGUMENT;
     }
     if (!upd_looks_like_database(pPath)) {
-        upd_message(pInfo, "Refusing to replace %s: it does not look like a signature database (%s); name the database folder itself",
-                    pPath, pName);
+        upd_message(pInfo, "Refusing to replace %s: it does not look like a signature database (%s); name the database folder itself", pPath, pName);
         return CDIE_UPDATE_ERROR_ARGUMENT;
     }
     return CDIE_UPDATE_OK;
@@ -1128,8 +1127,7 @@ static cdie_update_status upd_lock_acquire(const char *pDir, upd_lock *pLock)
     pLock->handle = INVALID_HANDLE_VALUE;
     xx_rt_free(pPath);
     if (!pWide) return CDIE_UPDATE_ERROR_DATABASE;
-    pLock->handle = CreateFileW((LPCWSTR)pWide, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_ALWAYS,
-                                FILE_ATTRIBUTE_HIDDEN | FILE_FLAG_DELETE_ON_CLOSE, NULL);
+    pLock->handle = CreateFileW((LPCWSTR)pWide, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_HIDDEN | FILE_FLAG_DELETE_ON_CLOSE, NULL);
     nError = GetLastError();
     xx_rt_free(pWide);
     if (pLock->handle != INVALID_HANDLE_VALUE) return CDIE_UPDATE_OK;
@@ -1387,8 +1385,8 @@ static char *upd_record_name(const xx_archive_record *pRecord)
 
 /* Extract every member whose first path component is one of ppNames into
  * pRoot. pbFound[i] is set when a member of ppNames[i] was seen. */
-static cdie_update_status upd_extract(const char *pZip, const char *pRoot, const char *const *ppNames, size_t nNames, int *pbFound,
-                                      cdie_update_info *pInfo, xx_pd_struct *pPd)
+static cdie_update_status upd_extract(const char *pZip, const char *pRoot, const char *const *ppNames, size_t nNames, int *pbFound, cdie_update_info *pInfo,
+                                      xx_pd_struct *pPd)
 {
     xx_io_device *pDevice = xx_io_file_open(pZip, "rb");
     xx_zip *pArchive = pDevice ? xx_zip_create(pDevice, 0) : NULL;
@@ -1480,9 +1478,8 @@ static cdie_update_status upd_extract(const char *pZip, const char *pRoot, const
                             upd_message(pInfo, "Cancelled");
                             result = CDIE_UPDATE_ERROR_CANCELLED;
                         } else {
-                            upd_message(pInfo, "Cannot extract %s from %s%s%s (error %d)", pName, pInfo->archive_name,
-                                        (pPd && pPd->error_string[0]) ? ": " : "", (pPd && pPd->error_string[0]) ? pPd->error_string : "",
-                                        xx_io_extract_errno());
+                            upd_message(pInfo, "Cannot extract %s from %s%s%s (error %d)", pName, pInfo->archive_name, (pPd && pPd->error_string[0]) ? ": " : "",
+                                        (pPd && pPd->error_string[0]) ? pPd->error_string : "", xx_io_extract_errno());
                             result = CDIE_UPDATE_ERROR_VERIFY;
                         }
                         xx_rt_free(pName);
@@ -1522,9 +1519,9 @@ typedef struct upd_target_s {
     const char *name;   /* "db": top folder in the archive */
     const char *target; /* where it goes */
     char *parent;
-    char *stage;        /* staging folder in parent */
-    char *staged;       /* stage/x/<name> */
-    char *old;          /* stage/old-<name> */
+    char *stage;  /* staging folder in parent */
+    char *staged; /* stage/x/<name> */
+    char *old;    /* stage/old-<name> */
     int found;
     int moved_old;
     int moved_new;
@@ -1714,8 +1711,7 @@ static cdie_update_status upd_install(const cdie_update_config *pConfig, cdie_up
 
         /* A default folder that turns out read-only (an installed copy not
          * flagged as one) falls back to the user's own data folder. */
-        if (pInfo->main_is_default && pConfig->user_fallback && !pInfo->used_user_folder && !cdie_is_portable() &&
-            upd_use_user_folder(pInfo)) {
+        if (pInfo->main_is_default && pConfig->user_fallback && !pInfo->used_user_folder && !cdie_is_portable() && upd_use_user_folder(pInfo)) {
             t->target = pInfo->main_path;
             continue;
         }
@@ -1857,8 +1853,8 @@ static cdie_update_status upd_install(const cdie_update_config *pConfig, cdie_up
     upd_replace(&pInfo->installed_source, pInfo->source_url);
     if (!upd_write_stamp(pInfo->main_path, pInfo, sMd5, sTime)) {
         pInfo->installed_md5[0] = 0;
-        upd_message(pInfo, "Installed %d signatures in %s, but could not write %s; the next check will offer the update again", pInfo->signatures,
-                    pInfo->main_path, CDIE_UPDATE_STAMP_NAME);
+        upd_message(pInfo, "Installed %d signatures in %s, but could not write %s; the next check will offer the update again", pInfo->signatures, pInfo->main_path,
+                    CDIE_UPDATE_STAMP_NAME);
     } else if (pInfo->used_user_folder) {
         upd_message(pInfo, "Installed %d signatures in %s (the default database folder is read-only)", pInfo->signatures, pInfo->main_path);
     } else {

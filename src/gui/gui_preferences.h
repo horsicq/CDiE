@@ -19,8 +19,12 @@ typedef struct gui_database_preferences {
     char peid_path[GUI_PREFERENCE_PATH_MAX], yara_path[GUI_PREFERENCE_PATH_MAX];
     char main_update_url[GUI_PREFERENCE_URL_MAX], peid_update_url[GUI_PREFERENCE_URL_MAX], yara_update_url[GUI_PREFERENCE_URL_MAX];
 } gui_database_preferences;
-typedef struct gui_signatures_preferences { char path[GUI_PREFERENCE_PATH_MAX]; } gui_signatures_preferences;
-typedef struct gui_online_preferences { char virustotal_api_key[GUI_PREFERENCE_PATH_MAX]; } gui_online_preferences;
+typedef struct gui_signatures_preferences {
+    char path[GUI_PREFERENCE_PATH_MAX];
+} gui_signatures_preferences;
+typedef struct gui_online_preferences {
+    char virustotal_api_key[GUI_PREFERENCE_PATH_MAX];
+} gui_online_preferences;
 typedef struct gui_info_preferences {
     char path[GUI_PREFERENCE_PATH_MAX], update_url[GUI_PREFERENCE_URL_MAX];
 } gui_info_preferences;

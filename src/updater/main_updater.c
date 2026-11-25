@@ -52,7 +52,10 @@
 #include <unistd.h>
 #endif
 
-typedef enum upd_mode_e { MODE_UPDATE = 0, MODE_CHECK } upd_mode;
+typedef enum upd_mode_e {
+    MODE_UPDATE = 0,
+    MODE_CHECK
+} upd_mode;
 
 static volatile int g_bInterrupted = 0;
 static int g_bProgressShown = 0;
@@ -134,8 +137,8 @@ static void format_time(int64_t nTime, char *pBuffer, size_t nSize)
     int64_t m = mp < 10 ? mp + 3 : mp - 9;
 
     if (m <= 2) ++y;
-    xx_rt_snprintf(pBuffer, nSize, "%04lld-%02lld-%02lldT%02lld:%02lld:%02lldZ", (long long)y, (long long)m, (long long)d,
-                   (long long)(nSeconds / 3600), (long long)((nSeconds / 60) % 60), (long long)(nSeconds % 60));
+    xx_rt_snprintf(pBuffer, nSize, "%04lld-%02lld-%02lldT%02lld:%02lld:%02lldZ", (long long)y, (long long)m, (long long)d, (long long)(nSeconds / 3600),
+                   (long long)((nSeconds / 60) % 60), (long long)(nSeconds % 60));
 }
 
 static void print_json(upd_mode mode, cdie_update_status status, const cdie_update_info *pInfo)
@@ -179,8 +182,8 @@ static void print_text(upd_mode mode, cdie_update_status status, const cdie_upda
     if (pSettings) xx_rt_printf("Settings:   %s\n", pSettings);
     if (pSource) xx_rt_printf("Source:     %s\n", pSource);
     if (pInfo->release_tag) {
-        xx_rt_printf("Release:    %s%s%s%s\n", pInfo->release_name ? pInfo->release_name : pInfo->release_tag,
-                     pInfo->release_name ? " (" : "", pInfo->release_name ? pInfo->release_tag : "", pInfo->release_name ? ")" : "");
+        xx_rt_printf("Release:    %s%s%s%s\n", pInfo->release_name ? pInfo->release_name : pInfo->release_tag, pInfo->release_name ? " (" : "",
+                     pInfo->release_name ? pInfo->release_tag : "", pInfo->release_name ? ")" : "");
     }
     if (pInfo->archive_url) {
         if (pInfo->remote_time) format_time(pInfo->remote_time, sTime, sizeof(sTime));
@@ -192,8 +195,7 @@ static void print_text(upd_mode mode, cdie_update_status status, const cdie_upda
     if (pInfo->remote_md5[0]) xx_rt_printf("MD5:        %s\n", pInfo->remote_md5);
     if (status == CDIE_UPDATE_OK || status == CDIE_UPDATE_AVAILABLE) {
         if (pInfo->installed_md5[0]) {
-            xx_rt_printf("Installed:  %s%s%s%s\n", pInfo->installed_md5, pInfo->installed_at[0] ? " (" : "", pInfo->installed_at,
-                         pInfo->installed_at[0] ? ")" : "");
+            xx_rt_printf("Installed:  %s%s%s%s\n", pInfo->installed_md5, pInfo->installed_at[0] ? " (" : "", pInfo->installed_at, pInfo->installed_at[0] ? ")" : "");
         } else {
             xx_rt_printf("Installed:  %s\n", pInfo->has_database ? "no update record" : "none");
         }

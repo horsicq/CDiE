@@ -47,7 +47,7 @@ void gui_preferences_set(const gui_options_values *values)
 {
     if (!values) return;
     preferences = *values;
-    if (!preferences.file.save_last_directory) memset(preferences.file.last_directory,0,sizeof(preferences.file.last_directory));
-    if (!preferences.file.save_recent_files) memset(preferences.file.recent_files,0,sizeof(preferences.file.recent_files));
+    if (!preferences.file.save_last_directory) memset(preferences.file.last_directory, 0, sizeof(preferences.file.last_directory));
+    if (!preferences.file.save_recent_files) memset(preferences.file.recent_files, 0, sizeof(preferences.file.recent_files));
     preferences_initialized = 1;
 }

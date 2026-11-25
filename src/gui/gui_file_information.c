@@ -20,7 +20,10 @@ static char *copy_text(gui_file_information_data *data, const char *text)
     char *copy;
     if (size > GUI_INFO_MAX_BYTES - data->bytes) return NULL;
     copy = malloc(size);
-    if (copy) { memcpy(copy, text ? text : "", size); data->bytes += size; }
+    if (copy) {
+        memcpy(copy, text ? text : "", size);
+        data->bytes += size;
+    }
     return copy;
 }
 static char *copy_wide(gui_file_information_data *data, const wchar_t *text)
@@ -33,7 +36,9 @@ static char *copy_wide(gui_file_information_data *data, const wchar_t *text)
 static int collect_file(const char *path, const char *type, int64_t size, void *user)
 {
     gui_file_information_data *data = user;
-    data->path = copy_text(data, path); data->file_type = copy_text(data, type); data->size = size;
+    data->path = copy_text(data, path);
+    data->file_type = copy_text(data, type);
+    data->size = size;
     return data->path && data->file_type;
 }
 static int collect_structure(const char *name, const xx_data_struct *item, void *user)
@@ -41,8 +46,14 @@ static int collect_structure(const char *name, const xx_data_struct *item, void 
     gui_file_information_data *data = user;
     xxwidgets_data_struct_item *target;
     data->skipping = 0;
-    if (data->truncated) { data->skipping = 1; return 0; }
-    if (data->count >= GUI_INFO_MAX_STRUCTURES) { data->truncated = data->skipping = 1; return 0; }
+    if (data->truncated) {
+        data->skipping = 1;
+        return 0;
+    }
+    if (data->count >= GUI_INFO_MAX_STRUCTURES) {
+        data->truncated = data->skipping = 1;
+        return 0;
+    }
     if (data->count == data->capacity) {
         size_t capacity = data->capacity ? data->capacity * 2 : 32;
         size_t bytes = (capacity - data->capacity) * sizeof(*data->items);
@@ -54,13 +65,17 @@ static int collect_structure(const char *name, const xx_data_struct *item, void 
         items = realloc(data->items, capacity * sizeof(*items));
         if (!items) return 0;
         memset(items + data->capacity, 0, bytes);
-        data->items = items; data->capacity = capacity; data->bytes += bytes;
+        data->items = items;
+        data->capacity = capacity;
+        data->bytes += bytes;
     }
     target = &data->items[data->count++];
-    target->name = copy_text(data, name); target->data_struct = *item;
+    target->name = copy_text(data, name);
+    target->data_struct = *item;
     data->field_capacity = 0;
     if (!target->name) {
-        memset(target, 0, sizeof(*target)); --data->count;
+        memset(target, 0, sizeof(*target));
+        --data->count;
         data->truncated = data->skipping = 1;
     }
     return data->truncated ? 0 : 1;
@@ -79,29 +94,45 @@ static int collect_field(const xx_data_struct_record *record, void *user)
         size_t capacity = data->field_capacity ? data->field_capacity * 2 : 4;
         size_t bytes = (capacity - data->field_capacity) * sizeof(*field);
         xxwidgets_data_struct_field *fields;
-        if (capacity > 262144 || bytes > GUI_INFO_MAX_BYTES - data->bytes) { data->truncated = 1; return 0; }
+        if (capacity > 262144 || bytes > GUI_INFO_MAX_BYTES - data->bytes) {
+            data->truncated = 1;
+            return 0;
+        }
         fields = realloc((void *)item->fields, capacity * sizeof(*fields));
         if (!fields) return 0;
         memset(fields + data->field_capacity, 0, bytes);
-        item->fields = fields; data->field_capacity = capacity; data->bytes += bytes;
+        item->fields = fields;
+        data->field_capacity = capacity;
+        data->bytes += bytes;
     }
     field = (xxwidgets_data_struct_field *)item->fields + item->field_count++;
     field->relative_offset = record->offset;
-    field->file_offset = record->offset >= 0 && item->data_struct.offset >= 0 &&
-        item->data_struct.offset <= INT64_MAX - record->offset ? item->data_struct.offset + record->offset : -1;
-    field->size = record->size; field->property = record->property;
-    field->name = copy_wide(data, record->name); field->type = copy_wide(data, record->type);
-    field->raw = copy_wide(data, record->raw_value); field->value = copy_wide(data, record->display_value);
+    field->file_offset =
+        record->offset >= 0 && item->data_struct.offset >= 0 && item->data_struct.offset <= INT64_MAX - record->offset ? item->data_struct.offset + record->offset : -1;
+    field->size = record->size;
+    field->property = record->property;
+    field->name = copy_wide(data, record->name);
+    field->type = copy_wide(data, record->type);
+    field->raw = copy_wide(data, record->raw_value);
+    field->value = copy_wide(data, record->display_value);
     field->comment = copy_wide(data, record->comment);
     if (!field->name || !field->type || !field->raw || !field->value || !field->comment) {
-        free((void *)field->name); free((void *)field->type); free((void *)field->raw);
-        free((void *)field->value); free((void *)field->comment);
-        memset(field, 0, sizeof(*field)); --item->field_count;
+        free((void *)field->name);
+        free((void *)field->type);
+        free((void *)field->raw);
+        free((void *)field->value);
+        free((void *)field->comment);
+        memset(field, 0, sizeof(*field));
+        --item->field_count;
         data->truncated = 1;
     }
     return data->truncated ? 0 : 1;
 }
-static int end_structure(void *user) { (void)user; return 1; }
+static int end_structure(void *user)
+{
+    (void)user;
+    return 1;
+}
 
 void gui_file_information_free(gui_file_information_data *data)
 {
@@ -112,12 +143,18 @@ void gui_file_information_free(gui_file_information_data *data)
         free((void *)item->name);
         for (j = 0; j < item->field_count; ++j) {
             const xxwidgets_data_struct_field *field = item->fields + j;
-            free((void *)field->name); free((void *)field->type); free((void *)field->raw);
-            free((void *)field->value); free((void *)field->comment);
+            free((void *)field->name);
+            free((void *)field->type);
+            free((void *)field->raw);
+            free((void *)field->value);
+            free((void *)field->comment);
         }
         free((void *)item->fields);
     }
-    free(data->items); free(data->path); free(data->file_type); free(data);
+    free(data->items);
+    free(data->path);
+    free(data->file_type);
+    free(data);
 }
 
 int gui_file_information_read(const char *path, xx_pd_struct *progress, gui_file_information_data **out, char **error)
@@ -125,18 +162,22 @@ int gui_file_information_read(const char *path, xx_pd_struct *progress, gui_file
     return gui_file_information_read_slice(path, CDIE_FILE_INFO_SLICE_AUTO, progress, out, error);
 }
 
-int gui_file_information_read_slice(const char *path, int slice, xx_pd_struct *progress,
-    gui_file_information_data **out, char **error)
+int gui_file_information_read_slice(const char *path, int slice, xx_pd_struct *progress, gui_file_information_data **out, char **error)
 {
     static const cdie_file_info_visitor visitor = {collect_file, collect_structure, collect_field, end_structure};
     gui_file_information_data *data;
     if (!out || !error) return 0;
-    *out = NULL; *error = NULL;
+    *out = NULL;
+    *error = NULL;
     data = calloc(1, sizeof(*data));
     if (!data) return 0;
     if (!cdie_file_info_visit_slice(path, slice, NULL, 0, &visitor, data, progress, error)) {
-        if (!data->truncated || !data->count) { gui_file_information_free(data); return 0; }
-        gui_backend_free(*error); *error = NULL;
+        if (!data->truncated || !data->count) {
+            gui_file_information_free(data);
+            return 0;
+        }
+        gui_backend_free(*error);
+        *error = NULL;
     }
     *out = data;
     return 1;
@@ -154,7 +195,10 @@ static bool observe_information(const xx_pd_struct *progress, void *user)
 {
     information_job *job = user;
     int stop;
-    xx_mutex_lock(job->lock); job->snapshot = *progress; stop = job->stop; xx_mutex_unlock(job->lock);
+    xx_mutex_lock(job->lock);
+    job->snapshot = *progress;
+    stop = job->stop;
+    xx_mutex_unlock(job->lock);
     return stop != 0;
 }
 static int information_worker(void *user)
@@ -163,7 +207,10 @@ static int information_worker(void *user)
     xx_pd_observer previous = xx_pd_set_observer(&job->work, observe_information, job);
     job->ok = gui_file_information_read_slice(job->path, job->slice, &job->work, &job->data, &job->error);
     xx_pd_set_observer(previous.progress, previous.callback, previous.user_data);
-    xx_mutex_lock(job->lock); job->snapshot = job->work; job->done = 1; xx_mutex_unlock(job->lock);
+    xx_mutex_lock(job->lock);
+    job->snapshot = job->work;
+    job->done = 1;
+    xx_mutex_unlock(job->lock);
     return 0;
 }
 static xxwidgets_status information_progress(void *user, int stop_requested, xx_pd_struct *progress, int *finished)
@@ -171,7 +218,8 @@ static xxwidgets_status information_progress(void *user, int stop_requested, xx_
     information_job *job = user;
     xx_mutex_lock(job->lock);
     if (stop_requested) job->stop = 1;
-    *progress = job->snapshot; *finished = job->done;
+    *progress = job->snapshot;
+    *finished = job->done;
     xx_mutex_unlock(job->lock);
     return XXWIDGETS_OK;
 }
@@ -200,21 +248,32 @@ static xxwidgets_status show_information(xxwidgets_widget *owner, const char *pa
     xxwidgets_status status;
     int joined;
     if (!owner || !path || !*path || slice < CDIE_FILE_INFO_SLICE_AUTO) return XXWIDGETS_INVALID_ARGUMENT;
-    job.path = path; job.slice = slice; job.work = xx_pd_init(); job.snapshot = job.work; job.lock = xx_mutex_create();
+    job.path = path;
+    job.slice = slice;
+    job.work = xx_pd_init();
+    job.snapshot = job.work;
+    job.lock = xx_mutex_create();
     if (!job.lock) return XXWIDGETS_OUT_OF_MEMORY;
     thread = xx_thread_create(information_worker, &job);
-    if (!thread) { xx_mutex_destroy(job.lock); return XXWIDGETS_PLATFORM_ERROR; }
+    if (!thread) {
+        xx_mutex_destroy(job.lock);
+        return XXWIDGETS_PLATFORM_ERROR;
+    }
     status = xxwidgets_process_dialog(owner, CDIE_TR("Loading File Information"), &progress, information_progress, &job);
     if (status != XXWIDGETS_OK) {
-        xx_mutex_lock(job.lock); job.stop = 1; xx_mutex_unlock(job.lock);
+        xx_mutex_lock(job.lock);
+        job.stop = 1;
+        xx_mutex_unlock(job.lock);
     }
-    joined = xx_thread_join(thread, NULL); xx_mutex_destroy(job.lock);
+    joined = xx_thread_join(thread, NULL);
+    xx_mutex_destroy(job.lock);
     if (!joined) status = XXWIDGETS_PLATFORM_ERROR;
     else if (status == XXWIDGETS_OK && job.ok)
-        status = xxwidgets_file_information_dialog_at(owner, CDIE_TR("File Information"), job.data->path, job.data->file_type,
-            job.data->size, job.data->items, job.data->count, selector);
+        status = xxwidgets_file_information_dialog_at(owner, CDIE_TR("File Information"), job.data->path, job.data->file_type, job.data->size, job.data->items,
+                                                      job.data->count, selector);
     else if (status == XXWIDGETS_OK && !job.work.is_stop)
         status = gui_error_show_file(owner, CDIE_TR("File Information"), CDIE_N_("Cannot read the file information of %s."), path, job.error);
-    gui_file_information_free(job.data); gui_backend_free(job.error);
+    gui_file_information_free(job.data);
+    gui_backend_free(job.error);
     return status;
 }

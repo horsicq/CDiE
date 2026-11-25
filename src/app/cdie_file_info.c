@@ -19,8 +19,8 @@ typedef struct info_reader {
     xx_pe pe;
     xx_elf elf;
     xx_macho macho;
-    xx_machofat fat;   /* fat (universal) Mach-O: validates the table... */
-    xx_macho slice;    /* ...and reads the opened slice through slice_device */
+    xx_machofat fat; /* fat (universal) Mach-O: validates the table... */
+    xx_macho slice;  /* ...and reads the opened slice through slice_device */
     xx_io_device *slice_device;
     int fat_ready, slice_ready;
     Abstractformat *format;
@@ -88,8 +88,7 @@ static void escaped(info_writer *writer, const char *text)
 {
     xx_terminal_writer terminal;
     xx_terminal_writer_init(&terminal, info_sink, &writer->buffer);
-    if (writer->output == CDIE_OUTPUT_JSON)
-        xx_terminal_writer_json_string(&terminal, text ? text : "");
+    if (writer->output == CDIE_OUTPUT_JSON) xx_terminal_writer_json_string(&terminal, text ? text : "");
     else xx_terminal_writer_xml_attribute(&terminal, text ? text : "");
     if (xx_terminal_writer_status(&terminal) != XXFC_OK) writer->buffer.failed = true;
 }
@@ -105,19 +104,25 @@ static void cell(info_writer *writer, const char *text)
     xx_buf_append_char(&writer->buffer, '"');
 }
 
-static void row(info_writer *writer, const char *structure, int64_t offset, int64_t size, uint64_t count,
-    const char *field, const char *type, const char *raw, const char *value)
+static void row(info_writer *writer, const char *structure, int64_t offset, int64_t size, uint64_t count, const char *field, const char *type, const char *raw,
+                const char *value)
 {
     char separator = writer->output == CDIE_OUTPUT_CSV ? ';' : '\t';
-    cell(writer, writer->path); xx_buf_append_char(&writer->buffer, separator);
-    cell(writer, structure); xx_buf_append_char(&writer->buffer, separator);
+    cell(writer, writer->path);
+    xx_buf_append_char(&writer->buffer, separator);
+    cell(writer, structure);
+    xx_buf_append_char(&writer->buffer, separator);
     xx_buf_appendf(&writer->buffer, "%lld%c%lld%c", (long long)offset, separator, (long long)size, separator);
     if (count) xx_buf_appendf(&writer->buffer, "%llu", (unsigned long long)count);
     xx_buf_append_char(&writer->buffer, separator);
-    cell(writer, field); xx_buf_append_char(&writer->buffer, separator);
-    cell(writer, type); xx_buf_append_char(&writer->buffer, separator);
-    cell(writer, raw); xx_buf_append_char(&writer->buffer, separator);
-    cell(writer, value); xx_buf_append_char(&writer->buffer, '\n');
+    cell(writer, field);
+    xx_buf_append_char(&writer->buffer, separator);
+    cell(writer, type);
+    xx_buf_append_char(&writer->buffer, separator);
+    cell(writer, raw);
+    xx_buf_append_char(&writer->buffer, separator);
+    cell(writer, value);
+    xx_buf_append_char(&writer->buffer, '\n');
 }
 
 static void begin_document(info_writer *writer, const char *path, const char *type, int64_t size)
@@ -126,17 +131,21 @@ static void begin_document(info_writer *writer, const char *path, const char *ty
     writer->first_structure = 1;
     writer->path = path;
     if (writer->output == CDIE_OUTPUT_JSON) {
-        xx_buf_append_str(buffer, "{\"path\":"); escaped(writer, path);
-        xx_buf_append_str(buffer, ",\"filetype\":"); escaped(writer, type);
+        xx_buf_append_str(buffer, "{\"path\":");
+        escaped(writer, path);
+        xx_buf_append_str(buffer, ",\"filetype\":");
+        escaped(writer, type);
         xx_buf_appendf(buffer, ",\"size\":%lld,\"structures\":[", (long long)size);
     } else if (writer->output == CDIE_OUTPUT_XML) {
-        xx_buf_append_str(buffer, "<file-info path=\""); escaped(writer, path);
-        xx_buf_append_str(buffer, "\" filetype=\""); escaped(writer, type);
+        xx_buf_append_str(buffer, "<file-info path=\"");
+        escaped(writer, path);
+        xx_buf_append_str(buffer, "\" filetype=\"");
+        escaped(writer, type);
         xx_buf_appendf(buffer, "\" size=\"%lld\">\n", (long long)size);
     } else if (writer->output == CDIE_OUTPUT_CSV || writer->output == CDIE_OUTPUT_TSV) {
         char separator = writer->output == CDIE_OUTPUT_CSV ? ';' : '\t';
-        xx_buf_appendf(buffer, "Path%cStructure%cOffset%cSize%cCount%cField%cType%cRaw%cValue\n",
-            separator, separator, separator, separator, separator, separator, separator, separator);
+        xx_buf_appendf(buffer, "Path%cStructure%cOffset%cSize%cCount%cField%cType%cRaw%cValue\n", separator, separator, separator, separator, separator, separator,
+                       separator, separator);
     } else {
         xx_buf_appendf(buffer, "%s\n    File: %s\n    Size: %lld\n", type, path ? path : "", (long long)size);
     }
@@ -148,18 +157,20 @@ static void begin_structure(info_writer *writer, const char *name, const xx_data
     writer->first_field = 1;
     if (writer->output == CDIE_OUTPUT_JSON) {
         if (!writer->first_structure) xx_buf_append_char(buffer, ',');
-        xx_buf_append_str(buffer, "{\"name\":"); escaped(writer, name);
-        xx_buf_appendf(buffer, ",\"offset\":%lld,\"size\":%lld,\"count\":%llu,\"fields\":[",
-            (long long)item->offset, (long long)item->total_size, (unsigned long long)item->count);
+        xx_buf_append_str(buffer, "{\"name\":");
+        escaped(writer, name);
+        xx_buf_appendf(buffer, ",\"offset\":%lld,\"size\":%lld,\"count\":%llu,\"fields\":[", (long long)item->offset, (long long)item->total_size,
+                       (unsigned long long)item->count);
     } else if (writer->output == CDIE_OUTPUT_XML) {
-        xx_buf_append_str(buffer, "  <structure name=\""); escaped(writer, name);
-        xx_buf_appendf(buffer, "\" offset=\"%lld\" size=\"%lld\" count=\"%llu\">\n",
-            (long long)item->offset, (long long)item->total_size, (unsigned long long)item->count);
+        xx_buf_append_str(buffer, "  <structure name=\"");
+        escaped(writer, name);
+        xx_buf_appendf(buffer, "\" offset=\"%lld\" size=\"%lld\" count=\"%llu\">\n", (long long)item->offset, (long long)item->total_size,
+                       (unsigned long long)item->count);
     } else if (writer->output == CDIE_OUTPUT_CSV || writer->output == CDIE_OUTPUT_TSV) {
         row(writer, name, item->offset, item->total_size, item->count, "", "", "", "");
     } else {
-        xx_buf_appendf(buffer, "    %s [Offset=0x%llx, Size=0x%llx, Count=%llu]\n", name,
-            (unsigned long long)item->offset, (unsigned long long)item->total_size, (unsigned long long)item->count);
+        xx_buf_appendf(buffer, "    %s [Offset=0x%llx, Size=0x%llx, Count=%llu]\n", name, (unsigned long long)item->offset, (unsigned long long)item->total_size,
+                       (unsigned long long)item->count);
     }
     writer->first_structure = 0;
 }
@@ -181,25 +192,36 @@ static int emit_field(info_writer *writer, const char *structure, const xx_data_
     if (!ok) goto done;
     if (writer->output == CDIE_OUTPUT_JSON) {
         if (!writer->first_field) xx_buf_append_char(buffer, ',');
-        xx_buf_append_str(buffer, "{\"name\":"); escaped(writer, name);
-        xx_buf_append_str(buffer, ",\"type\":"); escaped(writer, type);
+        xx_buf_append_str(buffer, "{\"name\":");
+        escaped(writer, name);
+        xx_buf_append_str(buffer, ",\"type\":");
+        escaped(writer, type);
         xx_buf_appendf(buffer, ",\"offset\":%lld,\"size\":%lld,\"raw\":", (long long)record->offset, (long long)record->size);
-        escaped(writer, raw); xx_buf_append_str(buffer, ",\"value\":"); escaped(writer, value);
+        escaped(writer, raw);
+        xx_buf_append_str(buffer, ",\"value\":");
+        escaped(writer, value);
         xx_buf_append_char(buffer, '}');
     } else if (writer->output == CDIE_OUTPUT_XML) {
-        xx_buf_append_str(buffer, "    <field name=\""); escaped(writer, name);
-        xx_buf_append_str(buffer, "\" type=\""); escaped(writer, type);
+        xx_buf_append_str(buffer, "    <field name=\"");
+        escaped(writer, name);
+        xx_buf_append_str(buffer, "\" type=\"");
+        escaped(writer, type);
         xx_buf_appendf(buffer, "\" offset=\"%lld\" size=\"%lld\" raw=\"", (long long)record->offset, (long long)record->size);
-        escaped(writer, raw); xx_buf_append_str(buffer, "\" value=\""); escaped(writer, value);
+        escaped(writer, raw);
+        xx_buf_append_str(buffer, "\" value=\"");
+        escaped(writer, value);
         xx_buf_append_str(buffer, "\"/>\n");
     } else if (writer->output == CDIE_OUTPUT_CSV || writer->output == CDIE_OUTPUT_TSV) {
         row(writer, structure, record->offset, record->size, 0, name, type, raw, value);
-    } else xx_buf_appendf(buffer, "        %s: %s [%s, +0x%llx, %lld bytes, raw=%s]\n",
-        name, value, type, (unsigned long long)record->offset, (long long)record->size, raw);
+    } else
+        xx_buf_appendf(buffer, "        %s: %s [%s, +0x%llx, %lld bytes, raw=%s]\n", name, value, type, (unsigned long long)record->offset, (long long)record->size, raw);
     writer->first_field = 0;
     ok = xx_buf_ok(buffer) && buffer->size <= INFO_MAX_OUTPUT;
 done:
-    xx_str_free(name); xx_str_free(type); xx_str_free(raw); xx_str_free(value);
+    xx_str_free(name);
+    xx_str_free(type);
+    xx_str_free(raw);
+    xx_str_free(value);
     return ok;
 }
 
@@ -231,8 +253,7 @@ static uint32_t host_cpu_type(void)
 }
 
 /* One fat_arch entry: cputype, offset and size. */
-static int fat_entry(xx_io_device *device, const info_fat *fat, uint32_t index, uint8_t *entry,
-    uint32_t *cpu, int64_t *offset, int64_t *size)
+static int fat_entry(xx_io_device *device, const info_fat *fat, uint32_t index, uint8_t *entry, uint32_t *cpu, int64_t *offset, int64_t *size)
 {
     if (!xx_io_read_at(device, 8 + (int64_t)index * fat->stride, entry, fat->stride)) return 0;
     *cpu = xx_data_get_u32(entry, fat->stride, 0, fat->big);
@@ -268,15 +289,20 @@ static int fat_read(xx_io_device *device, int requested, info_fat *fat)
 
 /* A fat table row, shaped like the native DataStructs: hex identifiers and
  * offsets, decimal counts and sizes, the raw value in fixed-width hex. */
-static int fat_structure(info_walk *walk, const char *name, uint32_t id, const xx_data_struct *item,
-    const info_fat_field *fields, size_t count)
+static int fat_structure(info_walk *walk, const char *name, uint32_t id, const xx_data_struct *item, const info_fat_field *fields, size_t count)
 {
     const cdie_file_info_visitor *visitor = walk->visitor;
     size_t i, k;
-    if (++walk->visited > INFO_MAX_STRUCTURES) { walk->message = "DataStructs structure limit exceeded"; return 0; }
+    if (++walk->visited > INFO_MAX_STRUCTURES) {
+        walk->message = "DataStructs structure limit exceeded";
+        return 0;
+    }
     if (walk->selected_id && (walk->selected_format != walk->fat_tag || id != walk->selected_id)) return 1;
     walk->found = 1;
-    if (++walk->structures > INFO_MAX_STRUCTURES) { walk->message = "DataStructs structure limit exceeded"; return 0; }
+    if (++walk->structures > INFO_MAX_STRUCTURES) {
+        walk->message = "DataStructs structure limit exceeded";
+        return 0;
+    }
     if (!visitor->begin_structure(name, item, walk->user)) goto collect_failure;
     for (i = 0; !walk->inventory && i < count; ++i) {
         const info_fat_field *field = fields + i;
@@ -284,7 +310,10 @@ static int fat_structure(info_walk *walk, const char *name, uint32_t id, const x
         wchar_t wide_name[16], wide_type[16], wide_raw[24], wide_value[24];
         xx_data_struct_record record;
         if (walk->field_filter && xx_rt_strcmp(field->name, walk->field_filter)) continue;
-        if (++walk->field_count > INFO_MAX_FIELDS) { walk->message = "DataStructs field limit exceeded"; return 0; }
+        if (++walk->field_count > INFO_MAX_FIELDS) {
+            walk->message = "DataStructs field limit exceeded";
+            return 0;
+        }
         if (field->size == 8) xx_rt_snprintf(raw, sizeof(raw), "0x%016llX", (unsigned long long)field->value);
         else xx_rt_snprintf(raw, sizeof(raw), "0x%08X", (unsigned)field->value);
         if (field->hex) xx_rt_snprintf(value, sizeof(value), "%s", raw);
@@ -298,8 +327,13 @@ static int fat_structure(info_walk *walk, const char *name, uint32_t id, const x
         for (k = 0; k < 23 && value[k]; ++k) wide_value[k] = (wchar_t)value[k];
         wide_value[k] = 0;
         xx_rt_memset(&record, 0, sizeof(record));
-        record.name = wide_name; record.type = wide_type; record.raw_value = wide_raw; record.display_value = wide_value;
-        record.offset = field->offset; record.size = field->size; record.property = field->property;
+        record.name = wide_name;
+        record.type = wide_type;
+        record.raw_value = wide_raw;
+        record.display_value = wide_value;
+        record.offset = field->offset;
+        record.size = field->size;
+        record.property = field->property;
         ++walk->matched_fields;
         if (!visitor->field(&record, walk->user)) goto collect_failure;
     }
@@ -322,49 +356,72 @@ static int walk_fat(info_walk *walk, xx_io_device *device, const info_fat *fat)
     uint8_t entry[32];
     int64_t offset, size;
     xx_data_struct item;
-    info_fat_field fields[6] = {
-        {"magic", "uint32", 0, 4, 0, 1, XX_DATA_STRUCT_RECORD_PROPERTY_SIGNATURE},
-        {"nfat_arch", "uint32", 4, 4, 0, 0, XX_DATA_STRUCT_RECORD_PROPERTY_COUNT}
-    };
+    info_fat_field fields[6] = {{"magic", "uint32", 0, 4, 0, 1, XX_DATA_STRUCT_RECORD_PROPERTY_SIGNATURE},
+                                {"nfat_arch", "uint32", 4, 4, 0, 0, XX_DATA_STRUCT_RECORD_PROPERTY_COUNT}};
     xx_rt_memset(&item, 0, sizeof(item));
-    item.address = -1; item.type = XX_DATA_STRUCT_TYPE_STRUCT;
-    item.entry_size = item.total_size = 8; item.count = 1;
-    fields[0].value = fat->magic; fields[1].value = fat->count;
+    item.address = -1;
+    item.type = XX_DATA_STRUCT_TYPE_STRUCT;
+    item.entry_size = item.total_size = 8;
+    item.count = 1;
+    fields[0].value = fat->magic;
+    fields[1].value = fat->count;
     if (!fat_structure(walk, "fat_header", INFO_FAT_HEADER, &item, fields, 2)) return 0;
-    item.offset = 8; item.entry_size = fat->stride; item.count = walk->inventory ? fat->count : 1;
+    item.offset = 8;
+    item.entry_size = fat->stride;
+    item.count = walk->inventory ? fat->count : 1;
     item.total_size = (int64_t)fat->stride * (int64_t)item.count;
     if (walk->inventory && !fat_structure(walk, arch, arch_id, &item, NULL, 0)) return 0;
     /* fat_arch: cputype, cpusubtype, offset, size, align (+ reserved in fat_arch_64);
      * offset and size are 32-bit, or 64-bit in fat_arch_64. */
-    fields[0].name = "cputype"; fields[0].hex = 1; fields[0].property = XX_DATA_STRUCT_RECORD_PROPERTY_ID;
-    fields[1].name = "cpusubtype"; fields[1].offset = 4; fields[1].hex = 1; fields[1].property = XX_DATA_STRUCT_RECORD_PROPERTY_ID;
+    fields[0].name = "cputype";
+    fields[0].hex = 1;
+    fields[0].property = XX_DATA_STRUCT_RECORD_PROPERTY_ID;
+    fields[1].name = "cpusubtype";
+    fields[1].offset = 4;
+    fields[1].hex = 1;
+    fields[1].property = XX_DATA_STRUCT_RECORD_PROPERTY_ID;
     for (i = 2; i < 6; ++i) {
         fields[i].type = i < 4 && fat->wide ? "uint64" : "uint32";
         fields[i].size = i < 4 && fat->wide ? 8 : 4;
         fields[i].offset = fields[i - 1].offset + fields[i - 1].size;
     }
-    fields[2].name = "offset"; fields[2].hex = 1; fields[2].property = XX_DATA_STRUCT_RECORD_PROPERTY_OFFSET;
-    fields[3].name = "size"; fields[3].property = XX_DATA_STRUCT_RECORD_PROPERTY_SIZE;
-    fields[4].name = "align"; fields[4].property = XX_DATA_STRUCT_RECORD_PROPERTY_NONE;
-    fields[5].name = "reserved"; fields[5].property = XX_DATA_STRUCT_RECORD_PROPERTY_RESERVED;
+    fields[2].name = "offset";
+    fields[2].hex = 1;
+    fields[2].property = XX_DATA_STRUCT_RECORD_PROPERTY_OFFSET;
+    fields[3].name = "size";
+    fields[3].property = XX_DATA_STRUCT_RECORD_PROPERTY_SIZE;
+    fields[4].name = "align";
+    fields[4].property = XX_DATA_STRUCT_RECORD_PROPERTY_NONE;
+    fields[5].name = "reserved";
+    fields[5].property = XX_DATA_STRUCT_RECORD_PROPERTY_RESERVED;
     for (i = 0; !walk->inventory && i < fat->count; ++i) {
-        if (!fat_entry(device, fat, i, entry, &cpu, &offset, &size)) { walk->message = "Cannot read the fat_arch table"; return 0; }
+        if (!fat_entry(device, fat, i, entry, &cpu, &offset, &size)) {
+            walk->message = "Cannot read the fat_arch table";
+            return 0;
+        }
         fields[0].value = cpu;
         fields[1].value = xx_data_get_u32(entry, fat->stride, 4, fat->big);
-        fields[2].value = (uint64_t)offset; fields[3].value = (uint64_t)size;
+        fields[2].value = (uint64_t)offset;
+        fields[3].value = (uint64_t)size;
         fields[4].value = xx_data_get_u32(entry, fat->stride, (size_t)fields[4].offset, fat->big);
         fields[5].value = fat->wide ? xx_data_get_u32(entry, fat->stride, 28, fat->big) : 0;
         item.offset = 8 + (int64_t)i * fat->stride;
         if (!fat_structure(walk, arch, arch_id, &item, fields, fat->wide ? 6 : 5)) return 0;
     }
     for (i = 0; i < fat->count; ++i) {
-        if (!fat_entry(device, fat, i, entry, &cpu, &offset, &size)) { walk->message = "Cannot read the fat_arch table"; return 0; }
+        if (!fat_entry(device, fat, i, entry, &cpu, &offset, &size)) {
+            walk->message = "Cannot read the fat_arch table";
+            return 0;
+        }
         if (i == fat->chosen && walk->slice) {
             if (!walk_structures(walk, walk->slice, offset)) return 0;
             continue;
         }
-        item.id = XX_DATA_STRUCT_ID_RAW_DATA; item.type = XX_DATA_STRUCT_TYPE_RAW_DATA;
-        item.offset = offset; item.entry_size = item.total_size = size; item.count = 1;
+        item.id = XX_DATA_STRUCT_ID_RAW_DATA;
+        item.type = XX_DATA_STRUCT_TYPE_RAW_DATA;
+        item.offset = offset;
+        item.entry_size = item.total_size = size;
+        item.count = 1;
         if (!fat_structure(walk, "RAW_DATA", XX_DATA_STRUCT_ID_RAW_DATA, &item, NULL, 0)) return 0;
     }
     return 1;
@@ -382,7 +439,10 @@ static int walk_structures(info_walk *walk, Abstractformat *format, int64_t bias
     if (!state) return 0;
     while ((item = xx_format_get_current_data_struct(format, state)) != NULL) {
         const char *name;
-        if (++walk->visited > INFO_MAX_STRUCTURES) { walk->message = "DataStructs structure limit exceeded"; goto done; }
+        if (++walk->visited > INFO_MAX_STRUCTURES) {
+            walk->message = "DataStructs structure limit exceeded";
+            goto done;
+        }
         if (!walk->selected_id || (format == walk->selected_format && item->id == walk->selected_id)) {
             uint64_t occurrence, occurrences = 1;
             name = xx_format_data_struct_id_to_string(format, item->id);
@@ -390,17 +450,22 @@ static int walk_structures(info_walk *walk, Abstractformat *format, int64_t bias
             walk->found = 1;
             if (!walk->inventory && item->type != XX_DATA_STRUCT_TYPE_RAW_DATA && item->count > 1 && item->entry_size > 0) {
                 if (item->total_size <= 0 || item->count > (uint64_t)(item->total_size / item->entry_size)) {
-                    walk->message = "Invalid DataStructs table extent"; goto done;
+                    walk->message = "Invalid DataStructs table extent";
+                    goto done;
                 }
                 occurrences = item->count;
             }
             for (occurrence = 0; occurrence < occurrences; ++occurrence) {
                 xx_data_struct entry = *item, shown;
-                if (++walk->structures > INFO_MAX_STRUCTURES) { walk->message = "DataStructs structure limit exceeded"; goto done; }
+                if (++walk->structures > INFO_MAX_STRUCTURES) {
+                    walk->message = "DataStructs structure limit exceeded";
+                    goto done;
+                }
                 if (occurrences > 1) {
                     int64_t delta = (int64_t)occurrence * item->entry_size;
                     if (item->offset < 0 || item->offset > INT64_MAX - delta) {
-                        walk->message = "DataStructs table offset overflow"; goto done;
+                        walk->message = "DataStructs table offset overflow";
+                        goto done;
                     }
                     entry.offset += delta;
                     entry.address = item->address >= 0 && item->address <= INT64_MAX - delta ? item->address + delta : -1;
@@ -409,7 +474,10 @@ static int walk_structures(info_walk *walk, Abstractformat *format, int64_t bias
                 }
                 shown = entry;
                 if (bias) {
-                    if (entry.offset < 0 || entry.offset > INT64_MAX - bias) { walk->message = "DataStructs table offset overflow"; goto done; }
+                    if (entry.offset < 0 || entry.offset > INT64_MAX - bias) {
+                        walk->message = "DataStructs table offset overflow";
+                        goto done;
+                    }
                     shown.offset += bias;
                 }
                 if (!visitor->begin_structure(name, &shown, walk->user)) goto collect_failure;
@@ -421,9 +489,15 @@ static int walk_structures(info_walk *walk, Abstractformat *format, int64_t bias
                     while ((record = xx_format_get_current_data_struct_record(format, fields)) != NULL) {
                         char *field_name;
                         int match;
-                        if (++walk->field_count > INFO_MAX_FIELDS) { walk->message = "DataStructs field limit exceeded"; goto done; }
+                        if (++walk->field_count > INFO_MAX_FIELDS) {
+                            walk->message = "DataStructs field limit exceeded";
+                            goto done;
+                        }
                         field_name = xx_str_unicode_to_utf8(record->name ? record->name : L"");
-                        if (!field_name) { walk->message = "Out of memory"; goto done; }
+                        if (!field_name) {
+                            walk->message = "Out of memory";
+                            goto done;
+                        }
                         match = !walk->field_filter || !xx_rt_strcmp(field_name, walk->field_filter);
                         xx_str_free(field_name);
                         if (match) {
@@ -432,7 +506,8 @@ static int walk_structures(info_walk *walk, Abstractformat *format, int64_t bias
                         }
                         if (!xx_format_data_struct_record_move_to_next(format, fields, walk->progress)) break;
                     }
-                    xx_format_free_data_struct_records_reading(format, fields); fields = NULL;
+                    xx_format_free_data_struct_records_reading(format, fields);
+                    fields = NULL;
                 }
                 if (!visitor->end_structure(walk->user)) goto collect_failure;
             }
@@ -449,14 +524,13 @@ done:
     return ok;
 }
 
-int cdie_file_info_visit(const char *path, const char *selector, int inventory,
-    const cdie_file_info_visitor *visitor, void *user, xx_pd_struct *progress, char **error)
+int cdie_file_info_visit(const char *path, const char *selector, int inventory, const cdie_file_info_visitor *visitor, void *user, xx_pd_struct *progress, char **error)
 {
     return cdie_file_info_visit_slice(path, CDIE_FILE_INFO_SLICE_AUTO, selector, inventory, visitor, user, progress, error);
 }
 
-int cdie_file_info_visit_slice(const char *path, int slice, const char *selector, int inventory,
-    const cdie_file_info_visitor *visitor, void *user, xx_pd_struct *external_progress, char **error)
+int cdie_file_info_visit_slice(const char *path, int slice, const char *selector, int inventory, const cdie_file_info_visitor *visitor, void *user,
+                               xx_pd_struct *external_progress, char **error)
 {
     /* The fat table's names, indexed by INFO_FAT_* - 1. */
     static const char *const fat_names[] = {"fat_header", "fat_arch", "fat_arch_64"};
@@ -472,22 +546,37 @@ int cdie_file_info_visit_slice(const char *path, int slice, const char *selector
     int64_t size = -1;
     if (!error) return 0;
     *error = NULL;
-    if (!visitor || !visitor->begin_file || !visitor->begin_structure || !visitor->field || !visitor->end_structure ||
-        slice < CDIE_FILE_INFO_SLICE_AUTO) {
-        *error = cdie_strdup("Invalid File Information visitor"); return 0;
+    if (!visitor || !visitor->begin_file || !visitor->begin_structure || !visitor->field || !visitor->end_structure || slice < CDIE_FILE_INFO_SLICE_AUTO) {
+        *error = cdie_strdup("Invalid File Information visitor");
+        return 0;
     }
     xx_rt_memset(&reader, 0, sizeof(reader));
     xx_rt_memset(&walk, 0, sizeof(walk));
     xx_rt_memset(&fat_table, 0, sizeof(fat_table));
-    walk.visitor = visitor; walk.user = user; walk.progress = progress; walk.inventory = inventory;
+    walk.visitor = visitor;
+    walk.user = user;
+    walk.progress = progress;
+    walk.inventory = inventory;
     walk.fat_tag = &reader.fat.format;
-    if (xx_pd_is_stopped(progress)) { message = "File Information cancelled"; goto finish; }
+    if (xx_pd_is_stopped(progress)) {
+        message = "File Information cancelled";
+        goto finish;
+    }
     if (path) {
         device = xx_io_file_open(path, "rb");
-        if (!device) { message = "Cannot open file"; goto finish; }
+        if (!device) {
+            message = "Cannot open file";
+            goto finish;
+        }
         size = xx_io_total_size(device);
-        if (size < 0) { message = "Cannot determine file size"; goto finish; }
-    } else if (!inventory) { message = "File information requires a target"; goto finish; }
+        if (size < 0) {
+            message = "Cannot determine file size";
+            goto finish;
+        }
+    } else if (!inventory) {
+        message = "File information requires a target";
+        goto finish;
+    }
     xx_pe_init(&reader.pe, device, 0);
     xx_elf_init(&reader.elf, device, 0);
     xx_macho_init(&reader.macho, device, 0);
@@ -509,22 +598,35 @@ int cdie_file_info_visit_slice(const char *path, int slice, const char *selector
                 if (!visitor->begin_structure(qualified_name, &catalog, user) || !visitor->end_structure(user)) goto collect_failure;
             }
         }
-        ok = 1; goto finish;
+        ok = 1;
+        goto finish;
     }
     for (family = 0; family < 3; ++family) {
         select_family(&reader, family);
-        if (reader.format->check_is_valid(reader.format, NULL)) { found = 1; break; }
+        if (reader.format->check_is_valid(reader.format, NULL)) {
+            found = 1;
+            break;
+        }
     }
     if (!found && reader.fat.format.check_is_valid(&reader.fat.format, NULL)) {
         /* Selectors stay MACHO:: for the fat table and the slice alike. */
         select_family(&reader, 2);
         found = fat = 1;
     }
-    if (!found) { message = "File information supports PE, ELF and Mach-O only"; goto finish; }
+    if (!found) {
+        message = "File information supports PE, ELF and Mach-O only";
+        goto finish;
+    }
     if (fat) {
-        if (!fat_read(device, slice, &fat_table)) { message = "Mach-O slice is not present in this file"; goto finish; }
+        if (!fat_read(device, slice, &fat_table)) {
+            message = "Mach-O slice is not present in this file";
+            goto finish;
+        }
         reader.slice_device = xx_io_sub_open_ro(device, fat_table.slice_offset, fat_table.slice_size);
-        if (!reader.slice_device) { message = "Out of memory"; goto finish; }
+        if (!reader.slice_device) {
+            message = "Out of memory";
+            goto finish;
+        }
         xx_macho_init(&reader.slice, reader.slice_device, 0);
         reader.slice_ready = 1;
         /* A slice that is not a Mach-O (a static library's archive) stays RAW_DATA. */
@@ -539,21 +641,36 @@ int cdie_file_info_visit_slice(const char *path, int slice, const char *selector
     }
     if (selector && xx_rt_strcmp(selector, "Info")) {
         selection = cdie_strdup(selector);
-        if (!selection) { message = "Out of memory"; goto finish; }
+        if (!selection) {
+            message = "Out of memory";
+            goto finish;
+        }
         qualified = xx_rt_strstr(selection, "::");
         if (qualified) {
             *qualified = 0;
-            if (xx_rt_strcmp(selection, reader.family)) { message = "Structure belongs to a different format"; goto finish; }
+            if (xx_rt_strcmp(selection, reader.family)) {
+                message = "Structure belongs to a different format";
+                goto finish;
+            }
             qualified += 2;
         } else qualified = selection;
         hash = xx_rt_strchr(qualified, '#');
-        if (hash) { *hash = 0; walk.field_filter = hash + 1; }
+        if (hash) {
+            *hash = 0;
+            walk.field_filter = hash + 1;
+        }
         walk.selected_format = walk.slice ? walk.slice : reader.format;
         walk.selected_id = xx_format_data_struct_string_to_id(walk.selected_format, qualified);
         for (family = 0; fat && !walk.selected_id && family < 3; ++family) {
-            if (!xx_rt_strcmp(qualified, fat_names[family])) { walk.selected_format = walk.fat_tag; walk.selected_id = (uint32_t)family + 1U; }
+            if (!xx_rt_strcmp(qualified, fat_names[family])) {
+                walk.selected_format = walk.fat_tag;
+                walk.selected_id = (uint32_t)family + 1U;
+            }
         }
-        if (!walk.selected_id || (walk.field_filter && !*walk.field_filter)) { message = "Unknown structure or empty field selector"; goto finish; }
+        if (!walk.selected_id || (walk.field_filter && !*walk.field_filter)) {
+            message = "Unknown structure or empty field selector";
+            goto finish;
+        }
     }
     if (!visitor->begin_file(path, reader.type, size, user)) goto collect_failure;
     if (!(fat ? walk_fat(&walk, device, &fat_table) : walk_structures(&walk, reader.format, 0))) {
@@ -561,8 +678,14 @@ int cdie_file_info_visit_slice(const char *path, int slice, const char *selector
         goto finish;
     }
     if (progress->last_error || progress->is_stop) goto finish;
-    if (walk.selected_id && !walk.found) { message = "Structure is not present in this file"; goto finish; }
-    if (walk.field_filter && !walk.matched_fields) { message = "Field is not present in the selected structure"; goto finish; }
+    if (walk.selected_id && !walk.found) {
+        message = "Structure is not present in this file";
+        goto finish;
+    }
+    if (walk.field_filter && !walk.matched_fields) {
+        message = "Field is not present in the selected structure";
+        goto finish;
+    }
     ok = 1;
     goto finish;
 collect_failure:
@@ -575,7 +698,9 @@ finish:
         ok = 0;
         message = "File Information cancelled";
     }
-    xx_pe_destroy(&reader.pe); xx_elf_destroy(&reader.elf); xx_macho_destroy(&reader.macho);
+    xx_pe_destroy(&reader.pe);
+    xx_elf_destroy(&reader.elf);
+    xx_macho_destroy(&reader.macho);
     if (reader.slice_ready) xx_macho_destroy(&reader.slice);
     if (reader.fat_ready) xx_machofat_destroy(&reader.fat);
     if (reader.slice_device) xx_io_close(reader.slice_device);
@@ -610,17 +735,15 @@ static int format_end_structure(void *user)
     return xx_buf_ok(&writer->buffer) && writer->buffer.size <= INFO_MAX_OUTPUT;
 }
 
-int cdie_file_info(const char *path, const char *selector, int inventory,
-    cdie_output_format output, char **text, char **error)
+int cdie_file_info(const char *path, const char *selector, int inventory, cdie_output_format output, char **text, char **error)
 {
-    static const cdie_file_info_visitor visitor = {
-        format_begin_file, format_begin_structure, format_field, format_end_structure
-    };
+    static const cdie_file_info_visitor visitor = {format_begin_file, format_begin_structure, format_field, format_end_structure};
     info_writer writer;
     int ok;
     if (!text || !error) return 0;
     *text = NULL;
-    xx_buf_init(&writer.buffer); writer.output = output;
+    xx_buf_init(&writer.buffer);
+    writer.output = output;
     ok = cdie_file_info_visit(path, selector, inventory, &visitor, &writer, NULL, error);
     if (ok) {
         if (output == CDIE_OUTPUT_JSON) xx_buf_append_str(&writer.buffer, "]}\n");

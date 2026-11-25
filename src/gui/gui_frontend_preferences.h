@@ -15,7 +15,7 @@ void gui_frontend_set_advanced(int advanced);
 void gui_frontend_remember_file(const char *path);
 xxwidgets_status gui_frontend_recent_dialog(xxwidgets_widget *owner, char *path, size_t capacity, int *accepted);
 char *gui_frontend_stored_language(int memory_only); /* free() by caller; NULL = System */
-char *gui_frontend_executable_directory(void); /* free() by caller */
+char *gui_frontend_executable_directory(void);       /* free() by caller */
 /* Single-application setting applies at startup. Zero means another instance
  * owns this installation. A negative return means the instance lock failed. */
 int gui_frontend_instance_start(xxwidgets_widget *window, const char *startup_file);

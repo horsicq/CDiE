@@ -66,7 +66,13 @@ static char *environment(const char *name)
  * be shown alone: "Downloading" is also the release query and the checksum,
  * and nothing is busy while connecting. So the step only moves forward, and a
  * transfer counts as the download once it is archive-sized. */
-enum { UPDATE_CHECKING = 1, UPDATE_DOWNLOADING, UPDATE_VERIFYING, UPDATE_INSTALLING, UPDATE_STEPS = UPDATE_INSTALLING };
+enum {
+    UPDATE_CHECKING = 1,
+    UPDATE_DOWNLOADING,
+    UPDATE_VERIFYING,
+    UPDATE_INSTALLING,
+    UPDATE_STEPS = UPDATE_INSTALLING
+};
 #define UPDATE_ARCHIVE_BYTES (256u * 1024u)
 
 typedef struct update_job {
@@ -93,7 +99,7 @@ static void update_stage(update_job *job, const xx_pd_struct *progress)
     }
     if (downloading && job->stage < UPDATE_DOWNLOADING) job->stage = UPDATE_DOWNLOADING;
     else if (!downloading && job->stage == UPDATE_DOWNLOADING) job->stage = UPDATE_VERIFYING; /* the archive's checksum */
-    if (verifying && job->stage < UPDATE_VERIFYING) job->stage = UPDATE_VERIFYING; /* unpacked and loaded beside the old one */
+    if (verifying && job->stage < UPDATE_VERIFYING) job->stage = UPDATE_VERIFYING;            /* unpacked and loaded beside the old one */
     if (checking) job->checked = 1;
     else if (job->checked && job->stage < UPDATE_INSTALLING) job->stage = UPDATE_INSTALLING; /* it loads: swapped in */
 }
@@ -102,7 +108,11 @@ static bool observe_update(const xx_pd_struct *progress, void *user)
 {
     update_job *job = user;
     int stop;
-    xx_mutex_lock(job->lock); job->snapshot = *progress; update_stage(job, progress); stop = job->stop; xx_mutex_unlock(job->lock);
+    xx_mutex_lock(job->lock);
+    job->snapshot = *progress;
+    update_stage(job, progress);
+    stop = job->stop;
+    xx_mutex_unlock(job->lock);
     return stop != 0;
 }
 
@@ -151,10 +161,12 @@ static int update_worker(void *user)
 {
     update_job *job = user;
     xx_pd_observer previous = xx_pd_set_observer(&job->work, observe_update, job);
-    job->status = job->install ? cdie_update_install(&job->config, &job->info, 0, &job->work)
-                               : cdie_update_check(&job->config, &job->info, &job->work);
+    job->status = job->install ? cdie_update_install(&job->config, &job->info, 0, &job->work) : cdie_update_check(&job->config, &job->info, &job->work);
     xx_pd_set_observer(previous.progress, previous.callback, previous.user_data);
-    xx_mutex_lock(job->lock); job->snapshot = job->work; job->done = 1; xx_mutex_unlock(job->lock);
+    xx_mutex_lock(job->lock);
+    job->snapshot = job->work;
+    job->done = 1;
+    xx_mutex_unlock(job->lock);
     return 0;
 }
 
@@ -165,7 +177,9 @@ static xxwidgets_status update_progress(void *user, int stop_requested, xx_pd_st
     int stage;
     xx_mutex_lock(job->lock);
     if (stop_requested) job->stop = 1;
-    snapshot = job->snapshot; stage = job->stage; *finished = job->done;
+    snapshot = job->snapshot;
+    stage = job->stage;
+    *finished = job->done;
     xx_mutex_unlock(job->lock);
     update_display(&snapshot, stage, progress);
     /* job->stop reaches the work only when the worker polls it; the network
@@ -197,8 +211,8 @@ static void update_report(xxwidgets_widget *owner, gui_update_result result, cdi
         xx_rt_snprintf(text, sizeof(text), "%s\n\n%s", line,
                        CDIE_TR("The previous database stays in use. Check the database folders under Options > Scan, or restart the program."));
     else if (status != CDIE_UPDATE_OK && detail && detail[0])
-        cdie_translation_snprintf(text, sizeof(text), CDIE_N_("Database update failed: %s.\n\nDetails: %s\n\nThe database was not changed."),
-                                  update_failure_text(status), detail);
+        cdie_translation_snprintf(text, sizeof(text), CDIE_N_("Database update failed: %s.\n\nDetails: %s\n\nThe database was not changed."), update_failure_text(status),
+                                  detail);
     else xx_rt_snprintf(text, sizeof(text), "%s\n\n%s", line, CDIE_TR("The database was not changed."));
     (void)xxwidgets_text_dialog(owner, CDIE_TR("Update database"), text);
 }
@@ -226,7 +240,9 @@ static int update_phase(update_job *job, xxwidgets_widget *owner, char *message,
     /* xxwidgets_process_dialog rejects a NULL owner. */
     shown = owner ? xxwidgets_process_dialog(owner, CDIE_TR("Updating Database"), &progress, update_progress, job) : XXWIDGETS_OK;
     if (shown != XXWIDGETS_OK) {
-        xx_mutex_lock(job->lock); job->stop = 1; xx_mutex_unlock(job->lock);
+        xx_mutex_lock(job->lock);
+        job->stop = 1;
+        xx_mutex_unlock(job->lock);
         xx_pd_stop(&job->work);
     }
     if (!xx_thread_join(thread, NULL)) {
@@ -254,8 +270,8 @@ static void update_format_time(int64_t seconds, char *text, size_t size)
     day = doy - (153 * mp + 2) / 5 + 1;
     month = mp < 10 ? mp + 3 : mp - 9;
     year = yoe + era * 400 + (month <= 2);
-    xx_rt_snprintf(text, size, "%04lld-%02lld-%02lld %02lld:%02lld UTC", (long long)year, (long long)month, (long long)day,
-                   (long long)(rem / 3600), (long long)(rem % 3600 / 60));
+    xx_rt_snprintf(text, size, "%04lld-%02lld-%02lld %02lld:%02lld UTC", (long long)year, (long long)month, (long long)day, (long long)(rem / 3600),
+                   (long long)(rem % 3600 / 60));
 }
 
 /* The question before an available update is installed; 1 for yes. A dialog
@@ -263,21 +279,16 @@ static void update_format_time(int64_t seconds, char *text, size_t size)
 static int update_ask(xxwidgets_widget *owner, const cdie_update_info *info)
 {
     char text[1024], when[32], installed[64] = "", size[48] = "";
-    const char *name = info->release_name && info->release_name[0] ? info->release_name :
-                       info->release_tag && info->release_tag[0] ? info->release_tag :
-                       info->archive_name && info->archive_name[0] ? info->archive_name : "";
+    const char *name = info->release_name && info->release_name[0]   ? info->release_name
+                       : info->release_tag && info->release_tag[0]   ? info->release_tag
+                       : info->archive_name && info->archive_name[0] ? info->archive_name
+                                                                     : "";
     int accepted = 0;
     update_format_time(info->remote_time, when, sizeof(when));
-    if (info->remote_size > 0)
-        cdie_translation_snprintf(size, sizeof(size), CDIE_N_("Size: %.1f MB"), (double)info->remote_size / (1024.0 * 1024.0));
-    if (info->installed_at[0])
-        cdie_translation_snprintf(installed, sizeof(installed), CDIE_N_("Installed now: %s"), info->installed_at);
-    xx_rt_snprintf(text, sizeof(text), "%s\n\n%s: %s\n%s: %s\n%s\n%s\n\n%s",
-                   CDIE_TR("A database update is available."),
-                   CDIE_TR("Update"), name,
-                   CDIE_TR("Version/date"), when[0] ? when : CDIE_TR("unknown"),
-                   size, installed,
-                   CDIE_TR("Install it now?"));
+    if (info->remote_size > 0) cdie_translation_snprintf(size, sizeof(size), CDIE_N_("Size: %.1f MB"), (double)info->remote_size / (1024.0 * 1024.0));
+    if (info->installed_at[0]) cdie_translation_snprintf(installed, sizeof(installed), CDIE_N_("Installed now: %s"), info->installed_at);
+    xx_rt_snprintf(text, sizeof(text), "%s\n\n%s: %s\n%s: %s\n%s\n%s\n\n%s", CDIE_TR("A database update is available."), CDIE_TR("Update"), name, CDIE_TR("Version/date"),
+                   when[0] ? when : CDIE_TR("unknown"), size, installed, CDIE_TR("Install it now?"));
     if (xxwidgets_question_dialog(owner, CDIE_TR("Update database"), text, CDIE_TR("Yes"), CDIE_TR("No"), &accepted) != XXWIDGETS_OK) return 0;
     return accepted;
 }
@@ -287,8 +298,7 @@ static void update_no_updates(xxwidgets_widget *owner, const cdie_update_info *i
 {
     char text[512];
     if (info->installed_at[0])
-        xx_rt_snprintf(text, sizeof(text), "%s\n\n%s\n%s: %s", CDIE_TR("No updates."), CDIE_TR("The database is up to date."),
-                       CDIE_TR("Installed"), info->installed_at);
+        xx_rt_snprintf(text, sizeof(text), "%s\n\n%s\n%s: %s", CDIE_TR("No updates."), CDIE_TR("The database is up to date."), CDIE_TR("Installed"), info->installed_at);
     else xx_rt_snprintf(text, sizeof(text), "%s\n\n%s", CDIE_TR("No updates."), CDIE_TR("The database is up to date."));
     (void)xxwidgets_text_dialog(owner, CDIE_TR("Update database"), text);
 }
@@ -360,10 +370,8 @@ gui_update_result gui_update_run(xxwidgets_widget *owner, const char *url, char 
             cdie_translation_snprintf(message, message_size, "%s", CDIE_TR("The database is up to date."));
         } else if (gui_backend_set_db_paths(main_default ? "" : main_path, custom_default ? "" : custom_path)) {
             result = job.info.installed ? GUI_UPDATE_INSTALLED : GUI_UPDATE_CURRENT;
-            if (job.info.installed)
-                cdie_translation_snprintf(message, message_size, CDIE_N_("Database updated: %d signatures."), gui_backend_signature_count());
-            else
-                cdie_translation_snprintf(message, message_size, "%s", CDIE_TR("The database is up to date."));
+            if (job.info.installed) cdie_translation_snprintf(message, message_size, CDIE_N_("Database updated: %d signatures."), gui_backend_signature_count());
+            else cdie_translation_snprintf(message, message_size, "%s", CDIE_TR("The database is up to date."));
         } else {
             result = GUI_UPDATE_RELOAD_FAILED;
             cdie_translation_snprintf(message, message_size, CDIE_N_("The database was updated in %s but could not be loaded."),
@@ -371,17 +379,14 @@ gui_update_result gui_update_run(xxwidgets_widget *owner, const char *url, char 
         }
     } else {
         result = GUI_UPDATE_FAILED;
-        cdie_translation_snprintf(message, message_size, CDIE_N_("Database update failed: %s"),
-                                  job.info.message[0] ? job.info.message : update_failure_text(job.status));
+        cdie_translation_snprintf(message, message_size, CDIE_N_("Database update failed: %s"), job.info.message[0] ? job.info.message : update_failure_text(job.status));
     }
 
 done:
     /* The status bar has room for one clipped line; a failure is also shown
      * whole, over the window that asked for the update. */
-    if (owner && (result == GUI_UPDATE_FAILED || result == GUI_UPDATE_RELOAD_FAILED))
-        update_report(owner, result, job.status, job.info.message, message);
-    else if (owner && result == GUI_UPDATE_CURRENT && !job.install)
-        update_no_updates(owner, &job.info);
+    if (owner && (result == GUI_UPDATE_FAILED || result == GUI_UPDATE_RELOAD_FAILED)) update_report(owner, result, job.status, job.info.message, message);
+    else if (owner && result == GUI_UPDATE_CURRENT && !job.install) update_no_updates(owner, &job.info);
     if (job.lock) xx_mutex_destroy(job.lock);
     cdie_update_info_free(&job.info);
     cdie_update_config_free(&job.config);

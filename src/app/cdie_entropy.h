@@ -6,7 +6,10 @@
 #define CDIE_ENTROPY_MAX_SAMPLES 100
 /* Engine-independent result. All offsets are physical file offsets. The model
  * and errors use xx_rt allocation; callers release with xx_rt_free. */
-typedef struct cdie_entropy_sample { uint64_t offset, size; double entropy; } cdie_entropy_sample;
+typedef struct cdie_entropy_sample {
+    uint64_t offset, size;
+    double entropy;
+} cdie_entropy_sample;
 typedef struct cdie_entropy_region {
     uint64_t offset, size;
     double entropy;

@@ -26,14 +26,12 @@ xxwidgets_status gui_about_create(const unsigned char *png, size_t png_size, xxw
 {
     /* Values that are not URLs (PayPal, BTC) are copied to the clipboard on click. */
     static const char *const social[][2] = {
-        {"GitHub", "https://github.com/horsicq"}, {"Twitter", "https://twitter.com/horsicq"},
-        {"YouTube", "https://www.youtube.com/@funreverseengineering"}};
-    static const char *const info[][3] = {
-        {"Bugreports:", "horsicq@gmail.com", "mailto:horsicq@gmail.com"},
-        {"Website:", "http://ntinfo.biz", "http://ntinfo.biz"},
-        {"Donate(Paypal):", "ntinfo.re@gmail.com", "ntinfo.re@gmail.com"},
-        {"Donate(BTC):", "3DqddVBX9PKqMvNPXZ3gPHBNNRtD9CnmJo", "3DqddVBX9PKqMvNPXZ3gPHBNNRtD9CnmJo"},
-        {"Source code:", "https://github.com/horsicq/DIE-engine", "https://github.com/horsicq/DIE-engine"}};
+        {"GitHub", "https://github.com/horsicq"}, {"Twitter", "https://twitter.com/horsicq"}, {"YouTube", "https://www.youtube.com/@funreverseengineering"}};
+    static const char *const info[][3] = {{"Bugreports:", "horsicq@gmail.com", "mailto:horsicq@gmail.com"},
+                                          {"Website:", "http://ntinfo.biz", "http://ntinfo.biz"},
+                                          {"Donate(Paypal):", "ntinfo.re@gmail.com", "ntinfo.re@gmail.com"},
+                                          {"Donate(BTC):", "3DqddVBX9PKqMvNPXZ3gPHBNNRtD9CnmJo", "3DqddVBX9PKqMvNPXZ3gPHBNNRtD9CnmJo"},
+                                          {"Source code:", "https://github.com/horsicq/DIE-engine", "https://github.com/horsicq/DIE-engine"}};
     static const char *const libraries[][2] = {
         {"xxfclib:", "formats, scan engine and runtime"}, {"xxwidgets:", "native widgets and dialogs"}, {"cdisasm:", "disassembler"}};
     xxwidgets_about_dialog *about = NULL;
@@ -55,14 +53,12 @@ xxwidgets_status gui_about_create(const unsigned char *png, size_t png_size, xxw
     if (status == XXWIDGETS_OK) status = xxwidgets_about_dialog_set_text(about, XXWIDGETS_ABOUT_BUILD_DATE, __DATE__);
     if (status == XXWIDGETS_OK)
         status = xxwidgets_about_dialog_set_text(about, XXWIDGETS_ABOUT_THANKS_URL, "https://github.com/horsicq/DIE-engine/blob/master/THANKS.md");
-    if (status == XXWIDGETS_OK)
-        status = xxwidgets_about_dialog_set_text(about, XXWIDGETS_ABOUT_UPDATES_URL, "https://github.com/horsicq/DIE-engine/releases");
+    if (status == XXWIDGETS_OK) status = xxwidgets_about_dialog_set_text(about, XXWIDGETS_ABOUT_UPDATES_URL, "https://github.com/horsicq/DIE-engine/releases");
     for (i = 0; status == XXWIDGETS_OK && i < sizeof(social) / sizeof(social[0]); ++i)
         status = xxwidgets_about_dialog_add_item(about, XXWIDGETS_ABOUT_ITEM_SOCIAL, social[i][0], NULL, social[i][1]);
     xx_rt_snprintf(line, sizeof(line), "Detect It Easy (cdie) v%s", version);
     if (status == XXWIDGETS_OK) status = xxwidgets_about_dialog_add_item(about, XXWIDGETS_ABOUT_ITEM_INFO, line, NULL, NULL);
-    if (status == XXWIDGETS_OK)
-        status = xxwidgets_about_dialog_add_item(about, XXWIDGETS_ABOUT_ITEM_INFO, "Copyright (C) 2006-2008 Hellsp@wn", NULL, NULL);
+    if (status == XXWIDGETS_OK) status = xxwidgets_about_dialog_add_item(about, XXWIDGETS_ABOUT_ITEM_INFO, "Copyright (C) 2006-2008 Hellsp@wn", NULL, NULL);
     /* __DATE__ is "Mmm dd yyyy": the copyright runs to the build year. */
     xx_rt_snprintf(line, sizeof(line), "Copyright (C) 2012-%s Hors", &__DATE__[7]);
     if (status == XXWIDGETS_OK) status = xxwidgets_about_dialog_add_item(about, XXWIDGETS_ABOUT_ITEM_INFO, line, NULL, NULL);

@@ -76,10 +76,8 @@ static const char *source_error_text(void *user)
 }
 static int valid_options(const xxwidgets_strings_search_options *o)
 {
-    return o && o->minimum_length >= 2 && (o->ansi || o->unicode) &&
-           (o->ansi == 0 || o->ansi == 1) && (o->unicode == 0 || o->unicode == 1) &&
-           (o->null_terminated == 0 || o->null_terminated == 1) && (o->links == 0 || o->links == 1) &&
-           (o->regexp == 0 || o->regexp == 1) &&
+    return o && o->minimum_length >= 2 && (o->ansi || o->unicode) && (o->ansi == 0 || o->ansi == 1) && (o->unicode == 0 || o->unicode == 1) &&
+           (o->null_terminated == 0 || o->null_terminated == 1) && (o->links == 0 || o->links == 1) && (o->regexp == 0 || o->regexp == 1) &&
            memchr(o->expression, 0, sizeof(o->expression));
 }
 static int write_all(xx_io_device *file, const void *data, size_t bytes)
@@ -270,8 +268,7 @@ static xx_strings_scan_status decode_text(gui_strings_source *s, const string_me
     if (s->generated) return sink("AAAA", 4, user) ? XX_STRINGS_SCAN_OK : XX_STRINGS_SCAN_SINK;
     small = decode_small(s, m, sink, user);
     if (small) return small > 0 ? XX_STRINGS_SCAN_OK : XX_STRINGS_SCAN_SINK;
-    return xx_strings_decode_device_ex(s->input, m->encoding, m->offset, m->bytes,
-                                       s->configured ? XX_STRINGS_DIE_ALPHABET : 0, pd, sink, user);
+    return xx_strings_decode_device_ex(s->input, m->encoding, m->offset, m->bytes, s->configured ? XX_STRINGS_DIE_ALPHABET : 0, pd, sink, user);
 }
 static xxwidgets_status source_read(void *user, uint64_t first, size_t capacity, xxwidgets_string_record *records, uint64_t *numbers, size_t *received)
 {
@@ -389,8 +386,7 @@ static xxwidgets_status build_index(gui_strings_source *s, xx_pd_struct *pd)
     options.flags = XX_STRINGS_NO_TEXT;
     if (s->configured) {
         options.minimum_length = s->model.options.minimum_length;
-        options.encodings = (s->model.options.ansi ? XX_STRINGS_ASCII : 0) |
-                            (s->model.options.unicode ? XX_STRINGS_UTF16LE : 0);
+        options.encodings = (s->model.options.ansi ? XX_STRINGS_ASCII : 0) | (s->model.options.unicode ? XX_STRINGS_UTF16LE : 0);
         options.flags |= XX_STRINGS_DIE_ALPHABET;
     }
     scan = xx_strings_scan_device(s->input, &options, pd, add_metadata, build, &stats);
@@ -606,16 +602,16 @@ static int match_metadata(search_context *c, const string_meta *m, uint64_t numb
     if (!c->global_text.found || !c->column_text.found) return 0;
     if (links && !c->link_text[0].found && !c->link_text[1].found && !c->link_text[2].found && !c->link_text[3].found) return 0;
     if (c->regex) {
-        xx_regex_exec_status status = xx_regex_exec_ex(c->regex, c->full_text.data ? c->full_text.data : "", c->full_text.size, 0,
-                                                      c->captures, abort_regex, c);
+        xx_regex_exec_status status = xx_regex_exec_ex(c->regex, c->full_text.data ? c->full_text.data : "", c->full_text.size, 0, c->captures, abort_regex, c);
         if (status < 0) {
-            c->text_error = status == XX_REGEX_EXEC_CANCELLED ? XXWIDGETS_UNAVAILABLE :
-                            status == XX_REGEX_EXEC_NO_MEMORY ? XXWIDGETS_OUT_OF_MEMORY :
-                            status == XX_REGEX_EXEC_INVALID ? XXWIDGETS_INVALID_ARGUMENT : XXWIDGETS_PLATFORM_ERROR;
-            source_error(c->source, status == XX_REGEX_EXEC_CANCELLED ? "Regular-expression search cancelled" :
-                         status == XX_REGEX_EXEC_NO_MEMORY ? "Cannot allocate regular-expression matcher state" :
-                         status == XX_REGEX_EXEC_BUDGET ? "Regular-expression work limit exceeded; preceding results have been preserved" :
-                         "Regular-expression matcher rejected the complete decoded string");
+            c->text_error = status == XX_REGEX_EXEC_CANCELLED   ? XXWIDGETS_UNAVAILABLE
+                            : status == XX_REGEX_EXEC_NO_MEMORY ? XXWIDGETS_OUT_OF_MEMORY
+                            : status == XX_REGEX_EXEC_INVALID   ? XXWIDGETS_INVALID_ARGUMENT
+                                                                : XXWIDGETS_PLATFORM_ERROR;
+            source_error(c->source, status == XX_REGEX_EXEC_CANCELLED   ? "Regular-expression search cancelled"
+                                    : status == XX_REGEX_EXEC_NO_MEMORY ? "Cannot allocate regular-expression matcher state"
+                                    : status == XX_REGEX_EXEC_BUDGET    ? "Regular-expression work limit exceeded; preceding results have been preserved"
+                                                                        : "Regular-expression matcher rejected the complete decoded string");
             return -1;
         }
         return status == XX_REGEX_EXEC_MATCH;
@@ -773,10 +769,17 @@ static int csv_flush(csv_output *c)
     if (c->failed) return 0;
     while (at < c->used) {
         ssize_t n;
-        if (stopped(c->progress)) { c->failed = 1; return 0; }
+        if (stopped(c->progress)) {
+            c->failed = 1;
+            return 0;
+        }
         n = xx_io_write(c->file, c->buffer + at, c->used - at);
-        if (n <= 0 || (size_t)n > c->used - at || (uint64_t)n > UINT64_MAX - c->written) { c->failed = 1; return 0; }
-        at += (size_t)n; c->written += (uint64_t)n;
+        if (n <= 0 || (size_t)n > c->used - at || (uint64_t)n > UINT64_MAX - c->written) {
+            c->failed = 1;
+            return 0;
+        }
+        at += (size_t)n;
+        c->written += (uint64_t)n;
         if (c->reporter) (void)xxwidgets_disk_write_set_bytes(c->reporter, c->written, 0, 0);
     }
     c->used = 0;
@@ -825,7 +828,8 @@ static xxwidgets_status source_save_ex(void *user, const char *path, xx_pd_struc
         source_error(s, "Cannot allocate strings CSV output buffer");
         return XXWIDGETS_OUT_OF_MEMORY;
     }
-    csv->progress = pd; csv->reporter = reporter;
+    csv->progress = pd;
+    csv->reporter = reporter;
     if (reporter) {
         (void)xxwidgets_disk_write_set_file(reporter, path, 0, 1, 1);
         /* Escaping/encoding determines the final CSV size while streaming.
@@ -885,7 +889,10 @@ static xxwidgets_status source_save_ex(void *user, const char *path, xx_pd_struc
         goto finish;
     }
     csv->file = NULL;
-    if (stopped(pd)) { status = XXWIDGETS_UNAVAILABLE; goto finish; }
+    if (stopped(pd)) {
+        status = XXWIDGETS_UNAVAILABLE;
+        goto finish;
+    }
     if (!xx_io_file_replace_a(temporary, path, true)) goto finish;
     status = XXWIDGETS_OK;
     if (reporter) {
@@ -1000,8 +1007,7 @@ static gui_strings_source *new_source(void)
 /* Selector labels belong to the provider and remain valid after a candidate
  * replaces its internals. Regions is the physical Data map; selecting Binary
  * always normalizes the map selector to Regions. */
-static xxwidgets_status configure_map(gui_strings_source *s, const xxwidgets_strings_search_options *requested,
-                                      xx_pd_struct *pd, char **error)
+static xxwidgets_status configure_map(gui_strings_source *s, const xxwidgets_strings_search_options *requested, xx_pd_struct *pd, char **error)
 {
     cdie_memory_map_data *map = NULL;
     char *map_error = NULL;
@@ -1012,7 +1018,8 @@ static xxwidgets_status configure_map(gui_strings_source *s, const xxwidgets_str
         map_error = NULL;
         if (stopped(pd)) return XXWIDGETS_UNAVAILABLE;
         if (!cdie_memory_map_read_mode(s->path, "Binary", "Data", pd, &map, &map_error)) {
-            if (error) *error = map_error; else xx_rt_free(map_error);
+            if (error) *error = map_error;
+            else xx_rt_free(map_error);
             return stopped(pd) ? XXWIDGETS_UNAVAILABLE : XXWIDGETS_PLATFORM_ERROR;
         }
     }
@@ -1020,10 +1027,8 @@ static xxwidgets_status configure_map(gui_strings_source *s, const xxwidgets_str
     if (native) {
         snprintf(s->format_labels[1], sizeof(s->format_labels[1]), "%s", map->file_type);
         s->model.format_count = 2;
-        if (map->available_modes & CDIE_MEMORY_MAP_MODE_SECTIONS)
-            snprintf(s->map_labels[s->model.map_mode_count++], sizeof(s->map_labels[0]), "Sections");
-        if (map->available_modes & CDIE_MEMORY_MAP_MODE_SEGMENTS)
-            snprintf(s->map_labels[s->model.map_mode_count++], sizeof(s->map_labels[0]), "Segments");
+        if (map->available_modes & CDIE_MEMORY_MAP_MODE_SECTIONS) snprintf(s->map_labels[s->model.map_mode_count++], sizeof(s->map_labels[0]), "Sections");
+        if (map->available_modes & CDIE_MEMORY_MAP_MODE_SEGMENTS) snprintf(s->map_labels[s->model.map_mode_count++], sizeof(s->map_labels[0]), "Segments");
         options.format = 1;
         options.map_mode = 1;
     }
@@ -1038,8 +1043,9 @@ static xxwidgets_status configure_map(gui_strings_source *s, const xxwidgets_str
         xx_rt_free(map);
         map = NULL;
         if (!cdie_memory_map_read_mode(s->path, !options.format || !options.map_mode ? "Binary" : s->format_labels[options.format],
-                                      !options.map_mode ? "Data" : s->map_labels[options.map_mode], pd, &map, &map_error)) {
-            if (error) *error = map_error; else xx_rt_free(map_error);
+                                       !options.map_mode ? "Data" : s->map_labels[options.map_mode], pd, &map, &map_error)) {
+            if (error) *error = map_error;
+            else xx_rt_free(map_error);
             return stopped(pd) ? XXWIDGETS_UNAVAILABLE : XXWIDGETS_PLATFORM_ERROR;
         }
     }
@@ -1054,9 +1060,9 @@ static xxwidgets_status configure_map(gui_strings_source *s, const xxwidgets_str
         for (i = 0; i < map->count; ++i) {
             const xx_memory_record *r = map->records + i;
             uint64_t current;
-            if (r->is_virtual || r->address == XX_INVALID_ADDRESS || r->offset < 0 || r->size <= 0 ||
-                !(r->file_part & (XX_FILE_PART_SECTION | XX_FILE_PART_HEADER)) ||
-                (uint64_t)r->offset > s->size || (uint64_t)r->size > s->size - (uint64_t)r->offset) continue;
+            if (r->is_virtual || r->address == XX_INVALID_ADDRESS || r->offset < 0 || r->size <= 0 || !(r->file_part & (XX_FILE_PART_SECTION | XX_FILE_PART_HEADER)) ||
+                (uint64_t)r->offset > s->size || (uint64_t)r->size > s->size - (uint64_t)r->offset)
+                continue;
             current = (uint64_t)r->offset + (uint64_t)r->size;
             if (current > end) end = current;
             mapped = 1;
@@ -1066,8 +1072,8 @@ static xxwidgets_status configure_map(gui_strings_source *s, const xxwidgets_str
     }
     return XXWIDGETS_OK;
 }
-static xxwidgets_status open_file(const char *path, const xxwidgets_strings_search_options *options, int configured, int search,
-                                  xx_pd_struct *pd, gui_strings_source **out, char **error)
+static xxwidgets_status open_file(const char *path, const xxwidgets_strings_search_options *options, int configured, int search, xx_pd_struct *pd,
+                                  gui_strings_source **out, char **error)
 {
     gui_strings_source *s;
     xxwidgets_status status;
@@ -1115,8 +1121,8 @@ xxwidgets_status gui_strings_source_open(const char *path, xx_pd_struct *pd, gui
 {
     return open_file(path, NULL, 0, 0, pd, out, error);
 }
-xxwidgets_status gui_strings_source_open_options(const char *path, const xxwidgets_strings_search_options *options, xx_pd_struct *pd,
-                                                gui_strings_source **out, char **error)
+xxwidgets_status gui_strings_source_open_options(const char *path, const xxwidgets_strings_search_options *options, xx_pd_struct *pd, gui_strings_source **out,
+                                                 char **error)
 {
     return open_file(path, options, 1, 1, pd, out, error);
 }
@@ -1154,8 +1160,8 @@ xxwidgets_status gui_strings_source_generated(uint64_t count, xx_pd_struct *pd, 
  * provider is destroyed until both extraction/filtering and the final stop
  * observation have succeeded. Swapping heap objects avoids a result-sized
  * stack allocation and keeps the public model and owner addresses stable. */
-static xxwidgets_status source_search_ex(void *user, xxwidgets_strings_search_options *options, const char *filter,
-                                         const char *const columns[7], xx_pd_struct *pd, uint64_t *matched)
+static xxwidgets_status source_search_ex(void *user, xxwidgets_strings_search_options *options, const char *filter, const char *const columns[7], xx_pd_struct *pd,
+                                         uint64_t *matched)
 {
     gui_strings_source *s = user, *candidate = NULL;
     xxwidgets_strings_search_options next;
@@ -1164,8 +1170,8 @@ static xxwidgets_status source_search_ex(void *user, xxwidgets_strings_search_op
     uint64_t result = 0;
     size_t i;
     unsigned char *left, *right;
-    if (!s || !matched || !valid_options(options) || options->format >= s->model.format_count ||
-        options->map_mode >= s->model.map_mode_count) return XXWIDGETS_INVALID_ARGUMENT;
+    if (!s || !matched || !valid_options(options) || options->format >= s->model.format_count || options->map_mode >= s->model.map_mode_count)
+        return XXWIDGETS_INVALID_ARGUMENT;
     source_error(s, "");
     next = *options;
     if (!next.format) next.map_mode = 0;
@@ -1184,8 +1190,10 @@ static xxwidgets_status source_search_ex(void *user, xxwidgets_strings_search_op
     if (status == XXWIDGETS_OK) status = source_search(candidate, filter, columns, pd, &result);
     if (status == XXWIDGETS_OK && stopped(pd)) status = XXWIDGETS_UNAVAILABLE;
     if (status != XXWIDGETS_OK) {
-        source_error(s, error ? error : candidate && candidate->error[0] ? candidate->error :
-                     stopped(pd) ? "Strings search cancelled" : "Cannot configure strings search");
+        source_error(s, error                              ? error
+                        : candidate && candidate->error[0] ? candidate->error
+                        : stopped(pd)                      ? "Strings search cancelled"
+                                                           : "Cannot configure strings search");
         xx_rt_free(error);
         gui_strings_source_free(candidate);
         return status;

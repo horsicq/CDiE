@@ -8,29 +8,23 @@
 
 static int name_is(const char *left, const char *right)
 {
-    if (!left || !right)
-        return 0;
+    if (!left || !right) return 0;
     while (*left && *right) {
         unsigned char a = (unsigned char)*left++, b = (unsigned char)*right++;
-        if (a >= 'a' && a <= 'z')
-            a -= 'a' - 'A';
-        if (b >= 'a' && b <= 'z')
-            b -= 'a' - 'A';
-        if (a != b)
-            return 0;
+        if (a >= 'a' && a <= 'z') a -= 'a' - 'A';
+        if (b >= 'a' && b <= 'z') b -= 'a' - 'A';
+        if (a != b) return 0;
     }
     return !*left && !*right;
 }
 
 static int native_name(const char *name)
 {
-    return name_is(name, "PE") || name_is(name, "PE32") || name_is(name, "PE64") ||
-           name_is(name, "ELF") || name_is(name, "ELF32") || name_is(name, "ELF64") ||
+    return name_is(name, "PE") || name_is(name, "PE32") || name_is(name, "PE64") || name_is(name, "ELF") || name_is(name, "ELF32") || name_is(name, "ELF64") ||
            name_is(name, "Mach-O") || name_is(name, "MACHO") || name_is(name, "Mach-O32") || name_is(name, "Mach-O64");
 }
 
-int cdie_memory_map_read_mode(const char *path, const char *format_name, const char *mode_name, xx_pd_struct *pd,
-                              cdie_memory_map_data **out, char **error)
+int cdie_memory_map_read_mode(const char *path, const char *format_name, const char *mode_name, xx_pd_struct *pd, cdie_memory_map_data **out, char **error)
 {
     xx_io_device *device = NULL;
     cdie_memory_map_data *data = NULL;
@@ -45,8 +39,7 @@ int cdie_memory_map_read_mode(const char *path, const char *format_name, const c
     int64_t size;
     size_t i;
     int initialized = 0, ok = 0, level = -1, force_binary, auto_format;
-    if (!out || !error)
-        return 0;
+    if (!out || !error) return 0;
     *out = NULL;
     *error = NULL;
     if (!path || !*path) {
@@ -74,8 +67,7 @@ int cdie_memory_map_read_mode(const char *path, const char *format_name, const c
             goto finish;
         }
     }
-    if (xx_pd_is_stopped(pd))
-        goto finish;
+    if (xx_pd_is_stopped(pd)) goto finish;
     device = xx_io_file_open(path, "rb");
     if (!device) {
         message = "Cannot open file for Memory Map";
@@ -116,51 +108,44 @@ int cdie_memory_map_read_mode(const char *path, const char *format_name, const c
     if (format) {
         const char *family;
         int is_64;
-        if (!xx_format_handle_base_info(format, pd))
-            goto finish;
+        if (!xx_format_handle_base_info(format, pd)) goto finish;
         family = format == &pe.format ? "PE" : format == &elf.format ? "ELF" : "Mach-O";
-        if (!auto_format && !name_is(format_name, family) &&
-            !(format == &macho.format && name_is(format_name, "MACHO")) &&
+        if (!auto_format && !name_is(format_name, family) && !(format == &macho.format && name_is(format_name, "MACHO")) &&
             !name_is(format_name, xx_format_file_type_to_string(format->file_type))) {
             message = "Memory Map format does not match the target";
             goto finish;
         }
-        data->available_modes = format == &pe.format ? CDIE_MEMORY_MAP_MODE_SECTIONS :
-                                format == &elf.format ? CDIE_MEMORY_MAP_MODE_SECTIONS | CDIE_MEMORY_MAP_MODE_SEGMENTS :
-                                                        CDIE_MEMORY_MAP_MODE_SEGMENTS;
+        data->available_modes = format == &pe.format    ? CDIE_MEMORY_MAP_MODE_SECTIONS
+                                : format == &elf.format ? CDIE_MEMORY_MAP_MODE_SECTIONS | CDIE_MEMORY_MAP_MODE_SEGMENTS
+                                                        : CDIE_MEMORY_MAP_MODE_SEGMENTS;
         if (requested_flag && !(data->available_modes & requested_flag)) {
             message = "Unsupported Memory Map mode for this format";
             goto finish;
         }
         map = xx_format_get_memory_map(format, requested_mode, pd);
-        if (!map)
-            goto finish;
+        if (!map) goto finish;
         if (map->record_count > CDIE_MEMORY_MAP_MAX_RECORDS || (map->record_count && !map->records)) {
             message = "Too many or invalid Memory Map records";
             goto finish;
         }
         data->module_address = map->module_address;
         data->entry_point_address = map->entry_point_address;
-        if (format == &pe.format && !pe.entry_point_rva)
-            data->entry_point_address = XX_INVALID_ADDRESS;
+        if (format == &pe.format && !pe.entry_point_rva) data->entry_point_address = XX_INVALID_ADDRESS;
         xx_rt_snprintf(data->file_type, sizeof(data->file_type), "%s", xx_format_file_type_to_string(format->file_type));
         xx_rt_snprintf(data->mode, sizeof(data->mode), "%s", map->mode == XX_MEMORY_MAP_MODE_SECTIONS ? "Sections" : "Segments");
         is_64 = format == &pe.format ? xx_pe_is_64(&pe) : format == &elf.format ? xx_elf_is_64(&elf) : xx_macho_is_64(&macho);
         xx_rt_snprintf(data->bitness, sizeof(data->bitness), "%s", is_64 ? "64-bit" : "32-bit");
-        xx_rt_snprintf(data->endianness, sizeof(data->endianness), "%s",
-                       map->endian == XX_ENDIAN_LITTLE ? "LE" : map->endian == XX_ENDIAN_BIG ? "BE" : "Unknown");
+        xx_rt_snprintf(data->endianness, sizeof(data->endianness), "%s", map->endian == XX_ENDIAN_LITTLE ? "LE" : map->endian == XX_ENDIAN_BIG ? "BE" : "Unknown");
         xx_rt_snprintf(data->architecture, sizeof(data->architecture), "%s", xx_arch_to_string(map->arch));
         level = xx_pd_enter_level(pd, map->record_count, "Reading Memory Map");
         for (i = 0; i < map->record_count; ++i) {
             const xx_memory_record *r = map->records + i;
-            if (xx_pd_is_stopped(pd))
-                goto finish;
+            if (xx_pd_is_stopped(pd)) goto finish;
             /* Preserve overlap/order, invisible and virtual-only records. A
              * virtual tail has no file range; never invent an offset for it. */
             if (r->size < 0 ||
                 (r->is_virtual ? r->offset != -1
-                               : (r->offset < 0 || (uint64_t)r->offset > data->file_size ||
-                                  (uint64_t)r->size > data->file_size - (uint64_t)r->offset)) ||
+                               : (r->offset < 0 || (uint64_t)r->offset > data->file_size || (uint64_t)r->size > data->file_size - (uint64_t)r->offset)) ||
                 (r->address != XX_INVALID_ADDRESS && (uint64_t)r->size > UINT64_MAX - r->address))
                 goto finish;
             data->records[data->count] = *r;
@@ -201,10 +186,8 @@ finish:
         xx_elf_destroy(&elf);
         xx_macho_destroy(&macho);
     }
-    if (device)
-        xx_io_close(device);
-    if (ok)
-        *out = data;
+    if (device) xx_io_close(device);
+    if (ok) *out = data;
     else {
         xx_rt_free(data);
         *error = cdie_strdup(message);

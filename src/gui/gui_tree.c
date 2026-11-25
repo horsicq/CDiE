@@ -12,7 +12,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { MARK_SIGNATURE = 0, MARK_INFO, MARK_COUNT };
+enum {
+    MARK_SIGNATURE = 0,
+    MARK_INFO,
+    MARK_COUNT
+};
 
 typedef struct tree_buffer {
     xxwidgets_tree_node *nodes;
@@ -44,7 +48,13 @@ static void tree_preferences_init(void)
     g_tree_preferences_ready = 1;
 }
 
-enum { PENDING_NONE = 0, PENDING_MARK, PENDING_SIGNATURES, PENDING_DIRECTORY, PENDING_LOG };
+enum {
+    PENDING_NONE = 0,
+    PENDING_MARK,
+    PENDING_SIGNATURES,
+    PENDING_DIRECTORY,
+    PENDING_LOG
+};
 
 /* The rows of the tree on screen, the last scan's file and log, and what a
  * button press waits on. */
@@ -62,9 +72,15 @@ static void free_rows(tree_buffer *rows)
 {
     for (size_t i = 0; i < rows->count; ++i) {
         free((void *)rows->nodes[i].text);
-        free(rows->names[i]); free(rows->signatures[i]);
+        free(rows->names[i]);
+        free(rows->signatures[i]);
     }
-    free(rows->nodes); free(rows->colors); free(rows->names); free(rows->signatures); free(rows->marks); free(rows->categories);
+    free(rows->nodes);
+    free(rows->colors);
+    free(rows->names);
+    free(rows->signatures);
+    free(rows->marks);
+    free(rows->categories);
     memset(rows, 0, sizeof(*rows));
 }
 
@@ -86,7 +102,8 @@ xxwidgets_status gui_tree_set_scan_preferences(const gui_scan_page_values *value
         const xx_scan_color_record records[2] = {values->colors.records[i], values->dark_colors.records[i]};
         for (size_t j = 0; j < 2; ++j)
             if ((records[j].foreground > UINT32_C(0xffffff) && records[j].foreground != UINT32_MAX) ||
-                (records[j].background > UINT32_C(0xffffff) && records[j].background != UINT32_MAX)) return XXWIDGETS_INVALID_ARGUMENT;
+                (records[j].background > UINT32_C(0xffffff) && records[j].background != UINT32_MAX))
+                return XXWIDGETS_INVALID_ARGUMENT;
     }
     tree_preferences_init();
     if (g_marks.tree && g_marks.rows.count) {
@@ -146,12 +163,10 @@ static int collect_node(size_t parent, const char *text, const char *category, c
     if (buffer->count == buffer->capacity) {
         size_t capacity = buffer->capacity ? buffer->capacity * 2 : 16;
         if (capacity < buffer->capacity || capacity > SIZE_MAX / sizeof(xxwidgets_tree_node)) return 0;
-        if (!grow((void **)&buffer->nodes, sizeof(*buffer->nodes), capacity) ||
-            !grow((void **)&buffer->colors, sizeof(*buffer->colors), capacity) ||
-            !grow((void **)&buffer->names, sizeof(*buffer->names), capacity) ||
-            !grow((void **)&buffer->signatures, sizeof(*buffer->signatures), capacity) ||
-            !grow((void **)&buffer->categories, sizeof(*buffer->categories), capacity) ||
-            !grow((void **)&buffer->marks, sizeof(*buffer->marks), capacity)) return 0;
+        if (!grow((void **)&buffer->nodes, sizeof(*buffer->nodes), capacity) || !grow((void **)&buffer->colors, sizeof(*buffer->colors), capacity) ||
+            !grow((void **)&buffer->names, sizeof(*buffer->names), capacity) || !grow((void **)&buffer->signatures, sizeof(*buffer->signatures), capacity) ||
+            !grow((void **)&buffer->categories, sizeof(*buffer->categories), capacity) || !grow((void **)&buffer->marks, sizeof(*buffer->marks), capacity))
+            return 0;
         buffer->capacity = capacity;
     }
     copy = copy_text(text);
@@ -160,7 +175,9 @@ static int collect_node(size_t parent, const char *text, const char *category, c
         signature = detection->signature ? copy_text(detection->signature) : NULL;
     }
     if (!copy || (detection && (!name || (detection->signature && !signature)))) {
-        free(copy); free(name); free(signature);
+        free(copy);
+        free(name);
+        free(signature);
         return 0;
     }
     buffer->nodes[buffer->count] = (xxwidgets_tree_node){parent, copy, 1};
@@ -189,8 +206,7 @@ static int scan_worker(void *arg)
 {
     scan_job *job = arg;
     xx_pd_observer previous = xx_pd_set_observer(&job->work, observe_progress, job);
-    job->ok = gui_backend_scan_tree(job->path, job->type_id, collect_node, &job->buffer,
-                                    &job->report, &job->type, &job->info, &job->work);
+    job->ok = gui_backend_scan_tree(job->path, job->type_id, collect_node, &job->buffer, &job->report, &job->type, &job->info, &job->work);
     xx_pd_set_observer(previous.progress, previous.callback, previous.user_data);
     xx_mutex_lock(job->lock);
     job->snapshot = job->work;
@@ -211,8 +227,7 @@ static xxwidgets_status update_progress(void *user, int stop_requested, xx_pd_st
     return XXWIDGETS_OK;
 }
 
-int gui_tree_scan(xxwidgets_widget *owner, xxwidgets_scan_panel *panel, const char *path, int type_id,
-                  char **type, int *cancelled)
+int gui_tree_scan(xxwidgets_widget *owner, xxwidgets_scan_panel *panel, const char *path, int type_id, char **type, int *cancelled)
 {
     scan_job job = {0};
     xx_pd_struct progress = xx_pd_init();
@@ -222,14 +237,19 @@ int gui_tree_scan(xxwidgets_widget *owner, xxwidgets_scan_panel *panel, const ch
     tree_preferences_init();
     if (type) *type = NULL;
     if (cancelled) *cancelled = 0;
-    job.path = path; job.type_id = type_id;
-    job.work = xx_pd_init(); job.snapshot = job.work;
+    job.path = path;
+    job.type_id = type_id;
+    job.work = xx_pd_init();
+    job.snapshot = job.work;
     job.lock = xx_mutex_create();
     if (!job.lock) return 0;
     /* The script interpreter recurses. macOS gives secondary threads only
      * 512 KiB, so ask for at least what a main thread gets (Windows reserves). */
     thread = xx_thread_create_ex(scan_worker, &job, 8u * 1024u * 1024u);
-    if (!thread) { xx_mutex_destroy(job.lock); return 0; }
+    if (!thread) {
+        xx_mutex_destroy(job.lock);
+        return 0;
+    }
     /* BUSY (inside an input callback or another modal form) returns before
      * starting, so the scan simply runs to its end; any other failure has
      * already passed the worker a stop request. Either way, join it. */
@@ -237,8 +257,7 @@ int gui_tree_scan(xxwidgets_widget *owner, xxwidgets_scan_panel *panel, const ch
     ok = xx_thread_join(thread, NULL) && job.ok;
     xx_mutex_destroy(job.lock);
     if (cancelled) *cancelled = job.work.is_stop;
-    if (ok && panel) ok = xxwidgets_scan_panel_set_tree(panel, job.buffer.nodes, job.buffer.colors,
-        job.buffer.count, job.buffer.detections, job.report) == XXWIDGETS_OK;
+    if (ok && panel) ok = xxwidgets_scan_panel_set_tree(panel, job.buffer.nodes, job.buffer.colors, job.buffer.count, job.buffer.detections, job.report) == XXWIDGETS_OK;
     if (ok && panel) {
         /* The facts and time DIE shows around the tree, and the log behind Log. */
         (void)xxwidgets_scan_panel_set_file_info(panel, job.info.endianness, job.info.mode, job.info.architecture, job.info.type);
@@ -259,9 +278,14 @@ int gui_tree_scan(xxwidgets_widget *owner, xxwidgets_scan_panel *panel, const ch
             g_marks.log = copy_text(job.info.log);
         } else free(copy);
     }
-    if (ok && type) { *type = job.type; job.type = NULL; }
+    if (ok && type) {
+        *type = job.type;
+        job.type = NULL;
+    }
     free_rows(&job.buffer);
-    gui_backend_free(job.report); gui_backend_free(job.type); gui_backend_free(job.info.log);
+    gui_backend_free(job.report);
+    gui_backend_free(job.type);
+    gui_backend_free(job.info.log);
     return ok;
 }
 
@@ -278,9 +302,10 @@ void gui_tree_reset(void)
 int gui_tree_event(xxwidgets_scan_panel *panel, const xxwidgets_event *event)
 {
     const xxwidgets_widget *tree = panel ? xxwidgets_scan_panel_control(panel, XXWIDGETS_SCAN_PANEL_RESULTS) : NULL;
-    static const struct { xxwidgets_scan_panel_control_id control; int pending; } buttons[] = {
-        {XXWIDGETS_SCAN_PANEL_SIGNATURES, PENDING_SIGNATURES}, {XXWIDGETS_SCAN_PANEL_DIRECTORY, PENDING_DIRECTORY},
-        {XXWIDGETS_SCAN_PANEL_LOG, PENDING_LOG}};
+    static const struct {
+        xxwidgets_scan_panel_control_id control;
+        int pending;
+    } buttons[] = {{XXWIDGETS_SCAN_PANEL_SIGNATURES, PENDING_SIGNATURES}, {XXWIDGETS_SCAN_PANEL_DIRECTORY, PENDING_DIRECTORY}, {XXWIDGETS_SCAN_PANEL_LOG, PENDING_LOG}};
     size_t i;
     if (!event || event->type != XXWIDGETS_EVENT_CLICK || !tree) return 0;
     for (i = 0; i < sizeof(buttons) / sizeof(buttons[0]); ++i)
@@ -291,8 +316,8 @@ int gui_tree_event(xxwidgets_scan_panel *panel, const xxwidgets_event *event)
         }
     if (event->widget != tree) return 0;
     /* Only presses on the rows this module put there, in this tree. */
-    if (tree == g_marks.tree && event->value >= 0 && (size_t)event->value < g_marks.rows.count &&
-        event->x >= 0 && event->x < MARK_COUNT && (g_marks.rows.marks[event->value] >> event->x & 1u)) {
+    if (tree == g_marks.tree && event->value >= 0 && (size_t)event->value < g_marks.rows.count && event->x >= 0 && event->x < MARK_COUNT &&
+        (g_marks.rows.marks[event->value] >> event->x & 1u)) {
         g_marks.pending_node = (size_t)event->value;
         g_marks.pending_mark = event->x;
         g_marks.pending = PENDING_MARK;
@@ -313,8 +338,10 @@ static xxwidgets_status run_edited(const char *source, const char *path, char **
     char *text = NULL;
     int ok = 0;
     if (target->path) ok = gui_backend_run_signature(target->path, target->type_id, path, source, &text);
-    *result = copy_text(!target->path ? CDIE_TR("Scan a file first: Run executes the signature on it.") :
-        text && text[0] ? text : ok ? CDIE_TR("Nothing detected.") : CDIE_TR("Cannot scan the file."));
+    *result = copy_text(!target->path     ? CDIE_TR("Scan a file first: Run executes the signature on it.")
+                        : text && text[0] ? text
+                        : ok              ? CDIE_TR("Nothing detected.")
+                                          : CDIE_TR("Cannot scan the file."));
     gui_backend_free(text);
     return *result ? XXWIDGETS_OK : XXWIDGETS_OUT_OF_MEMORY;
 }
@@ -345,11 +372,13 @@ static xxwidgets_status signatures_window(xxwidgets_widget *owner, const char *s
     if (!names) return XXWIDGETS_OUT_OF_MEMORY;
     for (i = 0; i < count; ++i) {
         const char *path = NULL;
-        if (!gui_backend_signature_entry(i, &names[i], &path)) { free(names); return XXWIDGETS_PLATFORM_ERROR; }
+        if (!gui_backend_signature_entry(i, &names[i], &path)) {
+            free(names);
+            return XXWIDGETS_PLATFORM_ERROR;
+        }
         if (signature && path && !strcmp(path, signature)) selected = (size_t)i;
     }
-    status = xxwidgets_die_signatures_dialog(owner, CDIE_TR("Signatures"), names, (size_t)count, selected,
-        load_signature, run_edited, &target);
+    status = xxwidgets_die_signatures_dialog(owner, CDIE_TR("Signatures"), names, (size_t)count, selected, load_signature, run_edited, &target);
     free(names);
     return status;
 }
@@ -372,15 +401,13 @@ static xxwidgets_status scan_directory_file(xxwidgets_scan_directory_task *task,
     directory_out out = {task, XXWIDGETS_OK};
     (void)user;
     if (xxwidgets_scan_directory_cancelled(task)) return XXWIDGETS_OK;
-    if (!gui_backend_scan_detections(path, options->flags, options->databases, emit_detection, &out) && out.status == XXWIDGETS_OK)
-        return XXWIDGETS_PLATFORM_ERROR;
+    if (!gui_backend_scan_detections(path, options->flags, options->databases, emit_detection, &out) && out.status == XXWIDGETS_OK) return XXWIDGETS_PLATFORM_ERROR;
     return out.status;
 }
 
 static xxwidgets_status directory_window(xxwidgets_widget *owner)
 {
-    xxwidgets_scan_options options = {XXWIDGETS_SCAN_DEEP | XXWIDGETS_SCAN_HEURISTIC | XXWIDGETS_SCAN_VERBOSE,
-        XXWIDGETS_SCAN_DATABASE_CUSTOM};
+    xxwidgets_scan_options options = {XXWIDGETS_SCAN_DEEP | XXWIDGETS_SCAN_HEURISTIC | XXWIDGETS_SCAN_VERBOSE, XXWIDGETS_SCAN_DATABASE_CUSTOM};
     char *folder = copy_text(g_marks.path ? g_marks.path : "");
     xxwidgets_status status;
     if (!folder) return XXWIDGETS_OUT_OF_MEMORY;
@@ -391,8 +418,10 @@ static xxwidgets_status directory_window(xxwidgets_widget *owner)
     {
         /* Start in the folder of the scanned file, if there is one. */
         char *cut = NULL;
-        for (char *s = folder; *s; ++s) if (*s == '/' || *s == '\\') cut = s;
-        if (cut) *cut = 0; else folder[0] = 0;
+        for (char *s = folder; *s; ++s)
+            if (*s == '/' || *s == '\\') cut = s;
+        if (cut) *cut = 0;
+        else folder[0] = 0;
     }
     status = xxwidgets_scan_directory_dialog(owner, CDIE_TR("Scan directory"), folder, &options, scan_directory_file, NULL);
     free(folder);
@@ -409,7 +438,11 @@ static char *search_url(const char *name)
     out = url + sizeof(prefix) - 1;
     for (const unsigned char *s = (const unsigned char *)name; *s; ++s) {
         if ((*s >= 'A' && *s <= 'Z') || (*s >= 'a' && *s <= 'z') || (*s >= '0' && *s <= '9') || strchr("-_.~", *s)) *out++ = (char)*s;
-        else { *out++ = '%'; *out++ = hex[*s >> 4]; *out++ = hex[*s & 15]; }
+        else {
+            *out++ = '%';
+            *out++ = hex[*s >> 4];
+            *out++ = hex[*s & 15];
+        }
     }
     *out = 0;
     return url;

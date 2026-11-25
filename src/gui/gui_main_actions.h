@@ -57,16 +57,16 @@ xxwidgets_status gui_main_store_tag_filters(xxwidgets_scan_panel *panel);
 typedef struct gui_main_hooks {
     void *user;
     /* NULL hooks make their action do nothing. */
-    void (*browse)(void *user);                  /* BROWSE, shortcut Open: the file chooser */
-    void (*recent)(void *user);                  /* RECENT: the recent-files dialog, then open */
-    void (*open_path)(void *user);               /* OPEN_PATH: open the typed path */
-    void (*scan)(void *user, int type_id);       /* SCAN, a new File type or engine: scan the loaded file */
-    void (*report)(void *user);                  /* REPORT */
-    void (*signatures)(void *user);              /* the scan bar's Signatures */
+    void (*browse)(void *user);            /* BROWSE, shortcut Open: the file chooser */
+    void (*recent)(void *user);            /* RECENT: the recent-files dialog, then open */
+    void (*open_path)(void *user);         /* OPEN_PATH: open the typed path */
+    void (*scan)(void *user, int type_id); /* SCAN, a new File type or engine: scan the loaded file */
+    void (*report)(void *user);            /* REPORT */
+    void (*signatures)(void *user);        /* the scan bar's Signatures */
     void (*directory)(void *user);
     void (*log)(void *user);
-    void (*update)(void *user);                  /* only called with with_update */
-    void (*options)(void *user, int page);       /* -1: the last page; else a gui_options_page_id */
+    void (*update)(void *user);            /* only called with with_update */
+    void (*options)(void *user, int page); /* -1: the last page; else a gui_options_page_id */
     void (*about)(void *user);
     void (*exit)(void *user);                    /* the normal close path */
     void (*settings_changed)(void *user);        /* save the settings (changes only) */
@@ -78,12 +78,10 @@ typedef struct gui_main_hooks {
 /* Carries out action for the loaded file path ("" or NULL: none). Returns 1
  * when the action was one of the shared ones (done, or deliberately
  * nothing), 0 when the frontend must handle it (PATH_EDITED and DEMANGLE). */
-int gui_main_run_action(xxwidgets_widget *owner, xxwidgets_die_main_panel *panel, const char *path, const xxwidgets_die_action *action,
-                        const gui_main_hooks *hooks);
+int gui_main_run_action(xxwidgets_widget *owner, xxwidgets_die_main_panel *panel, const char *path, const xxwidgets_die_action *action, const gui_main_hooks *hooks);
 
 /* A SHORTCUT event mapped with gui_shortcuts_action: the same steps as the
  * buttons; the tools work in both views, also those without a button. */
-int gui_main_run_shortcut(xxwidgets_widget *owner, xxwidgets_die_main_panel *panel, const char *path, gui_shortcut_action shortcut,
-                          const gui_main_hooks *hooks);
+int gui_main_run_shortcut(xxwidgets_widget *owner, xxwidgets_die_main_panel *panel, const char *path, gui_shortcut_action shortcut, const gui_main_hooks *hooks);
 
 #endif

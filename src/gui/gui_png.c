@@ -60,8 +60,7 @@ int gui_png_decode_rgba(const unsigned char *data, size_t size, unsigned char **
             w = png_u32(data + offset + 8);
             h = png_u32(data + offset + 12);
             /* 8-bit depth, RGB (2) or RGBA (6), deflate, adaptive filters, no interlace. */
-            if (data[offset + 16] != 8 || (data[offset + 17] != 2 && data[offset + 17] != 6) || data[offset + 18] || data[offset + 19] || data[offset + 20])
-                return 0;
+            if (data[offset + 16] != 8 || (data[offset + 17] != 2 && data[offset + 17] != 6) || data[offset + 18] || data[offset + 19] || data[offset + 20]) return 0;
             pixel = data[offset + 17] == 6 ? 4 : 3;
         } else if (!xx_rt_memcmp(type, "IDAT", 4)) compressed_size += length;
         else if (!xx_rt_memcmp(type, "IEND", 4)) break;
@@ -83,9 +82,7 @@ int gui_png_decode_rgba(const unsigned char *data, size_t size, unsigned char **
         } else if (!xx_rt_memcmp(data + offset + 4, "IEND", 4)) break;
         offset += 12 + (size_t)length;
     }
-    if (!xx_zlib_stream_decode_memory(compressed, compressed_size, raw, raw_size, &written) || written != raw_size ||
-        !png_unfilter(raw, h, stride, pixel))
-        goto done;
+    if (!xx_zlib_stream_decode_memory(compressed, compressed_size, raw, raw_size, &written) || written != raw_size || !png_unfilter(raw, h, stride, pixel)) goto done;
     for (y = 0; y < h; ++y)
         for (x = 0; x < w; ++x) {
             const unsigned char *src = raw + (size_t)y * (stride + 1) + 1 + (size_t)x * pixel;

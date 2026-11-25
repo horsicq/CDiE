@@ -90,32 +90,32 @@ typedef enum cdie_update_status_e {
 } cdie_update_status;
 
 typedef struct cdie_update_config_s {
-    char *main_path;      /* "db" folder; NULL/"" = the default (see cdie_paths.h, else ./db) */
-    char *url;           /* NULL/"" = CDIE_UPDATE_DEFAULT_URL */
-    char *api_base;       /* NULL = derived from the URL; tests point it at a local server */
+    char *main_path;         /* "db" folder; NULL/"" = the default (see cdie_paths.h, else ./db) */
+    char *url;               /* NULL/"" = CDIE_UPDATE_DEFAULT_URL */
+    char *api_base;          /* NULL = derived from the URL; tests point it at a local server */
     char *settings_location; /* set by cdie_update_config_load_settings, for display */
-    int no_proxy;         /* connect directly (tests on 127.0.0.1) */
-    int user_fallback;    /* default 1: see "HOW IT INSTALLS" */
-    uint32_t timeout_ms;  /* inactivity timeout, 0 = xxnetlib's default */
+    int no_proxy;            /* connect directly (tests on 127.0.0.1) */
+    int user_fallback;       /* default 1: see "HOW IT INSTALLS" */
+    uint32_t timeout_ms;     /* inactivity timeout, 0 = xxnetlib's default */
 } cdie_update_config;
 
 typedef struct cdie_update_info_s {
-    char *source_url;     /* the URL that was used */
-    char *archive_url;    /* where db.zip is downloaded from */
+    char *source_url;  /* the URL that was used */
+    char *archive_url; /* where db.zip is downloaded from */
     char *archive_name;
-    char *release_name;   /* GitHub release, when known */
+    char *release_name; /* GitHub release, when known */
     char *release_tag;
-    int64_t remote_size;  /* bytes, -1 when unknown */
-    int64_t remote_time;  /* asset upload time (Unix seconds), 0 when unknown */
-    char remote_md5[33];  /* lower-case hex, "" when unknown */
-    char remote_asset[96];/* "<id>:<size>:<time>" of a GitHub asset, "" when unknown */
+    int64_t remote_size;   /* bytes, -1 when unknown */
+    int64_t remote_time;   /* asset upload time (Unix seconds), 0 when unknown */
+    char remote_md5[33];   /* lower-case hex, "" when unknown */
+    char remote_asset[96]; /* "<id>:<size>:<time>" of a GitHub asset, "" when unknown */
 
-    char *main_path;      /* resolved target folder (absolute) */
-    int main_is_default;  /* main_path came from the default resolution */
-    int has_database;     /* main_path exists */
+    char *main_path;     /* resolved target folder (absolute) */
+    int main_is_default; /* main_path came from the default resolution */
+    int has_database;    /* main_path exists */
     char installed_md5[33];
     char installed_asset[96];
-    char installed_at[32];/* ISO 8601 from the stamp, "" when none */
+    char installed_at[32]; /* ISO 8601 from the stamp, "" when none */
     char *installed_source;
 
     int update_available;

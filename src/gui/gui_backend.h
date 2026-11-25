@@ -41,7 +41,11 @@ extern "C" {
 /* The database slots, as Detect It Easy has them: the main database, always
  * used, and the optional custom one. The extra database folder of earlier
  * versions is never loaded. */
-enum { GUI_DB_MAIN = 0, GUI_DB_CUSTOM = 1, GUI_DB_COUNT = 2 };
+enum {
+    GUI_DB_MAIN = 0,
+    GUI_DB_CUSTOM = 1,
+    GUI_DB_COUNT = 2
+};
 
 /* File-type choices Qt's XFormats exposes but xxfclib's compact scanner enum
  * does not.  They intentionally live outside XFileType; scans map them to
@@ -148,9 +152,7 @@ int gui_backend_set_scan_preferences(const gui_backend_scan_preferences *prefere
 /* Validate and stage all database folders before changing either databases or
  * preferences. Empty folders select executable-local defaults. Failure leaves
  * the complete previous configuration intact. Call between scans. */
-int gui_backend_apply_configuration(const gui_backend_scan_preferences *preferences,
-    const char *main_path, const char *custom_path,
-    char *error, size_t error_capacity);
+int gui_backend_apply_configuration(const gui_backend_scan_preferences *preferences, const char *main_path, const char *custom_path, char *error, size_t error_capacity);
 /* Why the last gui_backend_apply_configuration failed (OK after a success), so
  * a frontend can say it in its own language; error above is English. slot (may
  * be NULL) receives the database (a GUI_DB_* slot) for MISSING and LOAD, else
@@ -224,17 +226,13 @@ int gui_backend_scan(const char *pUtf8Path, char **ppResultText, char **ppTypeNa
  * Field strings are borrowed only for the duration of the callback. The type
  * includes the translated label and a heuristic marker when appropriate.
  * Output strings follow gui_backend_scan's ownership rules. */
-typedef void (*gui_backend_result_fn)(const char *pType, const char *pName,
-    const char *pVersion, const char *pInfo, void *pUserData);
-int gui_backend_scan_results(const char *pUtf8Path, gui_backend_result_fn pResultFn,
-    void *pUserData, char **ppResultText, char **ppTypeName);
+typedef void (*gui_backend_result_fn)(const char *pType, const char *pName, const char *pVersion, const char *pInfo, void *pUserData);
+int gui_backend_scan_results(const char *pUtf8Path, gui_backend_result_fn pResultFn, void *pUserData, char **ppResultText, char **ppTypeName);
 
 /* Scans the current file as the selected file-type ID from file_types().
  * ID 0 is automatic; explicit IDs run only that interpretation's scan pass.
  * The automatic APIs above do not retain a previous explicit selection. */
-int gui_backend_scan_results_type(const char *pUtf8Path, int nTypeId,
-    gui_backend_result_fn pResultFn, void *pUserData,
-    char **ppResultText, char **ppTypeName);
+int gui_backend_scan_results_type(const char *pUtf8Path, int nTypeId, gui_backend_result_fn pResultFn, void *pUserData, char **ppResultText, char **ppTypeName);
 
 /* Compact result tree with explicit parent indexes. SIZE_MAX denotes a root;
  * category selects the scan-layer color pair; an empty category denotes a group.
@@ -247,8 +245,7 @@ typedef struct gui_backend_detection {
 } gui_backend_detection;
 /* detection is NULL on group rows (the file type, Overlay, Archive member...)
  * and is borrowed for the call. */
-typedef int (*gui_backend_tree_fn)(size_t parent, const char *text, const char *category,
-                                   const gui_backend_detection *detection, void *user);
+typedef int (*gui_backend_tree_fn)(size_t parent, const char *text, const char *category, const gui_backend_detection *detection, void *user);
 /* What DIE shows around the result tree: the format parser's view of the
  * scanned file (empty strings when it has none) and the engine's errors and
  * warnings, one per line ("" when there are none; free with gui_backend_free). */
@@ -257,15 +254,14 @@ typedef struct gui_backend_scan_info {
     char *log;
 } gui_backend_scan_info;
 /* info may be NULL. */
-int gui_backend_scan_tree(const char *path, int type_id, gui_backend_tree_fn callback,
-    void *user, char **report, char **type_name, gui_backend_scan_info *info, xx_pd_struct *progress);
+int gui_backend_scan_tree(const char *path, int type_id, gui_backend_tree_fn callback, void *user, char **report, char **type_name, gui_backend_scan_info *info,
+                          xx_pd_struct *progress);
 /* Detections of one file for a directory scan, with these flags and optional
  * databases (xxwidgets scan option bits; only XXWIDGETS_SCAN_DATABASE_CUSTOM
  * counts) instead of the current ones. Safe on a worker thread while nothing
  * changes the databases. */
 typedef void (*gui_backend_detection_fn)(const char *type, const char *name, const char *version, const char *info, void *user);
-int gui_backend_scan_detections(const char *path, unsigned int flags, unsigned int databases,
-    gui_backend_detection_fn callback, void *user);
+int gui_backend_scan_detections(const char *path, unsigned int flags, unsigned int databases, gui_backend_detection_fn callback, void *user);
 /* Loaded signatures, in database order, as "Folder/name.sg" for display and
  * by the database path a result row names. */
 int gui_backend_signature_entry(int index, const char **display, const char **path);
@@ -292,36 +288,44 @@ int gui_backend_set_info_path(const char *path);
  * 2.5): the type page, the header values and the engine row. Pages are in the
  * order of xxwidgets_format_page, so a frontend can pass them on unchanged. */
 typedef enum gui_backend_facts_page {
-    GUI_FACTS_PAGE_BINARY = 0, GUI_FACTS_PAGE_COM, GUI_FACTS_PAGE_ARCHIVE, GUI_FACTS_PAGE_MSDOS,
-    GUI_FACTS_PAGE_NE, GUI_FACTS_PAGE_LE, GUI_FACTS_PAGE_DEX, GUI_FACTS_PAGE_PE, GUI_FACTS_PAGE_ELF,
-    GUI_FACTS_PAGE_MACH, GUI_FACTS_PAGE_COUNT
+    GUI_FACTS_PAGE_BINARY = 0,
+    GUI_FACTS_PAGE_COM,
+    GUI_FACTS_PAGE_ARCHIVE,
+    GUI_FACTS_PAGE_MSDOS,
+    GUI_FACTS_PAGE_NE,
+    GUI_FACTS_PAGE_LE,
+    GUI_FACTS_PAGE_DEX,
+    GUI_FACTS_PAGE_PE,
+    GUI_FACTS_PAGE_ELF,
+    GUI_FACTS_PAGE_MACH,
+    GUI_FACTS_PAGE_COUNT
 } gui_backend_facts_page;
 enum {
-    GUI_FACTS_SEG_OFF = 1u << 0,    /* MSDOS: show base and entry as "hhhh:llll" halves of 32 bits */
-    GUI_FACTS_EXPORTS = 1u << 1,    /* PE data directories present, as Qt DIE tests them */
+    GUI_FACTS_SEG_OFF = 1u << 0, /* MSDOS: show base and entry as "hhhh:llll" halves of 32 bits */
+    GUI_FACTS_EXPORTS = 1u << 1, /* PE data directories present, as Qt DIE tests them */
     GUI_FACTS_IMPORTS = 1u << 2,
     GUI_FACTS_RESOURCES = 1u << 3,
-    GUI_FACTS_DOTNET = 1u << 4,     /* a COM descriptor; .NET stays disabled until it has a viewer */
+    GUI_FACTS_DOTNET = 1u << 4, /* a COM descriptor; .NET stays disabled until it has a viewer */
     GUI_FACTS_TLS = 1u << 5,
-    GUI_FACTS_OVERLAY = 1u << 6,    /* PE and MSDOS: overlay_offset/overlay_size are valid */
-    GUI_FACTS_MANIFEST = 1u << 7,   /* PE: manifest holds the RT_MANIFEST text */
-    GUI_FACTS_VERSION = 1u << 8,    /* PE: version holds the RT_VERSION strings */
-    GUI_FACTS_SECTIONS = 1u << 9,   /* PE, ELF, Mach-O: sections is not zero */
-    GUI_FACTS_PROGRAMS = 1u << 10,  /* ELF */
-    GUI_FACTS_COMMANDS = 1u << 11,  /* Mach-O */
+    GUI_FACTS_OVERLAY = 1u << 6,   /* PE and MSDOS: overlay_offset/overlay_size are valid */
+    GUI_FACTS_MANIFEST = 1u << 7,  /* PE: manifest holds the RT_MANIFEST text */
+    GUI_FACTS_VERSION = 1u << 8,   /* PE: version holds the RT_VERSION strings */
+    GUI_FACTS_SECTIONS = 1u << 9,  /* PE, ELF, Mach-O: sections is not zero */
+    GUI_FACTS_PROGRAMS = 1u << 10, /* ELF */
+    GUI_FACTS_COMMANDS = 1u << 11, /* Mach-O */
     GUI_FACTS_SEGMENTS = 1u << 12,
     GUI_FACTS_LIBRARIES = 1u << 13,
     GUI_FACTS_ENTRY_OFFSET = 1u << 14, /* entry_point_offset is a file offset */
-    GUI_FACTS_NET_ID = 1u << 15     /* PE: net_id is valid; Qt titles the time stamp box ".NET ID"
-                                     * and shows net_id as 8 hex digits instead of the date */
+    GUI_FACTS_NET_ID = 1u << 15        /* PE: net_id is valid; Qt titles the time stamp box ".NET ID"
+                                        * and shows net_id as 8 hex digits instead of the date */
 };
 typedef struct gui_backend_facts {
-    int type_id;             /* the file_types() ID described: the preferred type when 0 was asked */
-    char type_name[32];      /* its name, e.g. "PE64", "MSDOS", "Binary" */
-    int page;                /* gui_backend_facts_page */
-    char main_label[64];     /* the page button: "PE", "ELF", "Mach-O", "MSDOS", "NE", "LE" or "LX",
-                              * "DEX", "Binary", or the archive format, e.g. "ZIP(2.0)"; "" for COM */
-    unsigned int flags;      /* GUI_FACTS_* */
+    int type_id;         /* the file_types() ID described: the preferred type when 0 was asked */
+    char type_name[32];  /* its name, e.g. "PE64", "MSDOS", "Binary" */
+    int page;            /* gui_backend_facts_page */
+    char main_label[64]; /* the page button: "PE", "ELF", "Mach-O", "MSDOS", "NE", "LE" or "LX",
+                          * "DEX", "Binary", or the archive format, e.g. "ZIP(2.0)"; "" for COM */
+    unsigned int flags;  /* GUI_FACTS_* */
     uint64_t file_size;
     /* Header values; Qt pads them to bits / 4 hex digits and shows them bold
      * when not zero. */
@@ -339,9 +343,9 @@ typedef struct gui_backend_facts {
     uint32_t sections, programs, commands, segments, libraries;
     /* PE */
     uint32_t time_date_stamp, size_of_image;
-    char time_date_stamp_text[32];      /* "yyyy-MM-dd hh:mm:ss" in local time, as Qt DIE */
+    char time_date_stamp_text[32];        /* "yyyy-MM-dd hh:mm:ss" in local time, as Qt DIE */
     int64_t overlay_offset, overlay_size; /* -1 and 0 without an overlay */
-    char *manifest, *version;           /* heap UTF-8 or NULL; "Key: Value" lines for version */
+    char *manifest, *version;             /* heap UTF-8 or NULL; "Key: Value" lines for version */
     /* XPE::getNetId: with a COM descriptor, a TimeDateStamp with bit 31 set
      * (a deterministic .NET build's hash), else 0. */
     uint32_t net_id;

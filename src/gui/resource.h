@@ -26,6 +26,6 @@
 #define CDIE_GUI_RESOURCE_H
 
 /* The lowest icon id is the executable icon Explorer shows. */
-#define IDI_CDIE         1
+#define IDI_CDIE 1
 
 #endif /* CDIE_GUI_RESOURCE_H */

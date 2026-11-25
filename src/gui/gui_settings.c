@@ -109,38 +109,62 @@ static gui_options_values defaults;
 static settings_snapshot *snapshots;
 
 static const char *const scan_color_names[XX_SCAN_COLOR_COUNT] = {
-    "Unknown","Installer","Sfx","Archive","Protection","Petool","Apktool","Os","Vm","Platform","DosExtender","Format","Signtool",
-    "Certificate","Licensing","Language","CorruptedData","PersonalData","Author","Virus","Trojan","Malware","Debug","DebugData","GameEngine",
-    "Compiler","Compressor","Converter","Creator","Data","Database","Document","Generic","Image","InstallerData","Library","Linker","Loader",
-    "Obfuscator","Overlay","Package","Player","Producer","ProtectorData","Rom","SfxData","SourceCode","Stub","Tool"
-};
+    "Unknown",     "Installer", "Sfx",      "Archive",       "Protection",    "Petool",   "Apktool",       "Os",           "Vm",         "Platform",
+    "DosExtender", "Format",    "Signtool", "Certificate",   "Licensing",     "Language", "CorruptedData", "PersonalData", "Author",     "Virus",
+    "Trojan",      "Malware",   "Debug",    "DebugData",     "GameEngine",    "Compiler", "Compressor",    "Converter",    "Creator",    "Data",
+    "Database",    "Document",  "Generic",  "Image",         "InstallerData", "Library",  "Linker",        "Loader",       "Obfuscator", "Overlay",
+    "Package",     "Player",    "Producer", "ProtectorData", "Rom",           "SfxData",  "SourceCode",    "Stub",         "Tool"};
 /* Detect It Easy's spelling; NULL keeps the category cdie-only. */
 static const char *const qt_scan_color_names[XX_SCAN_COLOR_COUNT] = {
-    NULL,"Installer","Sfx","Archive","Protection","PeTool","ApkTool","OS","VM","Platform","DosExtender","Format","SignTool",
-    "Certificate","Licensing","Language","CorruptedData","PersonalData","Author","Virus","Trojan","Malware","Debug","DebugData","GameEngine",
-    "Compiler","Compressor","Converter","Creator","Data","Database","Document","Generic","Image","InstallerData","Library","Linker","Loader",
-    "Obfuscator","Overlay","Package","Player","Producer","ProtectorData","ROM","SfxData","SourceCode","Stub","Tool"
-};
-static const struct { const char *cdie, *qt; } qt_disasm_colors[] = {
-    {"arrows", "Arrows"}, {"arrows_selected", "Arrows/Selected"}, {"regs", "Regs"}, {"numbers", "Numbers"}, {"opcode", "Opcode"},
-    {"refs", "Refs"}, {"currentip", "CurrentIP"},
-    {"x86_regs_general", "x86/Regs/General"}, {"x86_regs_stack", "x86/Regs/Stack"}, {"x86_regs_segment", "x86/Regs/Segment"},
-    {"x86_regs_debug", "x86/Regs/Debug"}, {"x86_regs_ip", "x86/Regs/IP"}, {"x86_regs_flags", "x86/Regs/Flags"},
-    {"x86_regs_fpu", "x86/Regs/Float"}, {"x86_regs_xmm", "x86/Regs/XMM"}, {"x86_regs_ymm", "x86/Regs/YMM"}, {"x86_regs_zmm", "x86/Regs/ZMM"},
-    {"x86_opcode_call", "x86/Opcode/call"}, {"x86_opcode_ret", "x86/Opcode/ret"}, {"x86_opcode_nop", "x86/Opcode/nop"},
-    {"x86_opcode_push", "x86/Opcode/push"}, {"x86_opcode_pop", "x86/Opcode/pop"}, {"x86_opcode_cond_jmp", "x86/Opcode/cond_jmp"},
-    {"x86_opcode_jmp", "x86/Opcode/jmp"}, {"x86_opcode_int3", "x86/Opcode/int3"}, {"x86_opcode_syscall", "x86/Opcode/syscall"},
-    {"arm_regs_general", "arm/Regs/General"}, {"arm_regs_stack", "arm/Regs/Stack"}, {"arm_opcode_branch", "arm/Opcode/b"},
-    {"arm_opcode_branchlink", "arm/Opcode/bl"}, {"arm_opcode_ret", "arm/Opcode/ret"}, {"arm_opcode_push", "arm/Opcode/push"},
-    {"arm_opcode_pop", "arm/Opcode/pop"}, {"arm_opcode_nop", "arm/Opcode/nop"}
-};
+    NULL,          "Installer", "Sfx",      "Archive",       "Protection",    "PeTool",   "ApkTool",       "OS",           "VM",         "Platform",
+    "DosExtender", "Format",    "SignTool", "Certificate",   "Licensing",     "Language", "CorruptedData", "PersonalData", "Author",     "Virus",
+    "Trojan",      "Malware",   "Debug",    "DebugData",     "GameEngine",    "Compiler", "Compressor",    "Converter",    "Creator",    "Data",
+    "Database",    "Document",  "Generic",  "Image",         "InstallerData", "Library",  "Linker",        "Loader",       "Obfuscator", "Overlay",
+    "Package",     "Player",    "Producer", "ProtectorData", "ROM",           "SfxData",  "SourceCode",    "Stub",         "Tool"};
+static const struct {
+    const char *cdie, *qt;
+} qt_disasm_colors[] = {{"arrows", "Arrows"},
+                        {"arrows_selected", "Arrows/Selected"},
+                        {"regs", "Regs"},
+                        {"numbers", "Numbers"},
+                        {"opcode", "Opcode"},
+                        {"refs", "Refs"},
+                        {"currentip", "CurrentIP"},
+                        {"x86_regs_general", "x86/Regs/General"},
+                        {"x86_regs_stack", "x86/Regs/Stack"},
+                        {"x86_regs_segment", "x86/Regs/Segment"},
+                        {"x86_regs_debug", "x86/Regs/Debug"},
+                        {"x86_regs_ip", "x86/Regs/IP"},
+                        {"x86_regs_flags", "x86/Regs/Flags"},
+                        {"x86_regs_fpu", "x86/Regs/Float"},
+                        {"x86_regs_xmm", "x86/Regs/XMM"},
+                        {"x86_regs_ymm", "x86/Regs/YMM"},
+                        {"x86_regs_zmm", "x86/Regs/ZMM"},
+                        {"x86_opcode_call", "x86/Opcode/call"},
+                        {"x86_opcode_ret", "x86/Opcode/ret"},
+                        {"x86_opcode_nop", "x86/Opcode/nop"},
+                        {"x86_opcode_push", "x86/Opcode/push"},
+                        {"x86_opcode_pop", "x86/Opcode/pop"},
+                        {"x86_opcode_cond_jmp", "x86/Opcode/cond_jmp"},
+                        {"x86_opcode_jmp", "x86/Opcode/jmp"},
+                        {"x86_opcode_int3", "x86/Opcode/int3"},
+                        {"x86_opcode_syscall", "x86/Opcode/syscall"},
+                        {"arm_regs_general", "arm/Regs/General"},
+                        {"arm_regs_stack", "arm/Regs/Stack"},
+                        {"arm_opcode_branch", "arm/Opcode/b"},
+                        {"arm_opcode_branchlink", "arm/Opcode/bl"},
+                        {"arm_opcode_ret", "arm/Opcode/ret"},
+                        {"arm_opcode_push", "arm/Opcode/push"},
+                        {"arm_opcode_pop", "arm/Opcode/pop"},
+                        {"arm_opcode_nop", "arm/Opcode/nop"}};
 static const char *const font_roles[4] = {"Controls", "TableViews", "TreeViews", "TextEdits"};
 static const char *const database_names[GUI_DB_COUNT] = {"db", "db_custom"}; /* GUI_DB_MAIN, GUI_DB_CUSTOM */
 
 static int *feature_field(gui_backend_optimization_options *options, size_t index)
 {
-    int *const fields[11] = {&options->use_sse2, &options->use_avx2, &options->use_sse42, &options->use_aes, &options->use_sha, &options->use_vpclmulqdq,
-                             &options->use_neon, &options->use_arm_crc32, &options->use_arm_crypto, &options->use_arm_dotprod, &options->use_arm_pmull};
+    int *const fields[11] = {&options->use_sse2,       &options->use_avx2,        &options->use_sse42,    &options->use_aes,
+                             &options->use_sha,        &options->use_vpclmulqdq,  &options->use_neon,     &options->use_arm_crc32,
+                             &options->use_arm_crypto, &options->use_arm_dotprod, &options->use_arm_pmull};
     return fields[index];
 }
 
@@ -173,7 +197,8 @@ static char *number_text(uint64_t number)
     char digits[24];
     size_t at = sizeof(digits);
     digits[--at] = 0;
-    do digits[--at] = (char)('0' + number % 10); while ((number /= 10) != 0);
+    do digits[--at] = (char)('0' + number % 10);
+    while ((number /= 10) != 0);
     return text_dup(digits + at);
 }
 
@@ -221,8 +246,10 @@ static int parse_hex(const char *text, size_t size, uint64_t *number)
     if (!size || size > 16) return 0;
     for (i = 0; i < size; ++i) {
         char c = text[i];
-        unsigned int digit = c >= '0' && c <= '9' ? (unsigned int)(c - '0') : c >= 'a' && c <= 'f' ? (unsigned int)(c - 'a' + 10) :
-                             c >= 'A' && c <= 'F' ? (unsigned int)(c - 'A' + 10) : 16u;
+        unsigned int digit = c >= '0' && c <= '9'   ? (unsigned int)(c - '0')
+                             : c >= 'a' && c <= 'f' ? (unsigned int)(c - 'a' + 10)
+                             : c >= 'A' && c <= 'F' ? (unsigned int)(c - 'A' + 10)
+                                                    : 16u;
         if (digit > 15) return 0;
         result = result * 16 + digit;
     }
@@ -304,7 +331,10 @@ static int parse_point_size(const char *text, size_t size, unsigned int *points)
     uint64_t whole = 0;
     size_t i = 0;
     int up = 0;
-    if (same_text(text, size, "-1", 0)) { *points = 0; return 1; }
+    if (same_text(text, size, "-1", 0)) {
+        *points = 0;
+        return 1;
+    }
     while (i < size && text[i] >= '0' && text[i] <= '9' && whole <= 1000) whole = whole * 10 + (uint64_t)(text[i++] - '0');
     if (!i || whole > 1000) return 0;
     if (i < size && text[i] == '.') {
@@ -476,22 +506,24 @@ static char *qt_font_string(const char *existing, size_t existing_size, const xx
 static int parse_color_half(const char *text, size_t size, uint32_t *color)
 {
     uint64_t value;
-    if (!size) { *color = UINT32_MAX; return 1; }
-    if (text[0] != '#' || !parse_hex(text + 1, size - 1, &value)) return 0;
-    switch (size - 1) {
-    case 3: *color = (uint32_t)(((value >> 8) & 0xF) * 0x110000u + ((value >> 4) & 0xF) * 0x1100u + (value & 0xF) * 0x11u); return 1;
-    case 6: *color = (uint32_t)(value & 0xFFFFFFu); return 1;
-    case 8: {
-        uint32_t alpha = (uint32_t)(value >> 24) & 0xFFu, blended = 0;
-        unsigned int shift;
-        for (shift = 0; shift < 24; shift += 8)
-            blended |= ((((uint32_t)(value >> shift) & 0xFFu) * alpha + 0xFFu * (0xFFu - alpha) + 0x7Fu) / 0xFFu) << shift;
-        *color = blended;
+    if (!size) {
+        *color = UINT32_MAX;
         return 1;
     }
-    case 9: *color = (uint32_t)((((value >> 28) & 0xFF) << 16) | (((value >> 16) & 0xFF) << 8) | ((value >> 4) & 0xFF)); return 1;
-    case 12: *color = (uint32_t)((((value >> 40) & 0xFF) << 16) | (((value >> 24) & 0xFF) << 8) | ((value >> 8) & 0xFF)); return 1;
-    default: return 0;
+    if (text[0] != '#' || !parse_hex(text + 1, size - 1, &value)) return 0;
+    switch (size - 1) {
+        case 3: *color = (uint32_t)(((value >> 8) & 0xF) * 0x110000u + ((value >> 4) & 0xF) * 0x1100u + (value & 0xF) * 0x11u); return 1;
+        case 6: *color = (uint32_t)(value & 0xFFFFFFu); return 1;
+        case 8: {
+            uint32_t alpha = (uint32_t)(value >> 24) & 0xFFu, blended = 0;
+            unsigned int shift;
+            for (shift = 0; shift < 24; shift += 8) blended |= ((((uint32_t)(value >> shift) & 0xFFu) * alpha + 0xFFu * (0xFFu - alpha) + 0x7Fu) / 0xFFu) << shift;
+            *color = blended;
+            return 1;
+        }
+        case 9: *color = (uint32_t)((((value >> 28) & 0xFF) << 16) | (((value >> 16) & 0xFF) << 8) | ((value >> 4) & 0xFF)); return 1;
+        case 12: *color = (uint32_t)((((value >> 40) & 0xFF) << 16) | (((value >> 24) & 0xFF) << 8) | ((value >> 8) & 0xFF)); return 1;
+        default: return 0;
     }
 }
 
@@ -597,8 +629,10 @@ static char *recent_from_list(const xx_settings_value *value)
         if (needed >= RECENT_CAPACITY - used) break;
         for (p = item; *p; ++p) {
             const char *escape = *p == '%' ? "%25" : *p == '\n' ? "%0A" : *p == '\r' ? "%0D" : NULL;
-            if (escape) { memcpy(result + used, escape, 3); used += 3; }
-            else result[used++] = *p;
+            if (escape) {
+                memcpy(result + used, escape, 3);
+                used += 3;
+            } else result[used++] = *p;
         }
         result[used++] = '\n';
         result[used] = 0;
@@ -621,7 +655,8 @@ static char *expand_data_path(const char *text, size_t size)
 #ifdef _WIN32
     if (result) {
         char *p;
-        for (p = result; *p; ++p) if (*p == '/') *p = '\\';
+        for (p = result; *p; ++p)
+            if (*p == '/') *p = '\\';
     }
 #endif
     xx_rt_free(rest);
@@ -668,33 +703,43 @@ static void spec_member(const char *key, int kind, size_t offset, size_t capacit
 
 static int specs_ready(void)
 {
-    static const struct { const char *key; size_t offset; } bools[] = {
-        {"View/StayOnTop", offsetof(gui_options_values, appearance.stay_on_top)},
-        {"View/SingleApplication", offsetof(gui_options_values, appearance.single_application)},
-        {"View/Advanced", offsetof(gui_options_values, appearance.advanced)},
-        {"File/SaveLastDirectory", offsetof(gui_options_values, file.save_last_directory)},
-        {"File/SaveRecentFiles", offsetof(gui_options_values, file.save_recent_files)},
-        {"File/SaveBackup", offsetof(gui_options_values, file.save_backup)},
-        {"File/SetEnvironment", offsetof(gui_options_values, file.set_environment)},
-        {"Scan/ScanAfterOpen", offsetof(gui_options_values, scan.scan_after_open)},
-        {"Scan/Flag/Recursive", offsetof(gui_options_values, scan.recursive)},
-        {"Scan/Log/Profiling", offsetof(gui_options_values, scan.profiling)},
-        {"Scan/Sort", offsetof(gui_options_values, scan.sort)},
-        {"Scan/UseCache", offsetof(gui_options_values, scan.use_cache)},
-        {"Scan/Highlight", offsetof(gui_options_values, scan.highlight)},
-        {"Hex/LocationColon", offsetof(gui_options_values, hex.location_colon)},
-        {"Hex/BoldNonZero", offsetof(gui_options_values, hex.bold_nonzero)},
-        {"Disasm/Uppercase", offsetof(gui_options_values, disasm.uppercase)},
-        {"Disasm/LocationColon", offsetof(gui_options_values, disasm.location_colon)},
-        {"Disasm/Highlight", offsetof(gui_options_values, disasm.highlight)}};
-    static const struct { const char *key; unsigned char group; unsigned int bit; } bits[] = {
-        {"Scan/Flag/Deep", 0, XXWIDGETS_SCAN_DEEP}, {"Scan/Flag/Heuristic", 0, XXWIDGETS_SCAN_HEURISTIC},
-        {"Scan/Flag/Verbose", 0, XXWIDGETS_SCAN_VERBOSE}, {"Scan/Flag/Aggressive", 0, XXWIDGETS_SCAN_AGGRESSIVE},
-        {"Scan/HideUnknown", 0, XXWIDGETS_SCAN_HIDE_UNKNOWN}, {"Scan/FormatResult", 0, XXWIDGETS_SCAN_FORMAT},
-        {"Scan/Die/Database/Custom/Enabled", 1, XXWIDGETS_SCAN_DATABASE_CUSTOM},
-        {"Scan/Flag/AllTypes", 2, GUI_SCAN_ALL_TYPES}, {"Scan/Flag/Overlay", 2, GUI_SCAN_OVERLAYS},
-        {"Scan/Flag/Resources", 2, GUI_SCAN_RESOURCES}, {"Scan/Flag/Archives", 2, GUI_SCAN_ARCHIVES}};
-    static const char *const feature_keys[11] = {"Feature/SSE2", "Feature/AVX2", "Feature/SSE42", "Feature/AES", "Feature/SHA", "Feature/VPCLMULQDQ",
+    static const struct {
+        const char *key;
+        size_t offset;
+    } bools[] = {{"View/StayOnTop", offsetof(gui_options_values, appearance.stay_on_top)},
+                 {"View/SingleApplication", offsetof(gui_options_values, appearance.single_application)},
+                 {"View/Advanced", offsetof(gui_options_values, appearance.advanced)},
+                 {"File/SaveLastDirectory", offsetof(gui_options_values, file.save_last_directory)},
+                 {"File/SaveRecentFiles", offsetof(gui_options_values, file.save_recent_files)},
+                 {"File/SaveBackup", offsetof(gui_options_values, file.save_backup)},
+                 {"File/SetEnvironment", offsetof(gui_options_values, file.set_environment)},
+                 {"Scan/ScanAfterOpen", offsetof(gui_options_values, scan.scan_after_open)},
+                 {"Scan/Flag/Recursive", offsetof(gui_options_values, scan.recursive)},
+                 {"Scan/Log/Profiling", offsetof(gui_options_values, scan.profiling)},
+                 {"Scan/Sort", offsetof(gui_options_values, scan.sort)},
+                 {"Scan/UseCache", offsetof(gui_options_values, scan.use_cache)},
+                 {"Scan/Highlight", offsetof(gui_options_values, scan.highlight)},
+                 {"Hex/LocationColon", offsetof(gui_options_values, hex.location_colon)},
+                 {"Hex/BoldNonZero", offsetof(gui_options_values, hex.bold_nonzero)},
+                 {"Disasm/Uppercase", offsetof(gui_options_values, disasm.uppercase)},
+                 {"Disasm/LocationColon", offsetof(gui_options_values, disasm.location_colon)},
+                 {"Disasm/Highlight", offsetof(gui_options_values, disasm.highlight)}};
+    static const struct {
+        const char *key;
+        unsigned char group;
+        unsigned int bit;
+    } bits[] = {{"Scan/Flag/Deep", 0, XXWIDGETS_SCAN_DEEP},
+                {"Scan/Flag/Heuristic", 0, XXWIDGETS_SCAN_HEURISTIC},
+                {"Scan/Flag/Verbose", 0, XXWIDGETS_SCAN_VERBOSE},
+                {"Scan/Flag/Aggressive", 0, XXWIDGETS_SCAN_AGGRESSIVE},
+                {"Scan/HideUnknown", 0, XXWIDGETS_SCAN_HIDE_UNKNOWN},
+                {"Scan/FormatResult", 0, XXWIDGETS_SCAN_FORMAT},
+                {"Scan/Die/Database/Custom/Enabled", 1, XXWIDGETS_SCAN_DATABASE_CUSTOM},
+                {"Scan/Flag/AllTypes", 2, GUI_SCAN_ALL_TYPES},
+                {"Scan/Flag/Overlay", 2, GUI_SCAN_OVERLAYS},
+                {"Scan/Flag/Resources", 2, GUI_SCAN_RESOURCES},
+                {"Scan/Flag/Archives", 2, GUI_SCAN_ARCHIVES}};
+    static const char *const feature_keys[11] = {"Feature/SSE2", "Feature/AVX2",     "Feature/SSE42",     "Feature/AES",        "Feature/SHA",     "Feature/VPCLMULQDQ",
                                                  "Feature/NEON", "Feature/ArmCRC32", "Feature/ArmCrypto", "Feature/ArmDotProd", "Feature/ArmPMULL"};
     /* Indexed by GUI_DB_*. The extra database of earlier versions is gone: its
      * Extra/Path and Extra/Enabled keys under Scan/Die/Database are not in this
@@ -741,12 +786,13 @@ static int specs_ready(void)
             spec = spec_add(key, SK_COLOR);
             spec->index = i;
             xx_rt_snprintf(spec->legacy, sizeof(spec->legacy), "Scan/Color/%s", scan_color_names[i]);
-        } else for (part = 0; part < 2; ++part) {
-            xx_rt_snprintf(key, sizeof(key), "Scan/Color/%s/%s", scan_color_names[i], part ? "Background" : "Foreground");
-            spec = spec_add(key, SK_PLAIN_COLOR);
-            spec->index = i;
-            spec->part = (unsigned char)part;
-        }
+        } else
+            for (part = 0; part < 2; ++part) {
+                xx_rt_snprintf(key, sizeof(key), "Scan/Color/%s/%s", scan_color_names[i], part ? "Background" : "Foreground");
+                spec = spec_add(key, SK_PLAIN_COLOR);
+                spec->index = i;
+                spec->part = (unsigned char)part;
+            }
         for (part = 0; part < 2; ++part) {
             xx_rt_snprintf(key, sizeof(key), "Scan/Color/Dark/%s/%s", scan_color_names[i], part ? "Background" : "Foreground");
             spec = spec_add(key, SK_PLAIN_COLOR);
@@ -758,7 +804,10 @@ static int specs_ready(void)
     for (i = 0; i < XXWIDGETS_DISASM_COLOR_COUNT; ++i) {
         const char *name = xxwidgets_disasm_color_key((xxwidgets_disasm_color_id)i), *qt = NULL;
         size_t j;
-        if (!name) { ready = -1; return 0; }
+        if (!name) {
+            ready = -1;
+            return 0;
+        }
         for (j = 0; j < sizeof(qt_disasm_colors) / sizeof(qt_disasm_colors[0]); ++j)
             if (!strcmp(qt_disasm_colors[j].cdie, name)) qt = qt_disasm_colors[j].qt;
         if (qt) {
@@ -767,13 +816,14 @@ static int specs_ready(void)
             spec->group = 2;
             spec->index = i;
             xx_rt_snprintf(spec->legacy, sizeof(spec->legacy), "Disasm/Color/%s", name);
-        } else for (part = 0; part < 2; ++part) {
-            xx_rt_snprintf(key, sizeof(key), "Disasm/Color/%s/%s", name, part ? "Background" : "Foreground");
-            spec = spec_add(key, SK_PLAIN_COLOR);
-            spec->group = 2;
-            spec->index = i;
-            spec->part = (unsigned char)part;
-        }
+        } else
+            for (part = 0; part < 2; ++part) {
+                xx_rt_snprintf(key, sizeof(key), "Disasm/Color/%s/%s", name, part ? "Background" : "Foreground");
+                spec = spec_add(key, SK_PLAIN_COLOR);
+                spec->group = 2;
+                spec->index = i;
+                spec->part = (unsigned char)part;
+            }
     }
     spec_add("Disasm/Syntax", SK_SYNTAX);
     for (i = 0; i < GUI_DB_COUNT; ++i) spec_add(database_keys[i], SK_DATABASE_PATH)->index = i;
@@ -806,97 +856,90 @@ static char *stored_canonical(const xx_settings *store, const setting_spec *spec
     uint64_t number;
     int flag;
     switch (spec->kind) {
-    case SK_BOOL: case SK_BIT: case SK_FEATURE:
-        return value_bool(value, &flag) ? text_dup(flag ? "true" : "false") : NULL;
-    case SK_TEXT: case SK_LAST_DIRECTORY:
-        text = value_text(value, &size);
-        return text && size < spec->capacity ? text_copy(text, size) : NULL;
-    case SK_LANGUAGE:
-        /* Older versions kept the .po path in View/Lang. Detect It Easy's own
-         * value counts only where it means the same here: "" (English),
-         * "System", or a .po file someone stored. */
-        if (!value) {
-            text = value_text(xx_settings_get(store, KEY_QT_LANGUAGE), &size);
-            if (text && !legacy && size && !same_text(text, size, "System", 1) && !(size > 3 && same_text(text + size - 3, 3, ".po", 1))) text = NULL;
-        } else text = value_text(value, &size);
-        return text && size < spec->capacity ? text_copy(text, size) : NULL;
-    case SK_RECENT:
-        if (legacy) value = xx_settings_get(store, KEY_QT_RECENT);
-        text = value_text(value, &size);
-        if (text) return size < spec->capacity ? text_copy(text, size) : NULL;
-        if (legacy || value) return NULL;
-        value = xx_settings_get(store, KEY_QT_RECENT);
-        return value && value->type == XX_SETTINGS_VALUE_STRING_LIST ? recent_from_list(value) : NULL;
-    case SK_ENGINE:
-        text = value_text(value, &size);
-        return text ? text_dup("die") : NULL;
-    case SK_FONT: {
-        xxwidgets_font font;
-        text_fields fields;
-        text = value_text(value, &size);
-        if (text && !size) return font_text(default_font(spec->index));
-        if (text && parse_qt_font(text, size, &font, &fields)) {
-            /* QT_FONT_MONOSPACE, as cdie writes its default for these roles. */
-            if (font_role_monospace_default(spec->index) && font_is_alias(font.family) && !font.point_size && !font.bold && !font.italic)
-                return font_text(default_font(spec->index));
-            return font_text(&font);
-        }
-        {
-            gui_options_values *source = (gui_options_values *)(base ? base : &defaults);
-            const xx_settings_value *part;
-            char family[sizeof(font.family)];
-            int found = 0;
-            font = *values_font(source, spec->index);
-            part = stored_at(store, spec->legacy, "Family");
-            if ((text = value_text(part, &size)) != NULL && size < sizeof(family)) {
-                memset(font.family, 0, sizeof(font.family));
-                memcpy(font.family, text, size);
-                found = 1;
+        case SK_BOOL:
+        case SK_BIT:
+        case SK_FEATURE: return value_bool(value, &flag) ? text_dup(flag ? "true" : "false") : NULL;
+        case SK_TEXT:
+        case SK_LAST_DIRECTORY: text = value_text(value, &size); return text && size < spec->capacity ? text_copy(text, size) : NULL;
+        case SK_LANGUAGE:
+            /* Older versions kept the .po path in View/Lang. Detect It Easy's own
+             * value counts only where it means the same here: "" (English),
+             * "System", or a .po file someone stored. */
+            if (!value) {
+                text = value_text(xx_settings_get(store, KEY_QT_LANGUAGE), &size);
+                if (text && !legacy && size && !same_text(text, size, "System", 1) && !(size > 3 && same_text(text + size - 3, 3, ".po", 1))) text = NULL;
+            } else text = value_text(value, &size);
+            return text && size < spec->capacity ? text_copy(text, size) : NULL;
+        case SK_RECENT:
+            if (legacy) value = xx_settings_get(store, KEY_QT_RECENT);
+            text = value_text(value, &size);
+            if (text) return size < spec->capacity ? text_copy(text, size) : NULL;
+            if (legacy || value) return NULL;
+            value = xx_settings_get(store, KEY_QT_RECENT);
+            return value && value->type == XX_SETTINGS_VALUE_STRING_LIST ? recent_from_list(value) : NULL;
+        case SK_ENGINE: text = value_text(value, &size); return text ? text_dup("die") : NULL;
+        case SK_FONT: {
+            xxwidgets_font font;
+            text_fields fields;
+            text = value_text(value, &size);
+            if (text && !size) return font_text(default_font(spec->index));
+            if (text && parse_qt_font(text, size, &font, &fields)) {
+                /* QT_FONT_MONOSPACE, as cdie writes its default for these roles. */
+                if (font_role_monospace_default(spec->index) && font_is_alias(font.family) && !font.point_size && !font.bold && !font.italic)
+                    return font_text(default_font(spec->index));
+                return font_text(&font);
             }
-            if (value_uint(stored_at(store, spec->legacy, "Size"), &number) && (number == 0 || (number >= 4 && number <= 96)))
-                font.point_size = (unsigned int)number, found = 1;
-            if (value_bool(stored_at(store, spec->legacy, "Bold"), &flag)) font.bold = flag, found = 1;
-            if (value_bool(stored_at(store, spec->legacy, "Italic"), &flag)) font.italic = flag, found = 1;
-            return found ? font_text(&font) : NULL;
+            {
+                gui_options_values *source = (gui_options_values *)(base ? base : &defaults);
+                const xx_settings_value *part;
+                char family[sizeof(font.family)];
+                int found = 0;
+                font = *values_font(source, spec->index);
+                part = stored_at(store, spec->legacy, "Family");
+                if ((text = value_text(part, &size)) != NULL && size < sizeof(family)) {
+                    memset(font.family, 0, sizeof(font.family));
+                    memcpy(font.family, text, size);
+                    found = 1;
+                }
+                if (value_uint(stored_at(store, spec->legacy, "Size"), &number) && (number == 0 || (number >= 4 && number <= 96)))
+                    font.point_size = (unsigned int)number, found = 1;
+                if (value_bool(stored_at(store, spec->legacy, "Bold"), &flag)) font.bold = flag, found = 1;
+                if (value_bool(stored_at(store, spec->legacy, "Italic"), &flag)) font.italic = flag, found = 1;
+                return found ? font_text(&font) : NULL;
+            }
         }
-    }
-    case SK_COLOR: {
-        uint32_t foreground, background;
-        gui_options_values *source = (gui_options_values *)(base ? base : &defaults);
-        int found = 0;
-        text = value_text(value, &size);
-        if (text && parse_qt_color(text, size, &foreground, &background)) return color_text(foreground, background);
-        foreground = *values_color(source, spec, 0);
-        background = *values_color(source, spec, 1);
-        if (value_uint(stored_at(store, spec->legacy, "Foreground"), &number) && valid_color(number)) foreground = (uint32_t)number, found = 1;
-        if (value_uint(stored_at(store, spec->legacy, "Background"), &number) && valid_color(number)) background = (uint32_t)number, found = 1;
-        return found ? color_text(foreground, background) : NULL;
-    }
-    case SK_PLAIN_COLOR:
-        return value_uint(value, &number) && valid_color(number) ? number_text(number) : NULL;
-    case SK_SYNTAX:
-        if (value_uint(value, &number)) return number <= 1 ? text_dup(number ? "1" : "0") : NULL;
-        text = value_text(value, &size);
-        return text ? text_dup(same_text(text, size, "ATT", 1) ? "1" : "0") : NULL;
-    case SK_DATABASE_PATH:
-        return stored_database_path(value, spec->index);
-    case SK_BUFFER:
-        /* Clamped as a 64-bit number, before apply() narrows it to size_t,
-         * so x86 never truncates it. The stored value is left as it is: a
-         * save writes it only when the size changes in Options. */
-        if (!value_uint(value, &number)) return NULL;
-        if (!number || number > BUFFER_SIZE_QT_MAX)
-            number = spec->index ? (uint64_t)XX_DEFAULT_FILE_BUFFER_SIZE : (uint64_t)XX_DEFAULT_BUFFER_SIZE;
-        else if (number < BUFFER_SIZE_MIN) number = BUFFER_SIZE_MIN;
-        else if (number > BUFFER_SIZE_MAX) number = BUFFER_SIZE_MAX;
-        return number_text(number);
-    case SK_BYTES_PER_ROW:
-        return value_uint(value, &number) && (number == 8 || number == 16 || number == 24 || number == 32 || number == 48 || number == 64) ?
-            number_text(number) : NULL;
-    case SK_PAGE:
-        return value_uint(value, &number) && number < GUI_OPTIONS_PAGE_COUNT ? number_text(number) : NULL;
-    default:
-        return NULL;
+        case SK_COLOR: {
+            uint32_t foreground, background;
+            gui_options_values *source = (gui_options_values *)(base ? base : &defaults);
+            int found = 0;
+            text = value_text(value, &size);
+            if (text && parse_qt_color(text, size, &foreground, &background)) return color_text(foreground, background);
+            foreground = *values_color(source, spec, 0);
+            background = *values_color(source, spec, 1);
+            if (value_uint(stored_at(store, spec->legacy, "Foreground"), &number) && valid_color(number)) foreground = (uint32_t)number, found = 1;
+            if (value_uint(stored_at(store, spec->legacy, "Background"), &number) && valid_color(number)) background = (uint32_t)number, found = 1;
+            return found ? color_text(foreground, background) : NULL;
+        }
+        case SK_PLAIN_COLOR: return value_uint(value, &number) && valid_color(number) ? number_text(number) : NULL;
+        case SK_SYNTAX:
+            if (value_uint(value, &number)) return number <= 1 ? text_dup(number ? "1" : "0") : NULL;
+            text = value_text(value, &size);
+            return text ? text_dup(same_text(text, size, "ATT", 1) ? "1" : "0") : NULL;
+        case SK_DATABASE_PATH: return stored_database_path(value, spec->index);
+        case SK_BUFFER:
+            /* Clamped as a 64-bit number, before apply() narrows it to size_t,
+             * so x86 never truncates it. The stored value is left as it is: a
+             * save writes it only when the size changes in Options. */
+            if (!value_uint(value, &number)) return NULL;
+            if (!number || number > BUFFER_SIZE_QT_MAX) number = spec->index ? (uint64_t)XX_DEFAULT_FILE_BUFFER_SIZE : (uint64_t)XX_DEFAULT_BUFFER_SIZE;
+            else if (number < BUFFER_SIZE_MIN) number = BUFFER_SIZE_MIN;
+            else if (number > BUFFER_SIZE_MAX) number = BUFFER_SIZE_MAX;
+            return number_text(number);
+        case SK_BYTES_PER_ROW:
+            return value_uint(value, &number) && (number == 8 || number == 16 || number == 24 || number == 32 || number == 48 || number == 64) ? number_text(number)
+                                                                                                                                               : NULL;
+        case SK_PAGE: return value_uint(value, &number) && number < GUI_OPTIONS_PAGE_COUNT ? number_text(number) : NULL;
+        default: return NULL;
     }
 }
 
@@ -906,40 +949,27 @@ static char *describe(const setting_spec *spec, const gui_options_values *values
     gui_options_values *source = (gui_options_values *)values; /* read only */
     const unsigned char *member = (const unsigned char *)values + spec->offset;
     switch (spec->kind) {
-    case SK_BOOL:
-        return text_dup(*(const int *)member ? "true" : "false");
-    case SK_BIT: {
-        unsigned int bits = spec->group == 2 ? now->modes : spec->group ? values->scan.options.databases : values->scan.options.flags;
-        return text_dup(bits & spec->bit ? "true" : "false");
-    }
-    case SK_TEXT: case SK_LANGUAGE:
-        return text_copy((const char *)member, bounded_length((const char *)member, spec->capacity));
-    case SK_LAST_DIRECTORY:
-        return values->file.save_last_directory ? text_copy((const char *)member, bounded_length((const char *)member, spec->capacity)) : text_dup("");
-    case SK_RECENT:
-        return values->file.save_recent_files ? text_copy((const char *)member, bounded_length((const char *)member, spec->capacity)) : text_dup("");
-    case SK_ENGINE:
-        return text_dup("die");
-    case SK_FONT:
-        return font_text(values_font(source, spec->index));
-    case SK_COLOR:
-        return color_text(*values_color(source, spec, 0), *values_color(source, spec, 1));
-    case SK_PLAIN_COLOR:
-        return number_text(*values_color(source, spec, spec->part));
-    case SK_SYNTAX:
-        return text_dup(values->disasm.syntax == 1 ? "1" : "0");
-    case SK_DATABASE_PATH:
-        return text_dup(now->paths[spec->index]);
-    case SK_BUFFER:
-        return number_text(spec->index ? now->optimization.file_buffer_size : now->optimization.buffer_size);
-    case SK_FEATURE:
-        return text_dup(*feature_field((gui_backend_optimization_options *)&now->optimization, spec->index) ? "true" : "false");
-    case SK_BYTES_PER_ROW:
-        return number_text(values->hex.bytes_per_row);
-    case SK_PAGE:
-        return number_text((uint64_t)now->page);
-    default:
-        return NULL;
+        case SK_BOOL: return text_dup(*(const int *)member ? "true" : "false");
+        case SK_BIT: {
+            unsigned int bits = spec->group == 2 ? now->modes : spec->group ? values->scan.options.databases : values->scan.options.flags;
+            return text_dup(bits & spec->bit ? "true" : "false");
+        }
+        case SK_TEXT:
+        case SK_LANGUAGE: return text_copy((const char *)member, bounded_length((const char *)member, spec->capacity));
+        case SK_LAST_DIRECTORY:
+            return values->file.save_last_directory ? text_copy((const char *)member, bounded_length((const char *)member, spec->capacity)) : text_dup("");
+        case SK_RECENT: return values->file.save_recent_files ? text_copy((const char *)member, bounded_length((const char *)member, spec->capacity)) : text_dup("");
+        case SK_ENGINE: return text_dup("die");
+        case SK_FONT: return font_text(values_font(source, spec->index));
+        case SK_COLOR: return color_text(*values_color(source, spec, 0), *values_color(source, spec, 1));
+        case SK_PLAIN_COLOR: return number_text(*values_color(source, spec, spec->part));
+        case SK_SYNTAX: return text_dup(values->disasm.syntax == 1 ? "1" : "0");
+        case SK_DATABASE_PATH: return text_dup(now->paths[spec->index]);
+        case SK_BUFFER: return number_text(spec->index ? now->optimization.file_buffer_size : now->optimization.buffer_size);
+        case SK_FEATURE: return text_dup(*feature_field((gui_backend_optimization_options *)&now->optimization, spec->index) ? "true" : "false");
+        case SK_BYTES_PER_ROW: return number_text(values->hex.bytes_per_row);
+        case SK_PAGE: return number_text((uint64_t)now->page);
+        default: return NULL;
     }
 }
 
@@ -957,60 +987,57 @@ static void apply(const setting_spec *spec, const char *text, gui_options_values
     uint64_t number = 0;
     int flag = !strcmp(text, "true");
     switch (spec->kind) {
-    case SK_BOOL:
-        *(int *)((unsigned char *)values + spec->offset) = flag;
-        break;
-    case SK_BIT: {
-        unsigned int *bits = spec->group == 2 ? &load->modes : spec->group ? &values->scan.options.databases : &values->scan.options.flags;
-        if (flag) *bits |= spec->bit;
-        else *bits &= ~spec->bit;
-        break;
-    }
-    case SK_TEXT: case SK_LANGUAGE: case SK_LAST_DIRECTORY: case SK_RECENT: case SK_ENGINE:
-        copy_member(values, spec, text);
-        break;
-    case SK_FONT: {
-        xxwidgets_font font;
-        if (font_from_text(text, &font)) *values_font(values, spec->index) = font;
-        break;
-    }
-    case SK_COLOR: {
-        uint32_t foreground, background;
-        if (color_from_text(text, &foreground, &background)) {
-            *values_color(values, spec, 0) = foreground;
-            *values_color(values, spec, 1) = background;
+        case SK_BOOL: *(int *)((unsigned char *)values + spec->offset) = flag; break;
+        case SK_BIT: {
+            unsigned int *bits = spec->group == 2 ? &load->modes : spec->group ? &values->scan.options.databases : &values->scan.options.flags;
+            if (flag) *bits |= spec->bit;
+            else *bits &= ~spec->bit;
+            break;
         }
-        break;
-    }
-    case SK_PLAIN_COLOR:
-        if (parse_decimal(text, strlen(text), &number)) *values_color(values, spec, spec->part) = (uint32_t)number;
-        break;
-    case SK_SYNTAX:
-        values->disasm.syntax = text[0] == '1';
-        break;
-    case SK_DATABASE_PATH:
-        xx_rt_free(load->paths[spec->index]);
-        load->paths[spec->index] = text_dup(text);
-        ++load->explicit_paths;
-        if (text[0]) load->stored_paths = 1;
-        break;
-    case SK_BUFFER:
-        if (load->have_optimization && parse_decimal(text, strlen(text), &number)) {
-            if (spec->index) load->optimization.file_buffer_size = (size_t)number;
-            else load->optimization.buffer_size = (size_t)number;
+        case SK_TEXT:
+        case SK_LANGUAGE:
+        case SK_LAST_DIRECTORY:
+        case SK_RECENT:
+        case SK_ENGINE: copy_member(values, spec, text); break;
+        case SK_FONT: {
+            xxwidgets_font font;
+            if (font_from_text(text, &font)) *values_font(values, spec->index) = font;
+            break;
         }
-        break;
-    case SK_FEATURE:
-        if (load->have_optimization) *feature_field(&load->optimization, spec->index) = flag;
-        break;
-    case SK_BYTES_PER_ROW:
-        if (parse_decimal(text, strlen(text), &number)) values->hex.bytes_per_row = (unsigned int)number;
-        break;
-    case SK_PAGE:
-        if (parse_decimal(text, strlen(text), &number)) *load->page = (gui_options_page_id)number;
-        break;
-    default:
-        break;
+        case SK_COLOR: {
+            uint32_t foreground, background;
+            if (color_from_text(text, &foreground, &background)) {
+                *values_color(values, spec, 0) = foreground;
+                *values_color(values, spec, 1) = background;
+            }
+            break;
+        }
+        case SK_PLAIN_COLOR:
+            if (parse_decimal(text, strlen(text), &number)) *values_color(values, spec, spec->part) = (uint32_t)number;
+            break;
+        case SK_SYNTAX: values->disasm.syntax = text[0] == '1'; break;
+        case SK_DATABASE_PATH:
+            xx_rt_free(load->paths[spec->index]);
+            load->paths[spec->index] = text_dup(text);
+            ++load->explicit_paths;
+            if (text[0]) load->stored_paths = 1;
+            break;
+        case SK_BUFFER:
+            if (load->have_optimization && parse_decimal(text, strlen(text), &number)) {
+                if (spec->index) load->optimization.file_buffer_size = (size_t)number;
+                else load->optimization.buffer_size = (size_t)number;
+            }
+            break;
+        case SK_FEATURE:
+            if (load->have_optimization) *feature_field(&load->optimization, spec->index) = flag;
+            break;
+        case SK_BYTES_PER_ROW:
+            if (parse_decimal(text, strlen(text), &number)) values->hex.bytes_per_row = (unsigned int)number;
+            break;
+        case SK_PAGE:
+            if (parse_decimal(text, strlen(text), &number)) *load->page = (gui_options_page_id)number;
+            break;
+        default: break;
     }
 }
 
@@ -1023,38 +1050,36 @@ static int write_setting(xx_settings *store, const setting_spec *spec, const cha
     size_t size = 0;
     int ok;
     switch (spec->kind) {
-    case SK_LANGUAGE: {
-        /* Detect It Easy loads View/Lang as a .qm name: only English ("") and
-         * "System" mean the same to both programs; a .po file is cdie's alone. */
-        size_t length = strlen(text);
-        const char *shared = same_text(text, length, "System", 1) ? "System" : !length || same_text(text, length, "English", 1) ? "" : NULL;
-        if (!write_text(store, spec->key, text)) return 0;
-        if (!shared) return 1;
-        current = value_text(xx_settings_get(store, KEY_QT_LANGUAGE), &size);
-        return (current && same_text(current, size, shared, 0)) || write_text(store, KEY_QT_LANGUAGE, shared);
-    }
-    case SK_SYNTAX:
-        return write_text(store, spec->key, text[0] == '1' ? "ATT" : "INTEL");
-    case SK_DATABASE_PATH:
-        if (text[0]) return write_text(store, spec->key, text);
-        xx_rt_snprintf(path, sizeof(path), "$data/%s", database_names[spec->index]);
-        return write_text(store, spec->key, path);
-    case SK_FONT: {
-        xxwidgets_font font;
-        if (!font_from_text(text, &font)) return 0;
-        current = value_text(existing, &size);
-        converted = qt_font_string(current, size, &font, spec->index);
-        break;
-    }
-    case SK_COLOR: {
-        uint32_t foreground, background;
-        if (!color_from_text(text, &foreground, &background)) return 0;
-        current = value_text(existing, &size);
-        converted = qt_color_string(current, size, foreground, background);
-        break;
-    }
-    default:
-        return write_text(store, spec->key, text);
+        case SK_LANGUAGE: {
+            /* Detect It Easy loads View/Lang as a .qm name: only English ("") and
+             * "System" mean the same to both programs; a .po file is cdie's alone. */
+            size_t length = strlen(text);
+            const char *shared = same_text(text, length, "System", 1) ? "System" : !length || same_text(text, length, "English", 1) ? "" : NULL;
+            if (!write_text(store, spec->key, text)) return 0;
+            if (!shared) return 1;
+            current = value_text(xx_settings_get(store, KEY_QT_LANGUAGE), &size);
+            return (current && same_text(current, size, shared, 0)) || write_text(store, KEY_QT_LANGUAGE, shared);
+        }
+        case SK_SYNTAX: return write_text(store, spec->key, text[0] == '1' ? "ATT" : "INTEL");
+        case SK_DATABASE_PATH:
+            if (text[0]) return write_text(store, spec->key, text);
+            xx_rt_snprintf(path, sizeof(path), "$data/%s", database_names[spec->index]);
+            return write_text(store, spec->key, path);
+        case SK_FONT: {
+            xxwidgets_font font;
+            if (!font_from_text(text, &font)) return 0;
+            current = value_text(existing, &size);
+            converted = qt_font_string(current, size, &font, spec->index);
+            break;
+        }
+        case SK_COLOR: {
+            uint32_t foreground, background;
+            if (!color_from_text(text, &foreground, &background)) return 0;
+            current = value_text(existing, &size);
+            converted = qt_color_string(current, size, foreground, background);
+            break;
+        }
+        default: return write_text(store, spec->key, text);
     }
     ok = converted && write_text(store, spec->key, converted);
     xx_rt_free(converted);
@@ -1096,10 +1121,16 @@ static void snapshot_forget(const xx_settings *store)
 static void snapshot_set(const xx_settings *store, char **texts)
 {
     settings_snapshot *snapshot = snapshot_find(store);
-    if (!texts) { snapshot_forget(store); return; }
+    if (!texts) {
+        snapshot_forget(store);
+        return;
+    }
     if (!snapshot) {
         snapshot = (settings_snapshot *)xx_rt_malloc(sizeof(*snapshot));
-        if (!snapshot) { texts_free(texts); return; }
+        if (!snapshot) {
+            texts_free(texts);
+            return;
+        }
         snapshot->store = store;
         snapshot->texts = NULL;
         snapshot->next = snapshots;
@@ -1150,10 +1181,8 @@ static void migrate_legacy(xx_settings *store, const char *directory)
             if (xx_settings_get(store, specs[i].key)) continue;
             /* A buffer size moves as it was stored, not as cdie clamps it, so
              * Detect It Easy reads what it would have read there. */
-            if (specs[i].kind == SK_BUFFER)
-                text = value_uint(xx_settings_get(legacy, specs[i].key), &number) ? number_text(number) : NULL;
-            else
-                text = stored_canonical(legacy, &specs[i], 1, NULL);
+            if (specs[i].kind == SK_BUFFER) text = value_uint(xx_settings_get(legacy, specs[i].key), &number) ? number_text(number) : NULL;
+            else text = stored_canonical(legacy, &specs[i], 1, NULL);
             if (text && specs[i].kind == SK_FONT) {
                 /* Older versions stored every font; a default one leaves Detect It Easy its own. */
                 char *plain = font_text(default_font(specs[i].index));
@@ -1164,8 +1193,7 @@ static void migrate_legacy(xx_settings *store, const char *directory)
             if (text) (void)(specs[i].kind == SK_LANGUAGE ? write_text(store, specs[i].key, text) : write_setting(store, &specs[i], text));
             xx_rt_free(text);
         }
-        if (write_text(store, KEY_MIGRATED, "true") && xx_settings_save(store) == XXFC_OK && write_text(legacy, KEY_MIGRATED, "true"))
-            (void)xx_settings_save(legacy);
+        if (write_text(store, KEY_MIGRATED, "true") && xx_settings_save(store) == XXFC_OK && write_text(legacy, KEY_MIGRATED, "true")) (void)xx_settings_save(legacy);
     }
     xx_settings_destroy(legacy);
 }
@@ -1282,12 +1310,16 @@ int gui_settings_load(xx_settings *store, gui_options_values *values, gui_option
     {
         gui_backend_scan_preferences scan, previous;
         if (gui_backend_get_scan_preferences(&previous)) {
-            scan.recursive = values->scan.recursive; scan.profiling = values->scan.profiling;
-            scan.sort = values->scan.sort; scan.use_cache = values->scan.use_cache;
+            scan.recursive = values->scan.recursive;
+            scan.profiling = values->scan.profiling;
+            scan.sort = values->scan.sort;
+            scan.use_cache = values->scan.use_cache;
             memcpy(scan.engine, values->scan.engine, sizeof(scan.engine));
             if (!gui_backend_set_scan_preferences(&scan)) {
-                values->scan.recursive = previous.recursive; values->scan.profiling = previous.profiling;
-                values->scan.sort = previous.sort; values->scan.use_cache = previous.use_cache;
+                values->scan.recursive = previous.recursive;
+                values->scan.profiling = previous.profiling;
+                values->scan.sort = previous.sort;
+                values->scan.use_cache = previous.use_cache;
                 memcpy(values->scan.engine, previous.engine, sizeof(values->scan.engine));
             }
         }
@@ -1316,19 +1348,31 @@ int gui_settings_save(xx_settings *store, const gui_options_values *values, gui_
         int same = 0;
         if (needs_optimization(spec) && !now.have_optimization) continue;
         text = describe(spec, values, &now);
-        if (!text) { ok = 0; continue; }
+        if (!text) {
+            ok = 0;
+            continue;
+        }
         /* Without a load there is nothing to compare with: write everything. */
         if (snapshot) {
-            if (snapshot->texts[i] && !strcmp(snapshot->texts[i], text)) { xx_rt_free(text); continue; }
+            if (snapshot->texts[i] && !strcmp(snapshot->texts[i], text)) {
+                xx_rt_free(text);
+                continue;
+            }
             stored = stored_canonical(store, spec, 0, values);
             same = stored && !strcmp(stored, text);
             xx_rt_free(stored);
         }
-        if (!same && !write_setting(store, spec, text)) { ok = 0; xx_rt_free(text); continue; }
+        if (!same && !write_setting(store, spec, text)) {
+            ok = 0;
+            xx_rt_free(text);
+            continue;
+        }
         /* The snapshot follows the store, not the disk: a failed save keeps its
          * changes for the next one, so a later change back must be written too. */
-        if (snapshot) { xx_rt_free(snapshot->texts[i]); snapshot->texts[i] = text; }
-        else xx_rt_free(text);
+        if (snapshot) {
+            xx_rt_free(snapshot->texts[i]);
+            snapshot->texts[i] = text;
+        } else xx_rt_free(text);
     }
     status = xx_settings_save(store);
     return ok && status == XXFC_OK;

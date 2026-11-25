@@ -8,8 +8,7 @@
 xxwidgets_status gui_imports_set_data(xxwidgets_imports *view, const char *path, const cdie_imports_data *data)
 {
     xxwidgets_imports_data snapshot;
-    if (!view || !path || !data)
-        return XXWIDGETS_INVALID_ARGUMENT;
+    if (!view || !path || !data) return XXWIDGETS_INVALID_ARGUMENT;
     snapshot = (xxwidgets_imports_data){path, data->file_type, data->file_size, data->records, data->count};
     return xxwidgets_imports_set_data(view, &snapshot);
 }
@@ -52,8 +51,7 @@ static xxwidgets_status imports_progress(void *user, int stop_requested, xx_pd_s
 {
     imports_job *job = user;
     xx_mutex_lock(job->lock);
-    if (stop_requested)
-        job->stop = 1;
+    if (stop_requested) job->stop = 1;
     *progress = job->snapshot;
     *finished = job->done;
     xx_mutex_unlock(job->lock);
@@ -66,14 +64,12 @@ xxwidgets_status gui_imports_show(xxwidgets_widget *owner, const char *path)
     xx_thread_t *thread;
     xxwidgets_status status;
     int joined;
-    if (!owner || !path || !*path)
-        return XXWIDGETS_INVALID_ARGUMENT;
+    if (!owner || !path || !*path) return XXWIDGETS_INVALID_ARGUMENT;
     job.path = path;
     job.work = xx_pd_init();
     job.snapshot = job.work;
     job.lock = xx_mutex_create();
-    if (!job.lock)
-        return XXWIDGETS_OUT_OF_MEMORY;
+    if (!job.lock) return XXWIDGETS_OUT_OF_MEMORY;
     thread = xx_thread_create(imports_worker, &job);
     if (!thread) {
         xx_mutex_destroy(job.lock);
@@ -87,10 +83,8 @@ xxwidgets_status gui_imports_show(xxwidgets_widget *owner, const char *path)
     }
     joined = xx_thread_join(thread, NULL);
     xx_mutex_destroy(job.lock);
-    if (!joined)
-        status = XXWIDGETS_PLATFORM_ERROR;
-    else if (status == XXWIDGETS_OK && job.ok)
-        status = show_imports(owner, path, job.data);
+    if (!joined) status = XXWIDGETS_PLATFORM_ERROR;
+    else if (status == XXWIDGETS_OK && job.ok) status = show_imports(owner, path, job.data);
     else if (status == XXWIDGETS_OK && !job.work.is_stop)
         status = gui_error_show_file(owner, CDIE_TR("Imports"), CDIE_N_("Cannot read the imports of %s."), path, job.error);
     cdie_imports_free(job.data);

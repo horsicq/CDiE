@@ -127,7 +127,12 @@ char *gui_frontend_executable_directory(void)
     DWORD size = GetModuleFileNameW(NULL, wide, 32768);
     if (size && size < 32768) {
         char *utf8 = xx_str_unicode_to_utf8(wide);
-        if (utf8) { size_t n = strlen(utf8) + 1; path = malloc(n); if (path) memcpy(path, utf8, n); xx_str_free(utf8); }
+        if (utf8) {
+            size_t n = strlen(utf8) + 1;
+            path = malloc(n);
+            if (path) memcpy(path, utf8, n);
+            xx_str_free(utf8);
+        }
     }
 #else
     char buffer[GUI_PREFERENCE_PATH_MAX];
@@ -136,13 +141,23 @@ char *gui_frontend_executable_directory(void)
     if (_NSGetExecutablePath(buffer, &size) == 0) path = realpath(buffer, NULL);
 #else
     ssize_t size = readlink("/proc/self/exe", buffer, sizeof(buffer) - 1);
-    if (size > 0) { buffer[size] = 0; path = malloc((size_t)size + 1); if (path) memcpy(path, buffer, (size_t)size + 1); }
+    if (size > 0) {
+        buffer[size] = 0;
+        path = malloc((size_t)size + 1);
+        if (path) memcpy(path, buffer, (size_t)size + 1);
+    }
 #endif
 #endif
     if (!path) return NULL;
     slash = strrchr(path, '/');
-    { char *other = strrchr(path, '\\'); if (other && (!slash || other > slash)) slash = other; }
-    if (!slash) { free(path); return NULL; }
+    {
+        char *other = strrchr(path, '\\');
+        if (other && (!slash || other > slash)) slash = other;
+    }
+    if (!slash) {
+        free(path);
+        return NULL;
+    }
     if (slash == path || (slash == path + 2 && path[1] == ':')) slash[1] = 0;
     else *slash = 0;
     return path;
@@ -159,8 +174,13 @@ static size_t recent_decode(const char *stored, char paths[16][GUI_PREFERENCE_PA
         while (*stored && *stored != '\n') {
             char c = *stored++;
             if (c == '%' && stored[0] && stored[1]) {
-                if (stored[0] == '2' && stored[1] == '5') { c = '%'; stored += 2; }
-                else if (stored[0] == '0' && (stored[1] == 'A' || stored[1] == 'D')) { c = stored[1] == 'A' ? '\n' : '\r'; stored += 2; }
+                if (stored[0] == '2' && stored[1] == '5') {
+                    c = '%';
+                    stored += 2;
+                } else if (stored[0] == '0' && (stored[1] == 'A' || stored[1] == 'D')) {
+                    c = stored[1] == 'A' ? '\n' : '\r';
+                    stored += 2;
+                }
             }
             if (at + 1 < GUI_PREFERENCE_PATH_MAX) paths[count][at++] = c;
             else oversized = 1;
@@ -176,11 +196,12 @@ static int recent_path_equal(const char *a, const char *b)
 {
 #ifdef _WIN32
     wchar_t *left = xx_str_utf8_to_unicode(a), *right = xx_str_utf8_to_unicode(b);
-    int same = left && right ? CompareStringOrdinal(left,-1,right,-1,TRUE) == CSTR_EQUAL : !strcmp(a,b);
-    xx_str_wfree(left); xx_str_wfree(right);
+    int same = left && right ? CompareStringOrdinal(left, -1, right, -1, TRUE) == CSTR_EQUAL : !strcmp(a, b);
+    xx_str_wfree(left);
+    xx_str_wfree(right);
     return same;
 #else
-    return !strcmp(a,b);
+    return !strcmp(a, b);
 #endif
 }
 
@@ -191,15 +212,25 @@ void gui_frontend_remember_file(const char *path)
     size_t count, used = 0, retained = 0;
     if (!path || !*path || !xx_io_file_exists_a(path)) return;
 #ifdef _WIN32
-    { wchar_t *wide = xx_str_utf8_to_unicode(path), full[32768];
-      DWORD n = wide ? GetFullPathNameW(wide, 32768, full, NULL) : 0;
-      char *utf8 = n && n < 32768 ? xx_str_unicode_to_utf8(full) : NULL;
-      if (utf8) { size_t len = strlen(utf8) + 1; absolute = malloc(len); if (absolute) memcpy(absolute, utf8, len); xx_str_free(utf8); }
-      xx_str_wfree(wide); }
+    {
+        wchar_t *wide = xx_str_utf8_to_unicode(path), full[32768];
+        DWORD n = wide ? GetFullPathNameW(wide, 32768, full, NULL) : 0;
+        char *utf8 = n && n < 32768 ? xx_str_unicode_to_utf8(full) : NULL;
+        if (utf8) {
+            size_t len = strlen(utf8) + 1;
+            absolute = malloc(len);
+            if (absolute) memcpy(absolute, utf8, len);
+            xx_str_free(utf8);
+        }
+        xx_str_wfree(wide);
+    }
 #else
     absolute = realpath(path, NULL);
 #endif
-    if (!absolute || strlen(absolute) >= GUI_PREFERENCE_PATH_MAX) { free(absolute); return; }
+    if (!absolute || strlen(absolute) >= GUI_PREFERENCE_PATH_MAX) {
+        free(absolute);
+        return;
+    }
     gui_preferences_get(&values);
     if (values.file.save_recent_files) {
         count = recent_decode(values.file.recent_files, previous);
@@ -212,8 +243,10 @@ void gui_frontend_remember_file(const char *path)
             if (needed >= sizeof(values.file.recent_files) - used) break;
             for (const char *p = text; *p; ++p) {
                 const char *escape = *p == '%' ? "%25" : *p == '\n' ? "%0A" : *p == '\r' ? "%0D" : NULL;
-                if (escape) { memcpy(values.file.recent_files + used, escape, 3); used += 3; }
-                else values.file.recent_files[used++] = *p;
+                if (escape) {
+                    memcpy(values.file.recent_files + used, escape, 3);
+                    used += 3;
+                } else values.file.recent_files[used++] = *p;
             }
             values.file.recent_files[used++] = '\n';
             values.file.recent_files[used] = 0;
@@ -223,9 +256,16 @@ void gui_frontend_remember_file(const char *path)
     if (values.file.save_last_directory) {
         slash = strrchr(absolute, '/');
 #ifdef _WIN32
-        { char *other = strrchr(absolute, '\\'); if (other && (!slash || other > slash)) slash = other; }
+        {
+            char *other = strrchr(absolute, '\\');
+            if (other && (!slash || other > slash)) slash = other;
+        }
 #endif
-        if (slash) { if (slash == absolute || (slash == absolute + 2 && absolute[1] == ':')) slash[1] = 0; else *slash = 0; strcpy(values.file.last_directory, absolute); }
+        if (slash) {
+            if (slash == absolute || (slash == absolute + 2 && absolute[1] == ':')) slash[1] = 0;
+            else *slash = 0;
+            strcpy(values.file.last_directory, absolute);
+        }
     } else values.file.last_directory[0] = 0;
     gui_preferences_set(&values);
     free(absolute);
@@ -245,7 +285,10 @@ xxwidgets_status gui_frontend_recent_dialog(xxwidgets_widget *owner, char *path,
     for (size_t i = 0; i < count; ++i) items[i] = paths[i];
     status = xxwidgets_choice_dialog(owner, CDIE_TR("Recent files"), items, count, &selection, accepted);
     if (status == XXWIDGETS_OK && *accepted) {
-        if (selection >= count || strlen(paths[selection]) >= capacity) { *accepted = 0; return XXWIDGETS_INVALID_ARGUMENT; }
+        if (selection >= count || strlen(paths[selection]) >= capacity) {
+            *accepted = 0;
+            return XXWIDGETS_INVALID_ARGUMENT;
+        }
         strcpy(path, paths[selection]);
     }
     return status;
@@ -259,12 +302,17 @@ char *gui_frontend_stored_language(int memory_only)
     const xx_settings_value *value = loaded && store ? xx_settings_get(store, "cdie/Lang") : NULL;
     char *path = NULL;
     if (!value && loaded && store) value = xx_settings_get(store, "View/Lang");
-    if (value && value->type == XX_SETTINGS_VALUE_STRING && value->data.buffer.size &&
-        value->data.buffer.size < GUI_PREFERENCE_PATH_MAX &&
+    if (value && value->type == XX_SETTINGS_VALUE_STRING && value->data.buffer.size && value->data.buffer.size < GUI_PREFERENCE_PATH_MAX &&
         !memchr(value->data.buffer.data, 0, value->data.buffer.size)) {
         path = malloc(value->data.buffer.size + 1);
-        if (path) { memcpy(path, value->data.buffer.data, value->data.buffer.size); path[value->data.buffer.size] = 0; }
-        if (path && (!strcmp(path, "System") || !strcmp(path, "English") || !xx_io_file_exists_a(path))) { free(path); path = NULL; }
+        if (path) {
+            memcpy(path, value->data.buffer.data, value->data.buffer.size);
+            path[value->data.buffer.size] = 0;
+        }
+        if (path && (!strcmp(path, "System") || !strcmp(path, "English") || !xx_io_file_exists_a(path))) {
+            free(path);
+            path = NULL;
+        }
     }
     gui_settings_close(store);
     return path;
@@ -286,7 +334,10 @@ static uint64_t installation_hash(const char *path)
 static BOOL CALLBACK find_instance(HWND window, LPARAM parameter)
 {
     HWND *found = (HWND *)parameter;
-    if (GetPropW(window, instance_name)) { *found = window; return FALSE; }
+    if (GetPropW(window, instance_name)) {
+        *found = window;
+        return FALSE;
+    }
     return TRUE;
 }
 #else
@@ -294,7 +345,10 @@ static void instance_set_flags(int fd, int nonblocking)
 {
     int flags = fcntl(fd, F_GETFD);
     if (flags >= 0) (void)fcntl(fd, F_SETFD, flags | FD_CLOEXEC);
-    if (nonblocking) { flags = fcntl(fd, F_GETFL); if (flags >= 0) (void)fcntl(fd, F_SETFL, flags | O_NONBLOCK); }
+    if (nonblocking) {
+        flags = fcntl(fd, F_GETFL);
+        if (flags >= 0) (void)fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    }
 }
 
 /* Only a socket this account created counts: /tmp is shared, and another
@@ -302,8 +356,7 @@ static void instance_set_flags(int fd, int nonblocking)
 static int instance_socket_ours(const char *path)
 {
     struct stat info;
-    return lstat(path, &info) == 0 && S_ISSOCK(info.st_mode) && info.st_uid == getuid() &&
-           !(info.st_mode & (S_IRWXG | S_IRWXO));
+    return lstat(path, &info) == 0 && S_ISSOCK(info.st_mode) && info.st_uid == getuid() && !(info.st_mode & (S_IRWXG | S_IRWXO));
 }
 
 /* Called with the lock held, so an existing socket of ours is stale. Bound,
@@ -324,8 +377,15 @@ static void instance_listen(const char *path)
     fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (fd < 0) return;
     instance_set_flags(fd, 1);
-    if (bind(fd, (struct sockaddr *)&address, sizeof(address)) != 0) { close(fd); return; }
-    if (chmod(path, 0600) != 0 || listen(fd, 8) != 0) { close(fd); unlink(path); return; }
+    if (bind(fd, (struct sockaddr *)&address, sizeof(address)) != 0) {
+        close(fd);
+        return;
+    }
+    if (chmod(path, 0600) != 0 || listen(fd, 8) != 0) {
+        close(fd);
+        unlink(path);
+        return;
+    }
     instance_listener = fd;
     strcpy(instance_socket_path, path);
 }
@@ -337,7 +397,10 @@ static int instance_utf8_valid(const unsigned char *text)
         int more = c < 0x80 ? 0 : (c & 0xE0) == 0xC0 && c >= 0xC2 ? 1 : (c & 0xF0) == 0xE0 ? 2 : (c & 0xF8) == 0xF0 && c <= 0xF4 ? 3 : -1;
         if (more < 0) return 0;
         ++text;
-        while (more--) { if ((*text & 0xC0) != 0x80) return 0; ++text; }
+        while (more--) {
+            if ((*text & 0xC0) != 0x80) return 0;
+            ++text;
+        }
     }
     return 1;
 }
@@ -383,9 +446,7 @@ static void instance_socket_name(char *buffer, size_t capacity, uint64_t hash)
 #endif
     length = strlen(directory);
     while (length > 1 && directory[length - 1] == '/') directory[--length] = 0;
-    if (directory[0] == '/' && stat(directory, &info) == 0 && S_ISDIR(info.st_mode) &&
-        info.st_uid == getuid() && !(info.st_mode & (S_IRWXG | S_IRWXO)))
-        base = directory;
+    if (directory[0] == '/' && stat(directory, &info) == 0 && S_ISDIR(info.st_mode) && info.st_uid == getuid() && !(info.st_mode & (S_IRWXG | S_IRWXO))) base = directory;
     if (snprintf(buffer, capacity, "%s/cdie-%lu-%016llx.sock", base, (unsigned long)getuid(), (unsigned long long)hash) >= (int)capacity)
         snprintf(buffer, capacity, "/tmp/cdie-%lu-%016llx.sock", (unsigned long)getuid(), (unsigned long long)hash);
 }
@@ -404,7 +465,11 @@ static char *instance_absolute(const char *file)
     length = strlen(directory) + strlen(file) + 2;
     joined = malloc(length);
     result = malloc(length + 1);
-    if (!joined || !result) { free(joined); free(result); return NULL; }
+    if (!joined || !result) {
+        free(joined);
+        free(result);
+        return NULL;
+    }
     snprintf(joined, length, "%s/%s", directory, file);
     for (part = joined; *part;) {
         const char *end = strchr(part, '/');
@@ -454,7 +519,10 @@ static int instance_forward(int lock, const char *path, const char *startup_file
     address.sun_family = AF_UNIX;
     strcpy(address.sun_path, path);
     for (attempt = 0; attempt < 60 && !acknowledged; ++attempt) {
-        if (attempt) { struct timespec delay = {0, 50000000L}; nanosleep(&delay, NULL); }
+        if (attempt) {
+            struct timespec delay = {0, 50000000L};
+            nanosleep(&delay, NULL);
+        }
         if (flock(lock, LOCK_EX | LOCK_NB) == 0) {
             if (fd >= 0) close(fd);
             free(absolute);
@@ -469,14 +537,23 @@ static int instance_forward(int lock, const char *path, const char *startup_file
             if (fd < 0) break;
             instance_set_flags(fd, 0);
             instance_no_sigpipe(fd);
-            if (connect(fd, (struct sockaddr *)&address, sizeof(address)) != 0) { close(fd); fd = -1; continue; }
+            if (connect(fd, (struct sockaddr *)&address, sizeof(address)) != 0) {
+                close(fd);
+                fd = -1;
+                continue;
+            }
             while (left) {
                 ssize_t n = send(fd, at, left, instance_send_flags());
                 if (n < 0 && errno == EINTR) continue;
                 if (n <= 0) break;
-                at += n; left -= (size_t)n;
+                at += n;
+                left -= (size_t)n;
             }
-            if (left) { close(fd); fd = -1; continue; }
+            if (left) {
+                close(fd);
+                fd = -1;
+                continue;
+            }
             sent = 1;
             instance_set_flags(fd, 1);
         }
@@ -485,7 +562,9 @@ static int instance_forward(int lock, const char *path, const char *startup_file
             ssize_t n = recv(fd, &answer, 1, 0);
             if (n == 1) acknowledged = 1;
             else if (n == 0 || (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)) {
-                close(fd); fd = -1; dropped = 1;
+                close(fd);
+                fd = -1;
+                dropped = 1;
             }
         }
     }
@@ -518,7 +597,9 @@ int gui_frontend_instance_start(xxwidgets_widget *window, const char *startup_fi
         if (GetLastError() == ERROR_ALREADY_EXISTS) {
             DWORD wait = WaitForSingleObject(instance_mutex, 3000);
             if (wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED) {
-                CloseHandle(instance_mutex); instance_mutex = NULL; return -1;
+                CloseHandle(instance_mutex);
+                instance_mutex = NULL;
+                return -1;
             }
             instance_mutex_owned = 1;
             EnumWindows(find_instance, (LPARAM)&existing);
@@ -526,27 +607,34 @@ int gui_frontend_instance_start(xxwidgets_widget *window, const char *startup_fi
                 int forwarded = 1;
                 if (startup_file && *startup_file) {
                     wchar_t *wide = xx_str_utf8_to_unicode(startup_file), absolute[32768];
-                    DWORD length = wide ? GetFullPathNameW(wide,32768,absolute,NULL) : 0;
+                    DWORD length = wide ? GetFullPathNameW(wide, 32768, absolute, NULL) : 0;
                     char *utf8 = length && length < 32768 ? xx_str_unicode_to_utf8(absolute) : NULL;
                     DWORD_PTR result = 0;
                     xx_str_wfree(wide);
                     if (utf8 && strlen(utf8) < GUI_PREFERENCE_PATH_MAX) {
-                        COPYDATASTRUCT data = {GUI_FRONTEND_COPYDATA_ID,(DWORD)strlen(utf8)+1,utf8};
-                        forwarded = SendMessageTimeoutW(existing,WM_COPYDATA,0,(LPARAM)&data,SMTO_ABORTIFHUNG,1500,&result) != 0 && result != 0;
+                        COPYDATASTRUCT data = {GUI_FRONTEND_COPYDATA_ID, (DWORD)strlen(utf8) + 1, utf8};
+                        forwarded = SendMessageTimeoutW(existing, WM_COPYDATA, 0, (LPARAM)&data, SMTO_ABORTIFHUNG, 1500, &result) != 0 && result != 0;
                     } else forwarded = 0;
                     xx_str_free(utf8);
                 }
-                ShowWindow(existing, SW_RESTORE); SetForegroundWindow(existing);
-                ReleaseMutex(instance_mutex); instance_mutex_owned = 0;
-                CloseHandle(instance_mutex); instance_mutex = NULL;
+                ShowWindow(existing, SW_RESTORE);
+                SetForegroundWindow(existing);
+                ReleaseMutex(instance_mutex);
+                instance_mutex_owned = 0;
+                CloseHandle(instance_mutex);
+                instance_mutex = NULL;
                 return forwarded ? 0 : -1;
             }
             /* The preceding owner closed before publishing a window. This
              * process can publish its own window while holding the barrier. */
         } else instance_mutex_owned = 1;
         instance_window = (HWND)xxwidgets_widget_native_handle(window);
-        if (!SetPropW(instance_window, instance_name, (HANDLE)(uintptr_t)1)) { gui_frontend_instance_close(); return -1; }
-        ReleaseMutex(instance_mutex); instance_mutex_owned = 0;
+        if (!SetPropW(instance_window, instance_name, (HANDLE)(uintptr_t)1)) {
+            gui_frontend_instance_close();
+            return -1;
+        }
+        ReleaseMutex(instance_mutex);
+        instance_mutex_owned = 0;
     }
 #else
     {
@@ -566,7 +654,11 @@ int gui_frontend_instance_start(xxwidgets_widget *window, const char *startup_fi
         if (instance_file < 0) return -1;
         if (flock(instance_file, LOCK_EX | LOCK_NB) != 0) {
             int forwarded = instance_forward(instance_file, socket_path, startup_file);
-            if (forwarded != 1) { close(instance_file); instance_file = -1; return forwarded; }
+            if (forwarded != 1) {
+                close(instance_file);
+                instance_file = -1;
+                return forwarded;
+            }
             /* The running copy closed meanwhile: this one owns the lock now. */
         }
         instance_listen(socket_path);
@@ -592,7 +684,9 @@ int gui_frontend_instance_poll(xxwidgets_widget *window, char **path_out)
             if (instance_client < 0) return 0;
             instance_set_flags(instance_client, 1);
             instance_no_sigpipe(instance_client);
-            instance_received = 0; instance_oversized = 0; instance_terminated = 0;
+            instance_received = 0;
+            instance_oversized = 0;
+            instance_terminated = 0;
             instance_client_since = time(NULL);
         }
         while (!done) {
@@ -602,18 +696,28 @@ int gui_frontend_instance_poll(xxwidgets_widget *window, char **path_out)
                 const char *end = memchr(chunk, 0, (size_t)n);
                 size_t take = end ? (size_t)(end - chunk) : (size_t)n;
                 if (instance_received + take >= sizeof(instance_message)) instance_oversized = 1;
-                else { memcpy(instance_message + instance_received, chunk, take); instance_received += take; }
+                else {
+                    memcpy(instance_message + instance_received, chunk, take);
+                    instance_received += take;
+                }
                 done = end != NULL;
                 if (done) instance_terminated = 1;
                 /* Too long, or still streaming after 2 s: dropped at once. */
-                else if (instance_oversized || time(NULL) - instance_client_since > 2) { instance_oversized = 1; done = 1; }
+                else if (instance_oversized || time(NULL) - instance_client_since > 2) {
+                    instance_oversized = 1;
+                    done = 1;
+                }
             } else if (n == 0) done = 1;
             else if (errno == EINTR) continue;
             else if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 /* A sender that stalls is dropped rather than waited for. */
                 if (time(NULL) - instance_client_since <= 2) return 0;
-                instance_oversized = 1; done = 1;
-            } else { instance_oversized = 1; done = 1; }
+                instance_oversized = 1;
+                done = 1;
+            } else {
+                instance_oversized = 1;
+                done = 1;
+            }
         }
         instance_message[instance_received] = 0;
         /* A whole message: a path, or "" from a launch without a file (raise
@@ -621,14 +725,18 @@ int gui_frontend_instance_poll(xxwidgets_widget *window, char **path_out)
          * tells the sender the path was taken; it may have stopped waiting. */
         if (!instance_oversized && instance_terminated) {
             char answer = 1;
-            if (!instance_utf8_valid((const unsigned char *)instance_message)) { instance_message[0] = 0; instance_received = 0; }
+            if (!instance_utf8_valid((const unsigned char *)instance_message)) {
+                instance_message[0] = 0;
+                instance_received = 0;
+            }
             *path_out = malloc(instance_received + 1);
             if (*path_out) {
                 memcpy(*path_out, instance_message, instance_received + 1);
                 (void)send(instance_client, &answer, 1, instance_send_flags());
             }
         }
-        close(instance_client); instance_client = -1;
+        close(instance_client);
+        instance_client = -1;
         if (*path_out) return 1;
     }
     return 0;
@@ -662,28 +770,32 @@ void gui_frontend_instance_close(void)
 static int directory_component_equal(const wchar_t *component, size_t length, const wchar_t *directory)
 {
     size_t size = wcslen(directory);
-    while (length && (component[length-1] == L'\\' || component[length-1] == L'/')) --length;
-    while (size && (directory[size-1] == L'\\' || directory[size-1] == L'/')) --size;
+    while (length && (component[length - 1] == L'\\' || component[length - 1] == L'/')) --length;
+    while (size && (directory[size - 1] == L'\\' || directory[size - 1] == L'/')) --size;
     return length == size && _wcsnicmp(component, directory, size) == 0;
 }
 static wchar_t *user_path(DWORD *stored_type, LONG *result)
 {
-    HKEY key; DWORD bytes = 0, type = 0;
+    HKEY key;
+    DWORD bytes = 0, type = 0;
     wchar_t *path;
     LONG code = RegOpenKeyExW(HKEY_CURRENT_USER, L"Environment", 0, KEY_QUERY_VALUE, &key);
     if (result) *result = code;
     if (stored_type) *stored_type = REG_EXPAND_SZ;
     if (code != ERROR_SUCCESS) return NULL;
     code = RegQueryValueExW(key, L"Path", NULL, &type, NULL, &bytes);
-    if (code != ERROR_SUCCESS || bytes > 1024 * 1024 || bytes % sizeof(wchar_t) ||
-        (type != REG_SZ && type != REG_EXPAND_SZ)) {
+    if (code != ERROR_SUCCESS || bytes > 1024 * 1024 || bytes % sizeof(wchar_t) || (type != REG_SZ && type != REG_EXPAND_SZ)) {
         if (result) *result = code == ERROR_SUCCESS ? ERROR_INVALID_DATA : code;
-        RegCloseKey(key); return NULL;
+        RegCloseKey(key);
+        return NULL;
     }
     if (stored_type) *stored_type = type;
     path = calloc(1, (size_t)bytes + sizeof(wchar_t));
     code = path ? RegQueryValueExW(key, L"Path", NULL, &type, (BYTE *)path, &bytes) : ERROR_NOT_ENOUGH_MEMORY;
-    if (code != ERROR_SUCCESS) { free(path); path = NULL; }
+    if (code != ERROR_SUCCESS) {
+        free(path);
+        path = NULL;
+    }
     if (result) *result = code;
     RegCloseKey(key);
     return path;
@@ -694,11 +806,23 @@ int gui_frontend_environment_contains(const char *directory)
 #ifdef _WIN32
     wchar_t *wide = directory ? xx_str_utf8_to_unicode(directory) : NULL, *path = user_path(NULL, NULL);
     int found = 0;
-    if (wide && path) for (const wchar_t *at = path; *at;) { const wchar_t *end = wcschr(at, ';'); size_t n = end ? (size_t)(end - at) : wcslen(at); if (directory_component_equal(at, n, wide)) { found = 1; break; } at += n; if (*at) ++at; }
-    xx_str_wfree(wide); free(path);
+    if (wide && path)
+        for (const wchar_t *at = path; *at;) {
+            const wchar_t *end = wcschr(at, ';');
+            size_t n = end ? (size_t)(end - at) : wcslen(at);
+            if (directory_component_equal(at, n, wide)) {
+                found = 1;
+                break;
+            }
+            at += n;
+            if (*at) ++at;
+        }
+    xx_str_wfree(wide);
+    free(path);
     return found;
 #else
-    (void)directory; return 0;
+    (void)directory;
+    return 0;
 #endif
 }
 xxwidgets_status gui_frontend_environment_apply(const char *directory, int enabled)
@@ -708,17 +832,35 @@ xxwidgets_status gui_frontend_environment_apply(const char *directory, int enabl
     LONG read_status = ERROR_SUCCESS;
     wchar_t *wide = directory ? xx_str_utf8_to_unicode(directory) : NULL;
     wchar_t *old = user_path(&stored_type, &read_status), *result;
-    size_t capacity, used = 0; HKEY key; LONG code;
-    if (!wide || wcschr(wide, L';')) { xx_str_wfree(wide); free(old); return XXWIDGETS_INVALID_ARGUMENT; }
-    if (!old && read_status != ERROR_FILE_NOT_FOUND && read_status != ERROR_PATH_NOT_FOUND) {
-        xx_str_wfree(wide); return XXWIDGETS_PLATFORM_ERROR;
+    size_t capacity, used = 0;
+    HKEY key;
+    LONG code;
+    if (!wide || wcschr(wide, L';')) {
+        xx_str_wfree(wide);
+        free(old);
+        return XXWIDGETS_INVALID_ARGUMENT;
     }
-    if (gui_frontend_environment_contains(directory) == !!enabled) { xx_str_wfree(wide); free(old); return XXWIDGETS_OK; }
+    if (!old && read_status != ERROR_FILE_NOT_FOUND && read_status != ERROR_PATH_NOT_FOUND) {
+        xx_str_wfree(wide);
+        return XXWIDGETS_PLATFORM_ERROR;
+    }
+    if (gui_frontend_environment_contains(directory) == !!enabled) {
+        xx_str_wfree(wide);
+        free(old);
+        return XXWIDGETS_OK;
+    }
     capacity = (old ? wcslen(old) : 0) + wcslen(wide) + 3;
     result = calloc(capacity, sizeof(wchar_t));
-    if (!result) { xx_str_wfree(wide); free(old); return XXWIDGETS_OUT_OF_MEMORY; }
+    if (!result) {
+        xx_str_wfree(wide);
+        free(old);
+        return XXWIDGETS_OUT_OF_MEMORY;
+    }
     if (enabled) {
-        if (old) { used = wcslen(old); memcpy(result, old, used * sizeof(wchar_t)); }
+        if (old) {
+            used = wcslen(old);
+            memcpy(result, old, used * sizeof(wchar_t));
+        }
         if (used) result[used++] = L';';
         wcscpy(result + used, wide);
     } else if (old) {
@@ -728,7 +870,8 @@ xxwidgets_status gui_frontend_environment_apply(const char *directory, int enabl
             size_t n = end ? (size_t)(end - at) : wcslen(at);
             if (!directory_component_equal(at, n, wide)) {
                 if (retained++) result[used++] = L';';
-                memcpy(result + used, at, n * sizeof(wchar_t)); used += n;
+                memcpy(result + used, at, n * sizeof(wchar_t));
+                used += n;
             }
             if (!end) break;
             at = end + 1;
@@ -736,13 +879,19 @@ xxwidgets_status gui_frontend_environment_apply(const char *directory, int enabl
     }
     code = RegCreateKeyExW(HKEY_CURRENT_USER, L"Environment", 0, NULL, 0, KEY_SET_VALUE, NULL, &key, NULL);
     if (code == ERROR_SUCCESS) {
-        code = RegSetValueExW(key, L"Path", 0, stored_type, (const BYTE *)result, (DWORD)((wcslen(result)+1)*sizeof(wchar_t)));
+        code = RegSetValueExW(key, L"Path", 0, stored_type, (const BYTE *)result, (DWORD)((wcslen(result) + 1) * sizeof(wchar_t)));
         RegCloseKey(key);
     }
-    free(result); free(old); xx_str_wfree(wide);
-    if (code == ERROR_SUCCESS) { DWORD_PTR response; SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE, 0, (LPARAM)L"Environment", SMTO_ABORTIFHUNG, 1000, &response); }
+    free(result);
+    free(old);
+    xx_str_wfree(wide);
+    if (code == ERROR_SUCCESS) {
+        DWORD_PTR response;
+        SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE, 0, (LPARAM)L"Environment", SMTO_ABORTIFHUNG, 1000, &response);
+    }
     return code == ERROR_SUCCESS ? XXWIDGETS_OK : XXWIDGETS_PLATFORM_ERROR;
 #else
-    (void)directory; return enabled ? XXWIDGETS_UNAVAILABLE : XXWIDGETS_OK;
+    (void)directory;
+    return enabled ? XXWIDGETS_UNAVAILABLE : XXWIDGETS_OK;
 #endif
 }

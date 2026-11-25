@@ -69,7 +69,6 @@
 
 #include <time.h>
 
-
 static xx_scan_options g_options;
 static DBase g_db;
 static int g_bInited = 0;
@@ -122,16 +121,23 @@ void gui_backend_cache_statistics(uint64_t *hits, uint64_t *misses)
     if (g_cache_lock) xx_mutex_unlock(g_cache_lock);
 }
 
-size_t gui_backend_engine_count(void) { return 1; }
-const char *gui_backend_engine_id(size_t index) { return index == 0 ? "die" : NULL; }
-const char *gui_backend_engine_name(size_t index) { return index == 0 ? "Detect It Easy" : NULL; }
+size_t gui_backend_engine_count(void)
+{
+    return 1;
+}
+const char *gui_backend_engine_id(size_t index)
+{
+    return index == 0 ? "die" : NULL;
+}
+const char *gui_backend_engine_name(size_t index)
+{
+    return index == 0 ? "Detect It Easy" : NULL;
+}
 
 static int valid_scan_preferences(const gui_backend_scan_preferences *p)
 {
-    return p && (p->recursive == 0 || p->recursive == 1) && (p->profiling == 0 || p->profiling == 1) &&
-        (p->sort == 0 || p->sort == 1) && (p->use_cache == 0 || p->use_cache == 1) &&
-        xx_rt_memchr(p->engine, 0, sizeof(p->engine)) &&
-        !xx_rt_strcmp(p->engine, "die");
+    return p && (p->recursive == 0 || p->recursive == 1) && (p->profiling == 0 || p->profiling == 1) && (p->sort == 0 || p->sort == 1) &&
+           (p->use_cache == 0 || p->use_cache == 1) && xx_rt_memchr(p->engine, 0, sizeof(p->engine)) && !xx_rt_strcmp(p->engine, "die");
 }
 
 int gui_backend_get_scan_preferences(gui_backend_scan_preferences *preferences)
@@ -146,7 +152,8 @@ int gui_backend_set_scan_preferences(const gui_backend_scan_preferences *prefere
     if (!valid_scan_preferences(preferences)) return 0;
     if (g_scan_preferences.recursive != preferences->recursive || g_scan_preferences.profiling != preferences->profiling ||
         g_scan_preferences.sort != preferences->sort || g_scan_preferences.use_cache != preferences->use_cache ||
-        xx_rt_strcmp(g_scan_preferences.engine, preferences->engine)) options_changed();
+        xx_rt_strcmp(g_scan_preferences.engine, preferences->engine))
+        options_changed();
     g_scan_preferences = *preferences;
     g_options.recursive_scan = preferences->recursive != 0;
     g_options.profiling = preferences->profiling != 0;
@@ -269,9 +276,7 @@ gui_backend_configuration_failure gui_backend_configuration_failed(int *slot)
     return g_configuration_failure;
 }
 
-int gui_backend_apply_configuration(const gui_backend_scan_preferences *preferences,
-    const char *main_path, const char *custom_path,
-    char *error, size_t error_capacity)
+int gui_backend_apply_configuration(const gui_backend_scan_preferences *preferences, const char *main_path, const char *custom_path, char *error, size_t error_capacity)
 {
     const char *paths[GUI_DB_COUNT] = {main_path, custom_path};
     static const char *const names[GUI_DB_COUNT] = {"main", "custom"};
@@ -282,15 +287,15 @@ int gui_backend_apply_configuration(const gui_backend_scan_preferences *preferen
         return gui_configuration_failed(GUI_BACKEND_CONFIGURATION_OPTIONS, -1);
     }
     const char *current[GUI_DB_COUNT] = {gui_backend_main_db_path(), gui_backend_custom_db_path()};
-    for (size_t i = 0; i < GUI_DB_COUNT; ++i) if (paths[i] && paths[i][0] && xx_rt_strcmp(paths[i], current[i]) &&
-        !xx_fs_is_dir(paths[i]) && !xx_fs_is_file(paths[i])) {
-        if (error && error_capacity) xx_rt_snprintf(error, error_capacity, "The %s database folder does not exist: %s", names[i], paths[i]);
-        return gui_configuration_failed(GUI_BACKEND_CONFIGURATION_MISSING, (int)i);
-    }
-    if (!gui_backend_db_paths_current(main_path, custom_path) &&
-        !gui_backend_set_db_paths(main_path, custom_path)) {
-        if (error && error_capacity) xx_rt_snprintf(error, error_capacity, "Cannot load signatures from %s; the main database must contain signatures.",
-            main_path && main_path[0] ? main_path : "the default main database folder");
+    for (size_t i = 0; i < GUI_DB_COUNT; ++i)
+        if (paths[i] && paths[i][0] && xx_rt_strcmp(paths[i], current[i]) && !xx_fs_is_dir(paths[i]) && !xx_fs_is_file(paths[i])) {
+            if (error && error_capacity) xx_rt_snprintf(error, error_capacity, "The %s database folder does not exist: %s", names[i], paths[i]);
+            return gui_configuration_failed(GUI_BACKEND_CONFIGURATION_MISSING, (int)i);
+        }
+    if (!gui_backend_db_paths_current(main_path, custom_path) && !gui_backend_set_db_paths(main_path, custom_path)) {
+        if (error && error_capacity)
+            xx_rt_snprintf(error, error_capacity, "Cannot load signatures from %s; the main database must contain signatures.",
+                           main_path && main_path[0] ? main_path : "the default main database folder");
         return gui_configuration_failed(GUI_BACKEND_CONFIGURATION_LOAD, GUI_DB_MAIN);
     }
     if (!gui_backend_set_scan_preferences(preferences)) return gui_configuration_failed(GUI_BACKEND_CONFIGURATION_OPTIONS, -1);
@@ -373,7 +378,7 @@ int gui_backend_set_tag_filters(const char *pIncludeTags, const char *pExcludeTa
     }
 
     int changed = xx_rt_strcmp(g_pIncludeTags ? g_pIncludeTags : "", pNewInclude ? pNewInclude : "") ||
-        xx_rt_strcmp(g_pExcludeTags ? g_pExcludeTags : "", pNewExclude ? pNewExclude : "");
+                  xx_rt_strcmp(g_pExcludeTags ? g_pExcludeTags : "", pNewExclude ? pNewExclude : "");
     xx_rt_free(g_pIncludeTags);
     xx_rt_free(g_pExcludeTags);
     g_pIncludeTags = pNewInclude;
@@ -393,9 +398,9 @@ const char *gui_backend_app_title(void)
 
 void gui_backend_set_flags(int bDeep, int bHeuristic, int bVerbose, int bAggressive, int bHideUnknown, int bFormat)
 {
-    if (g_options.deep_scan != (bDeep != 0) || g_options.heuristic_scan != (bHeuristic != 0) ||
-        g_options.verbose != (bVerbose != 0) || g_options.aggressive_scan != (bAggressive != 0) ||
-        g_options.hide_unknown != (bHideUnknown != 0) || g_options.format_result != (bFormat != 0)) options_changed();
+    if (g_options.deep_scan != (bDeep != 0) || g_options.heuristic_scan != (bHeuristic != 0) || g_options.verbose != (bVerbose != 0) ||
+        g_options.aggressive_scan != (bAggressive != 0) || g_options.hide_unknown != (bHideUnknown != 0) || g_options.format_result != (bFormat != 0))
+        options_changed();
     g_options.deep_scan = bDeep ? 1 : 0;
     g_options.heuristic_scan = bHeuristic ? 1 : 0;
     g_options.verbose = bVerbose ? 1 : 0;
@@ -451,17 +456,12 @@ int gui_backend_set_optimization_options(const gui_backend_optimization_options 
     gui_backend_optimization_options options;
     if (!pOptions) return 0;
     options = *pOptions;
-    if ((options.use_sse2 != 0 && options.use_sse2 != 1) ||
-        (options.use_avx2 != 0 && options.use_avx2 != 1) ||
-        (options.use_sse42 != 0 && options.use_sse42 != 1) ||
-        (options.use_aes != 0 && options.use_aes != 1) ||
-        (options.use_sha != 0 && options.use_sha != 1) ||
-        (options.use_vpclmulqdq != 0 && options.use_vpclmulqdq != 1) ||
-        (options.use_neon != 0 && options.use_neon != 1) ||
-        (options.use_arm_crc32 != 0 && options.use_arm_crc32 != 1) ||
-        (options.use_arm_crypto != 0 && options.use_arm_crypto != 1) ||
-        (options.use_arm_dotprod != 0 && options.use_arm_dotprod != 1) ||
-        (options.use_arm_pmull != 0 && options.use_arm_pmull != 1)) return 0;
+    if ((options.use_sse2 != 0 && options.use_sse2 != 1) || (options.use_avx2 != 0 && options.use_avx2 != 1) || (options.use_sse42 != 0 && options.use_sse42 != 1) ||
+        (options.use_aes != 0 && options.use_aes != 1) || (options.use_sha != 0 && options.use_sha != 1) ||
+        (options.use_vpclmulqdq != 0 && options.use_vpclmulqdq != 1) || (options.use_neon != 0 && options.use_neon != 1) ||
+        (options.use_arm_crc32 != 0 && options.use_arm_crc32 != 1) || (options.use_arm_crypto != 0 && options.use_arm_crypto != 1) ||
+        (options.use_arm_dotprod != 0 && options.use_arm_dotprod != 1) || (options.use_arm_pmull != 0 && options.use_arm_pmull != 1))
+        return 0;
     xx_set_buffer_size(options.buffer_size);
     xx_set_file_buffer_size(options.file_buffer_size);
     xx_set_sse2_enabled(options.use_sse2 != 0);
@@ -488,22 +488,19 @@ typedef struct gui_file_types_context {
 
 static int gui_archive_file_type(int type)
 {
-    return type == XFT_ZIP || type == XFT_JAR || type == XFT_APK || type == XFT_IPA ||
-        type == XFT_NPM || type == XFT_MACHOFAT || type == XFT_RAR || type == XFT_ISO9660;
+    return type == XFT_ZIP || type == XFT_JAR || type == XFT_APK || type == XFT_IPA || type == XFT_NPM || type == XFT_MACHOFAT || type == XFT_RAR || type == XFT_ISO9660;
 }
 
 /* Broad database categories do not identify separate concrete format readers. */
 static int gui_concrete_file_type(XFileType type)
 {
-    return type != XFT_UNKNOWN && type != XFT_PE && type != XFT_ELF &&
-        type != XFT_MACHO && type != XFT_ARCHIVE && type != XFT_IMAGE &&
-        type != XFT_CLI_ASSEMBLY;
+    return type != XFT_UNKNOWN && type != XFT_PE && type != XFT_ELF && type != XFT_MACHO && type != XFT_ARCHIVE && type != XFT_IMAGE && type != XFT_CLI_ASSEMBLY;
 }
 
 static int gui_selectable_file_type(int type)
 {
     return type == GUI_FILE_TYPE_TEXT || type == GUI_FILE_TYPE_UNICODE || type == GUI_FILE_TYPE_7ZIP ||
-        (type > 0 && type < XFT_COUNT && (gui_concrete_file_type((XFileType)type) || type == XFT_ARCHIVE));
+           (type > 0 && type < XFT_COUNT && (gui_concrete_file_type((XFileType)type) || type == XFT_ARCHIVE));
 }
 
 static int gui_scan_file_type(int type)
@@ -515,7 +512,8 @@ static void gui_collect_file_type(XFileType type, void *pUserData)
 {
     gui_file_types_context *context = (gui_file_types_context *)pUserData;
     size_t i;
-    for (i = 0; i < context->count; ++i) if (context->types[i] == type) return;
+    for (i = 0; i < context->count; ++i)
+        if (context->types[i] == type) return;
     if (context->count < sizeof(context->types) / sizeof(context->types[0])) context->types[context->count++] = type;
 }
 
@@ -533,8 +531,7 @@ static void gui_extra_file_types(const char *path, int *text, int *unicode, int 
     xx_io_close(device);
     if (count <= 0) return;
     if (count >= 6 && !xx_rt_memcmp(buffer, seven_zip_magic, sizeof(seven_zip_magic))) *seven_zip = 1;
-    if (count >= 7 && !xx_rt_memcmp(buffer, rar_magic, sizeof(rar_magic)) &&
-        (buffer[6] == 0 || (count >= 8 && buffer[6] == 1 && buffer[7] == 0))) *rar = 1;
+    if (count >= 7 && !xx_rt_memcmp(buffer, rar_magic, sizeof(rar_magic)) && (buffer[6] == 0 || (count >= 8 && buffer[6] == 1 && buffer[7] == 0))) *rar = 1;
     if (count >= 2 && ((buffer[0] == 0xff && buffer[1] == 0xfe) || (buffer[0] == 0xfe && buffer[1] == 0xff))) *unicode = 1;
     for (i = 0; i < (size_t)count; ++i)
         if (buffer[i] == '\t' || buffer[i] == '\r' || buffer[i] == '\n' || buffer[i] >= 0x20) ++plain;
@@ -568,14 +565,11 @@ int gui_backend_file_types(const char *pUtf8Path, gui_backend_file_type_fn pType
         for (i = 0; i < context.count; ++i) {
             int type = context.types[i];
             if (type == XFT_JAR && has_apk) continue; /* Qt lists APK as ZIP, never JAR. */
-            if (gui_concrete_file_type((XFileType)type) || type == XFT_ARCHIVE)
-                pTypeFn(type, xft_to_string((XFileType)type), pUserData);
+            if (gui_concrete_file_type((XFileType)type) || type == XFT_ARCHIVE) pTypeFn(type, xft_to_string((XFileType)type), pUserData);
         }
         gui_extra_file_types(pUtf8Path, &text, &unicode, &seven_zip, &rar);
-        if (rar && !has_rar)
-            pTypeFn(XFT_RAR, xft_to_string(XFT_RAR), pUserData);
-        if (!has_archive && (seven_zip || rar || has_archive_type))
-            pTypeFn(XFT_ARCHIVE, xft_to_string(XFT_ARCHIVE), pUserData);
+        if (rar && !has_rar) pTypeFn(XFT_RAR, xft_to_string(XFT_RAR), pUserData);
+        if (!has_archive && (seven_zip || rar || has_archive_type)) pTypeFn(XFT_ARCHIVE, xft_to_string(XFT_ARCHIVE), pUserData);
         if (text) pTypeFn(GUI_FILE_TYPE_TEXT, "Text", pUserData);
         if (unicode) pTypeFn(GUI_FILE_TYPE_UNICODE, "Unicode", pUserData);
         if (seven_zip) pTypeFn(GUI_FILE_TYPE_7ZIP, "7-Zip", pUserData);
@@ -590,10 +584,8 @@ int gui_backend_scan(const char *pUtf8Path, char **ppResultText, char **ppTypeNa
 
 unsigned int gui_backend_get_scan_modes(void)
 {
-    return (g_options.all_types_scan ? GUI_SCAN_ALL_TYPES : 0u) |
-        (g_options.overlay_scan ? GUI_SCAN_OVERLAYS : 0u) |
-        (g_options.resources_scan ? GUI_SCAN_RESOURCES : 0u) |
-        (g_options.archives_scan ? GUI_SCAN_ARCHIVES : 0u);
+    return (g_options.all_types_scan ? GUI_SCAN_ALL_TYPES : 0u) | (g_options.overlay_scan ? GUI_SCAN_OVERLAYS : 0u) |
+           (g_options.resources_scan ? GUI_SCAN_RESOURCES : 0u) | (g_options.archives_scan ? GUI_SCAN_ARCHIVES : 0u);
 }
 
 int gui_backend_set_scan_modes(unsigned int modes)
@@ -607,8 +599,7 @@ int gui_backend_set_scan_modes(unsigned int modes)
     return 1;
 }
 
-int gui_backend_scan_results(const char *pUtf8Path, gui_backend_result_fn pResultFn,
-    void *pUserData, char **ppResultText, char **ppTypeName)
+int gui_backend_scan_results(const char *pUtf8Path, gui_backend_result_fn pResultFn, void *pUserData, char **ppResultText, char **ppTypeName)
 {
     return gui_backend_scan_results_type(pUtf8Path, 0, pResultFn, pUserData, ppResultText, ppTypeName);
 }
@@ -617,12 +608,26 @@ int gui_backend_scan_results(const char *pUtf8Path, gui_backend_result_fn pResul
 static int arch_bits(xx_arch_t arch)
 {
     switch (arch) {
-    case XX_ARCH_X86_64: case XX_ARCH_ARM64: case XX_ARCH_MIPS64: case XX_ARCH_PPC64: case XX_ARCH_RISCV64: case XX_ARCH_SPARC64: return 64;
-    case XX_ARCH_X86: case XX_ARCH_ARM: case XX_ARCH_MIPS: case XX_ARCH_PPC: case XX_ARCH_RISCV: case XX_ARCH_SPARC:
-    case XX_ARCH_M68K: case XX_ARCH_SH: case XX_ARCH_ARC: case XX_ARCH_HPPA: return 32;
-    case XX_ARCH_X86_16: case XX_ARCH_Z80: return 16;
-    case XX_ARCH_AVR: return 8;
-    default: return 0;
+        case XX_ARCH_X86_64:
+        case XX_ARCH_ARM64:
+        case XX_ARCH_MIPS64:
+        case XX_ARCH_PPC64:
+        case XX_ARCH_RISCV64:
+        case XX_ARCH_SPARC64: return 64;
+        case XX_ARCH_X86:
+        case XX_ARCH_ARM:
+        case XX_ARCH_MIPS:
+        case XX_ARCH_PPC:
+        case XX_ARCH_RISCV:
+        case XX_ARCH_SPARC:
+        case XX_ARCH_M68K:
+        case XX_ARCH_SH:
+        case XX_ARCH_ARC:
+        case XX_ARCH_HPPA: return 32;
+        case XX_ARCH_X86_16:
+        case XX_ARCH_Z80: return 16;
+        case XX_ARCH_AVR: return 8;
+        default: return 0;
     }
 }
 
@@ -630,32 +635,32 @@ static int arch_bits(xx_arch_t arch)
 static const char *arch_name(xx_arch_t arch)
 {
     switch (arch) {
-    case XX_ARCH_X86_16: return "8086";
-    case XX_ARCH_X86: return "I386";
-    case XX_ARCH_X86_64: return "AMD64";
-    case XX_ARCH_ARM: return "ARM";
-    case XX_ARCH_ARM64: return "ARM64";
-    case XX_ARCH_MIPS: return "MIPS";
-    case XX_ARCH_MIPS64: return "MIPS64";
-    case XX_ARCH_PPC: return "PPC";
-    case XX_ARCH_PPC64: return "PPC64";
-    case XX_ARCH_RISCV: return "RISCV";
-    case XX_ARCH_RISCV64: return "RISCV64";
-    case XX_ARCH_SPARC: return "SPARC";
-    case XX_ARCH_SPARC64: return "SPARC64";
-    case XX_ARCH_M68K: return "68K";
-    case XX_ARCH_UNKNOWN: return "";
-    default: return xx_arch_to_string(arch);
+        case XX_ARCH_X86_16: return "8086";
+        case XX_ARCH_X86: return "I386";
+        case XX_ARCH_X86_64: return "AMD64";
+        case XX_ARCH_ARM: return "ARM";
+        case XX_ARCH_ARM64: return "ARM64";
+        case XX_ARCH_MIPS: return "MIPS";
+        case XX_ARCH_MIPS64: return "MIPS64";
+        case XX_ARCH_PPC: return "PPC";
+        case XX_ARCH_PPC64: return "PPC64";
+        case XX_ARCH_RISCV: return "RISCV";
+        case XX_ARCH_RISCV64: return "RISCV64";
+        case XX_ARCH_SPARC: return "SPARC";
+        case XX_ARCH_SPARC64: return "SPARC64";
+        case XX_ARCH_M68K: return "68K";
+        case XX_ARCH_UNKNOWN: return "";
+        default: return xx_arch_to_string(arch);
     }
 }
 
 static const char *type_name(xx_format_type_t type)
 {
     switch (type) {
-    case XX_TYPE_GUI_APPLICATION: return "GUI";
-    case XX_TYPE_CONSOLE_APPLICATION: return "Console";
-    case XX_TYPE_LIBRARY: return "DLL";
-    default: return xx_type_to_string(type);
+        case XX_TYPE_GUI_APPLICATION: return "GUI";
+        case XX_TYPE_CONSOLE_APPLICATION: return "Console";
+        case XX_TYPE_LIBRARY: return "DLL";
+        default: return xx_type_to_string(type);
     }
 }
 
@@ -717,28 +722,29 @@ failed:
     return 0;
 }
 
-static int cached_result(const char *path, int type_id, const uint8_t digest[XX_BLAKE2SP_DIGEST_SIZE], int64_t size,
-                         xx_scan_result *result)
+static int cached_result(const char *path, int type_id, const uint8_t digest[XX_BLAKE2SP_DIGEST_SIZE], int64_t size, xx_scan_result *result)
 {
     int found = 0;
     if (!g_cache_lock) return 0;
     xx_mutex_lock(g_cache_lock);
-    if (g_cache.valid && g_cache.type_id == type_id && g_cache.size == size &&
-        g_cache.options_generation == g_options_generation && g_cache.database_generation == g_database_generation &&
-        !xx_rt_strcmp(path, g_cache.path) && !xx_rt_memcmp(digest, g_cache.digest, XX_BLAKE2SP_DIGEST_SIZE))
+    if (g_cache.valid && g_cache.type_id == type_id && g_cache.size == size && g_cache.options_generation == g_options_generation &&
+        g_cache.database_generation == g_database_generation && !xx_rt_strcmp(path, g_cache.path) && !xx_rt_memcmp(digest, g_cache.digest, XX_BLAKE2SP_DIGEST_SIZE))
         found = copy_scan_result(result, &g_cache.result);
-    if (found) ++g_cache.hits; else ++g_cache.misses;
+    if (found) ++g_cache.hits;
+    else ++g_cache.misses;
     xx_mutex_unlock(g_cache_lock);
     return found;
 }
 
-static void save_cached_result(const char *path, int type_id, const uint8_t digest[XX_BLAKE2SP_DIGEST_SIZE], int64_t size,
-                              const xx_scan_result *result)
+static void save_cached_result(const char *path, int type_id, const uint8_t digest[XX_BLAKE2SP_DIGEST_SIZE], int64_t size, const xx_scan_result *result)
 {
     char *copy_path;
     xx_scan_result copy;
     if (!g_cache_lock || !(copy_path = cdie_strdup(path))) return;
-    if (!copy_scan_result(&copy, result)) { xx_rt_free(copy_path); return; }
+    if (!copy_scan_result(&copy, result)) {
+        xx_rt_free(copy_path);
+        return;
+    }
     xx_mutex_lock(g_cache_lock);
     gui_backend_clear_cache();
     g_cache.path = copy_path;
@@ -768,16 +774,14 @@ static int scan_configured(const char *path, int type_id, xx_scan_options *optio
     ok = die_engine_scan_file_type_pd(path, &g_db, &effective, (XFileType)type_id, result, progress);
     if (ok && options->profiling) {
         char line[192];
-        xx_rt_snprintf(line, sizeof(line), "[Profiling] Detect It Easy: %d detection records, %lld ms total scan time.",
-            result->nCount, xx_rt_clock_ms() - started);
+        xx_rt_snprintf(line, sizeof(line), "[Profiling] Detect It Easy: %d detection records, %lld ms total scan time.", result->nCount, xx_rt_clock_ms() - started);
         ok = xx_scan_result_add_error(result, line, progress);
     }
     return ok;
 }
 
-static int scan_results_impl(const char *pUtf8Path, int nTypeId,
-    gui_backend_result_fn pResultFn, void *pUserData, char **ppResultText, char **ppTypeName, gui_backend_tree_fn tree_fn,
-    gui_backend_scan_info *pInfo, xx_pd_struct *pProgress)
+static int scan_results_impl(const char *pUtf8Path, int nTypeId, gui_backend_result_fn pResultFn, void *pUserData, char **ppResultText, char **ppTypeName,
+                             gui_backend_tree_fn tree_fn, gui_backend_scan_info *pInfo, xx_pd_struct *pProgress)
 {
     xx_scan_result result;
     char *pText = NULL;
@@ -796,8 +800,7 @@ static int scan_results_impl(const char *pUtf8Path, int nTypeId,
         *ppTypeName = NULL;
     }
 
-    if ((!g_bInited) || (pUtf8Path == NULL) || (pUtf8Path[0] == 0) ||
-        nTypeId < 0 || (nTypeId != 0 && !gui_selectable_file_type(nTypeId))) {
+    if ((!g_bInited) || (pUtf8Path == NULL) || (pUtf8Path[0] == 0) || nTypeId < 0 || (nTypeId != 0 && !gui_selectable_file_type(nTypeId))) {
         return 0;
     }
     engine_type = gui_scan_file_type(nTypeId);
@@ -816,10 +819,13 @@ static int scan_results_impl(const char *pUtf8Path, int nTypeId,
     if (!hit && identity_valid && !xx_pd_is_stopped(pProgress)) {
         uint8_t after[XX_BLAKE2SP_DIGEST_SIZE];
         int64_t after_size = 0;
-        if (input_identity(pUtf8Path, after, &after_size, pProgress) && input_size == after_size &&
-            !xx_rt_memcmp(digest, after, sizeof(digest))) save_cached_result(pUtf8Path, nTypeId, digest, input_size, &result);
+        if (input_identity(pUtf8Path, after, &after_size, pProgress) && input_size == after_size && !xx_rt_memcmp(digest, after, sizeof(digest)))
+            save_cached_result(pUtf8Path, nTypeId, digest, input_size, &result);
     }
-    if (xx_pd_is_stopped(pProgress)) { xx_scan_result_free(&result); return 0; }
+    if (xx_pd_is_stopped(pProgress)) {
+        xx_scan_result_free(&result);
+        return 0;
+    }
 
     if (ppResultText != NULL) {
         pText = xx_scan_format_text(&result, &g_options);
@@ -835,8 +841,7 @@ static int scan_results_impl(const char *pUtf8Path, int nTypeId,
         return 0;
     }
 
-    if (tree_fn && !gui_result_tree_emit(&result, g_options.hide_unknown, tree_fn, pUserData))
-        goto scan_allocation_failed;
+    if (tree_fn && !gui_result_tree_emit(&result, g_options.hide_unknown, tree_fn, pUserData)) goto scan_allocation_failed;
     if (pInfo) {
         describe_input(pUtf8Path, nTypeId, &result, pInfo);
         pInfo->log = join_errors(&result);
@@ -857,11 +862,13 @@ static int scan_results_impl(const char *pUtf8Path, int nTypeId,
         nMarkerLength = xx_rt_strlen(pMarker);
         nLength = nMarkerLength + xx_rt_strlen(pType) + 1;
         pDisplayType = (char *)xx_rt_malloc(nLength);
-        if (!pDisplayType) { xx_rt_free(pType); goto scan_allocation_failed; }
+        if (!pDisplayType) {
+            xx_rt_free(pType);
+            goto scan_allocation_failed;
+        }
         xx_rt_memcpy(pDisplayType, pMarker, nMarkerLength);
         xx_rt_memcpy(pDisplayType + nMarkerLength, pType, nLength - nMarkerLength);
-        pResultFn(pDisplayType, pRecord->name ? pRecord->name : "",
-            pRecord->version ? pRecord->version : "", pRecord->info ? pRecord->info : "", pUserData);
+        pResultFn(pDisplayType, pRecord->name ? pRecord->name : "", pRecord->version ? pRecord->version : "", pRecord->info ? pRecord->info : "", pUserData);
         xx_rt_free(pDisplayType);
         xx_rt_free(pType);
     }
@@ -916,9 +923,7 @@ int gui_backend_run_signature(const char *path, int type_id, const char *signatu
     char *detected;
     int ok, i;
     if (text) *text = NULL;
-    if (!g_bInited || !path || !path[0] || !source || !text || type_id < 0 ||
-        (type_id && !gui_selectable_file_type(type_id)))
-        return 0;
+    if (!g_bInited || !path || !path[0] || !source || !text || type_id < 0 || (type_id && !gui_selectable_file_type(type_id))) return 0;
     type_id = gui_scan_file_type(type_id);
     xx_buf_init(&log);
     xx_buf_init(&out);
@@ -938,7 +943,10 @@ int gui_backend_run_signature(const char *path, int type_id, const char *signatu
     options.archives_scan = false;
     ok = die_engine_scan_file_type_debug_pd(path, &g_db, &options, (XFileType)type_id, &result, NULL, &config);
     detected = ok ? xx_scan_format_text(&result, &options) : NULL;
-    if (detected) { xx_buf_append_str(&out, detected); xx_rt_free(detected); }
+    if (detected) {
+        xx_buf_append_str(&out, detected);
+        xx_rt_free(detected);
+    }
     for (i = 0; i < result.nErrorCount; ++i)
         if (result.ppErrors && result.ppErrors[i]) xx_buf_appendf(&out, "%s\n", result.ppErrors[i]);
     if (log.size) {
@@ -958,7 +966,9 @@ static char *read_info(const char *dir, const char *file)
     char *info = xx_fs_path_join(dir, "info"), *html = info ? xx_fs_path_join(info, "html") : NULL;
     char *path = html ? xx_fs_path_join(html, file) : NULL, *data = NULL;
     if (path && xx_fs_is_file(path)) data = xx_fs_read_file(path, NULL);
-    xx_rt_free(info); xx_rt_free(html); xx_rt_free(path);
+    xx_rt_free(info);
+    xx_rt_free(html);
+    xx_rt_free(path);
     return data;
 }
 
@@ -966,7 +976,8 @@ int gui_backend_set_info_path(const char *path)
 {
     char *copy = path && path[0] ? cdie_strdup(path) : NULL;
     if (path && path[0] && !copy) return 0;
-    xx_rt_free(g_info_path); g_info_path = copy;
+    xx_rt_free(g_info_path);
+    g_info_path = copy;
     return 1;
 }
 
@@ -988,7 +999,8 @@ static char *read_configured_info(const char *file)
         if (path && xx_fs_is_file(path)) data = xx_fs_read_file(path, NULL);
         xx_rt_free(path);
     }
-    xx_rt_free(html); xx_rt_free(directory);
+    xx_rt_free(html);
+    xx_rt_free(directory);
     return data;
 }
 
@@ -1003,21 +1015,30 @@ static char *info_plain_text(const char *html)
         if (*s == '<') {
             const char *end = s + 1;
             while (*end && *end != '>') ++end;
-            if ((end - s >= 3 && (s[1] == 'b' || s[1] == 'B') && (s[2] == 'r' || s[2] == 'R')) ||
-                (end - s >= 2 && (s[1] == 'p' || s[1] == 'P')) || (end - s >= 3 && s[1] == '/' && (s[2] == 'p' || s[2] == 'P')))
+            if ((end - s >= 3 && (s[1] == 'b' || s[1] == 'B') && (s[2] == 'r' || s[2] == 'R')) || (end - s >= 2 && (s[1] == 'p' || s[1] == 'P')) ||
+                (end - s >= 3 && s[1] == '/' && (s[2] == 'p' || s[2] == 'P')))
                 xx_buf_append_str(&out, "\n");
             s = *end ? end + 1 : end;
         } else if (*s == '&') {
-            static const struct { const char *entity, *text; } entities[] = {
-                {"&amp;", "&"}, {"&lt;", "<"}, {"&gt;", ">"}, {"&quot;", "\""}, {"&#39;", "'"}, {"&nbsp;", " "}};
+            static const struct {
+                const char *entity, *text;
+            } entities[] = {{"&amp;", "&"}, {"&lt;", "<"}, {"&gt;", ">"}, {"&quot;", "\""}, {"&#39;", "'"}, {"&nbsp;", " "}};
             size_t k;
             for (k = 0; k < sizeof(entities) / sizeof(entities[0]); ++k) {
                 size_t length = xx_rt_strlen(entities[k].entity);
-                if (!xx_rt_strncmp(s, entities[k].entity, length)) { xx_buf_append_str(&out, entities[k].text); s += length; break; }
+                if (!xx_rt_strncmp(s, entities[k].entity, length)) {
+                    xx_buf_append_str(&out, entities[k].text);
+                    s += length;
+                    break;
+                }
             }
-            if (k == sizeof(entities) / sizeof(entities[0])) { xx_buf_append_char(&out, *s); ++s; }
+            if (k == sizeof(entities) / sizeof(entities[0])) {
+                xx_buf_append_char(&out, *s);
+                ++s;
+            }
         } else if (*s != '\r') {
-            xx_buf_append_char(&out, *s); ++s;
+            xx_buf_append_char(&out, *s);
+            ++s;
         } else ++s;
     }
     return xx_buf_detach(&out, NULL);
@@ -1061,22 +1082,20 @@ char *gui_backend_info_text(const char *name)
     return text;
 }
 
-int gui_backend_scan_results_type(const char *path, int type_id, gui_backend_result_fn callback,
-    void *user, char **report, char **type_name)
+int gui_backend_scan_results_type(const char *path, int type_id, gui_backend_result_fn callback, void *user, char **report, char **type_name)
 {
     return scan_results_impl(path, type_id, callback, user, report, type_name, NULL, NULL, NULL);
 }
 
-int gui_backend_scan_tree(const char *path, int type_id, gui_backend_tree_fn callback,
-    void *user, char **report, char **type_name, gui_backend_scan_info *info, xx_pd_struct *progress)
+int gui_backend_scan_tree(const char *path, int type_id, gui_backend_tree_fn callback, void *user, char **report, char **type_name, gui_backend_scan_info *info,
+                          xx_pd_struct *progress)
 {
     if (info) xx_rt_memset(info, 0, sizeof(*info));
     if (!callback) return 0;
     return scan_results_impl(path, type_id, NULL, user, report, type_name, callback, info, progress);
 }
 
-int gui_backend_scan_detections(const char *path, unsigned int flags, unsigned int databases,
-    gui_backend_detection_fn callback, void *user)
+int gui_backend_scan_detections(const char *path, unsigned int flags, unsigned int databases, gui_backend_detection_fn callback, void *user)
 {
     xx_scan_options options;
     xx_scan_result result;
@@ -1096,8 +1115,7 @@ int gui_backend_scan_detections(const char *path, unsigned int flags, unsigned i
     for (i = 0; i < result.nCount; ++i) {
         const xx_scan_record *record = &result.pRecords[i];
         if (record->is_unknown && options.hide_unknown) continue;
-        callback(record->type ? record->type : "", record->name ? record->name : "",
-            record->version ? record->version : "", record->info ? record->info : "", user);
+        callback(record->type ? record->type : "", record->name ? record->name : "", record->version ? record->version : "", record->info ? record->info : "", user);
     }
     xx_scan_result_free(&result);
     return 1;
@@ -1115,7 +1133,10 @@ int gui_backend_signature_entry(int index, const char **display, const char **pa
         /* The folder and file name: "PE/_Microsoft.6.sg". */
         base = folder = full;
         for (s = full; *s; ++s)
-            if (*s == '/' || *s == '\\') { folder = base; base = s + 1; }
+            if (*s == '/' || *s == '\\') {
+                folder = base;
+                base = s + 1;
+            }
         *display = folder;
     }
     return 1;
@@ -1149,49 +1170,119 @@ static void facts_type(XFileType type, void *user)
 static int facts_page(int type)
 {
     switch (type) {
-    case XFT_ZIP: case XFT_JAR: case XFT_APK: case XFT_IPA: case XFT_NPM: case XFT_MACHOFAT:
-    case XFT_RAR: case XFT_ISO9660: case XFT_ARCHIVE:
-        return GUI_FACTS_PAGE_ARCHIVE;
-    case XFT_DEX: return GUI_FACTS_PAGE_DEX;
-    case XFT_MSDOS: return GUI_FACTS_PAGE_MSDOS;
-    case XFT_NE: return GUI_FACTS_PAGE_NE;
-    case XFT_LE: case XFT_LX: return GUI_FACTS_PAGE_LE;
-    case XFT_PE32: case XFT_PE64: return GUI_FACTS_PAGE_PE;
-    case XFT_ELF32: case XFT_ELF64: return GUI_FACTS_PAGE_ELF;
-    case XFT_MACHO32: case XFT_MACHO64: return GUI_FACTS_PAGE_MACH;
-    case XFT_COM: return GUI_FACTS_PAGE_COM;
-    default: return GUI_FACTS_PAGE_BINARY;
+        case XFT_ZIP:
+        case XFT_JAR:
+        case XFT_APK:
+        case XFT_IPA:
+        case XFT_NPM:
+        case XFT_MACHOFAT:
+        case XFT_RAR:
+        case XFT_ISO9660:
+        case XFT_ARCHIVE: return GUI_FACTS_PAGE_ARCHIVE;
+        case XFT_DEX: return GUI_FACTS_PAGE_DEX;
+        case XFT_MSDOS: return GUI_FACTS_PAGE_MSDOS;
+        case XFT_NE: return GUI_FACTS_PAGE_NE;
+        case XFT_LE:
+        case XFT_LX: return GUI_FACTS_PAGE_LE;
+        case XFT_PE32:
+        case XFT_PE64: return GUI_FACTS_PAGE_PE;
+        case XFT_ELF32:
+        case XFT_ELF64: return GUI_FACTS_PAGE_ELF;
+        case XFT_MACHO32:
+        case XFT_MACHO64: return GUI_FACTS_PAGE_MACH;
+        case XFT_COM: return GUI_FACTS_PAGE_COM;
+        default: return GUI_FACTS_PAGE_BINARY;
     }
 }
 
 /* The reader of the other types that have one in the engine's link closure
  * (xx_format_create_reader is outside it); Binary and the rest have none.
  * Every reader struct starts with its Abstractformat. */
-static void facts_free_ne(void *reader) { xx_ne_free((xx_ne *)reader); }
-static void facts_free_le(void *reader) { xx_le_free((xx_le *)reader); }
-static void facts_free_lx(void *reader) { xx_lx_free((xx_lx *)reader); }
-static void facts_free_dex(void *reader) { xx_dex_free((xx_dex *)reader); }
-static void facts_free_amigahunk(void *reader) { xx_amigahunk_free((xx_amigahunk *)reader); }
-static void facts_free_zip(void *reader) { xx_zip_free((xx_zip *)reader); }
-static void facts_free_jar(void *reader) { xx_jar_free((xx_jar *)reader); }
-static void facts_free_apk(void *reader) { xx_apk_free((xx_apk *)reader); }
-static void facts_free_ipa(void *reader) { xx_ipa_free((xx_ipa *)reader); }
-static void facts_free_rar(void *reader) { xx_rar_free((xx_rar *)reader); }
+static void facts_free_ne(void *reader)
+{
+    xx_ne_free((xx_ne *)reader);
+}
+static void facts_free_le(void *reader)
+{
+    xx_le_free((xx_le *)reader);
+}
+static void facts_free_lx(void *reader)
+{
+    xx_lx_free((xx_lx *)reader);
+}
+static void facts_free_dex(void *reader)
+{
+    xx_dex_free((xx_dex *)reader);
+}
+static void facts_free_amigahunk(void *reader)
+{
+    xx_amigahunk_free((xx_amigahunk *)reader);
+}
+static void facts_free_zip(void *reader)
+{
+    xx_zip_free((xx_zip *)reader);
+}
+static void facts_free_jar(void *reader)
+{
+    xx_jar_free((xx_jar *)reader);
+}
+static void facts_free_apk(void *reader)
+{
+    xx_apk_free((xx_apk *)reader);
+}
+static void facts_free_ipa(void *reader)
+{
+    xx_ipa_free((xx_ipa *)reader);
+}
+static void facts_free_rar(void *reader)
+{
+    xx_rar_free((xx_rar *)reader);
+}
 static Abstractformat *facts_reader(int type, xx_io_device *device, void (**release)(void *))
 {
     void *reader = NULL;
     switch (type) {
-    case XFT_NE: reader = xx_ne_create(device, 0); *release = facts_free_ne; break;
-    case XFT_LE: reader = xx_le_create(device, 0); *release = facts_free_le; break;
-    case XFT_LX: reader = xx_lx_create(device, 0); *release = facts_free_lx; break;
-    case XFT_DEX: reader = xx_dex_create(device, 0); *release = facts_free_dex; break;
-    case XFT_AMIGAHUNK: reader = xx_amigahunk_create(device, 0); *release = facts_free_amigahunk; break;
-    case XFT_ZIP: reader = xx_zip_create(device, 0); *release = facts_free_zip; break;
-    case XFT_JAR: reader = xx_jar_create(device, 0); *release = facts_free_jar; break;
-    case XFT_APK: reader = xx_apk_create(device, 0); *release = facts_free_apk; break;
-    case XFT_IPA: reader = xx_ipa_create(device, 0); *release = facts_free_ipa; break;
-    case XFT_RAR: reader = xx_rar_create(device, 0); *release = facts_free_rar; break;
-    default: break;
+        case XFT_NE:
+            reader = xx_ne_create(device, 0);
+            *release = facts_free_ne;
+            break;
+        case XFT_LE:
+            reader = xx_le_create(device, 0);
+            *release = facts_free_le;
+            break;
+        case XFT_LX:
+            reader = xx_lx_create(device, 0);
+            *release = facts_free_lx;
+            break;
+        case XFT_DEX:
+            reader = xx_dex_create(device, 0);
+            *release = facts_free_dex;
+            break;
+        case XFT_AMIGAHUNK:
+            reader = xx_amigahunk_create(device, 0);
+            *release = facts_free_amigahunk;
+            break;
+        case XFT_ZIP:
+            reader = xx_zip_create(device, 0);
+            *release = facts_free_zip;
+            break;
+        case XFT_JAR:
+            reader = xx_jar_create(device, 0);
+            *release = facts_free_jar;
+            break;
+        case XFT_APK:
+            reader = xx_apk_create(device, 0);
+            *release = facts_free_apk;
+            break;
+        case XFT_IPA:
+            reader = xx_ipa_create(device, 0);
+            *release = facts_free_ipa;
+            break;
+        case XFT_RAR:
+            reader = xx_rar_create(device, 0);
+            *release = facts_free_rar;
+            break;
+        default: break;
     }
     return (Abstractformat *)reader;
 }
@@ -1227,8 +1318,7 @@ static void facts_engine_row(gui_backend_facts *facts, xx_endian_t endian, xx_ar
     copy_field(facts->type, sizeof(facts->type), type_name(type));
 }
 
-static void facts_qt_row(gui_backend_facts *facts, const char *endian, const char *mode,
-    const char *arch, const char *type)
+static void facts_qt_row(gui_backend_facts *facts, const char *endian, const char *mode, const char *arch, const char *type)
 {
     copy_field(facts->endianness, sizeof(facts->endianness), endian);
     copy_field(facts->mode, sizeof(facts->mode), mode);
@@ -1239,30 +1329,32 @@ static void facts_qt_row(gui_backend_facts *facts, const char *endian, const cha
 static const char *facts_linear_arch(uint16_t cpu)
 {
     switch (cpu) {
-    case 0x01: return "80286";
-    case 0x02: return "80386";
-    case 0x03: return "80486";
-    case 0x04: return "80586";
-    case 0x20: return "i860";
-    case 0x21: return "N11";
-    case 0x40: return "R2000";
-    case 0x41: return "R6000";
-    case 0x42: return "R4000";
-    default: return "Unknown";
+        case 0x01: return "80286";
+        case 0x02: return "80386";
+        case 0x03: return "80486";
+        case 0x04: return "80586";
+        case 0x20: return "i860";
+        case 0x21: return "N11";
+        case 0x40: return "R2000";
+        case 0x41: return "R6000";
+        case 0x42: return "R4000";
+        default: return "Unknown";
     }
 }
 
 static void facts_format_row(gui_backend_facts *facts, Abstractformat *format)
 {
-    facts_engine_row(facts, format->get_endian ? format->get_endian(format) : format->endian,
-        format->get_arch ? format->get_arch(format) : format->arch,
-        format->get_type ? format->get_type(format) : format->format_type);
+    facts_engine_row(facts, format->get_endian ? format->get_endian(format) : format->endian, format->get_arch ? format->get_arch(format) : format->arch,
+                     format->get_type ? format->get_type(format) : format->format_type);
 }
 
 static void facts_entry_offset(gui_backend_facts *facts, const xx_memory_map *map)
 {
     int64_t offset = map ? xx_memory_map_address_to_offset(map, facts->entry_point) : -1;
-    if (offset >= 0) { facts->entry_point_offset = offset; facts->flags |= GUI_FACTS_ENTRY_OFFSET; }
+    if (offset >= 0) {
+        facts->entry_point_offset = offset;
+        facts->flags |= GUI_FACTS_ENTRY_OFFSET;
+    }
 }
 
 /* XBinary::valueToTimeString(DT_TYPE_POSIX): a QDateTime in local time. */
@@ -1288,21 +1380,36 @@ static void facts_time(char *text, size_t capacity, uint32_t stamp)
         const int64_t shift = 2650838400; /* 84 years */
         int64_t shifted = value - shift, days, offset, era, doe, yoe, doy, mp, y, m, d, secs;
         if (!facts_localtime(shifted, &local)) return;
-        y = local.tm_year + 1900; m = local.tm_mon + 1; d = local.tm_mday;
-        y -= m <= 2; era = (y >= 0 ? y : y - 399) / 400; yoe = y - era * 400;
-        doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1; doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+        y = local.tm_year + 1900;
+        m = local.tm_mon + 1;
+        d = local.tm_mday;
+        y -= m <= 2;
+        era = (y >= 0 ? y : y - 399) / 400;
+        yoe = y - era * 400;
+        doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+        doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
         days = era * 146097 + doe - 719468;
         offset = days * 86400 + local.tm_hour * 3600 + local.tm_min * 60 + local.tm_sec - shifted;
         value += offset;
-        days = (value >= 0 ? value : value - 86399) / 86400; secs = value - days * 86400;
-        days += 719468; era = (days >= 0 ? days : days - 146096) / 146097; doe = days - era * 146097;
-        yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365; doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-        mp = (5 * doy + 2) / 153; d = doy - (153 * mp + 2) / 5 + 1; m = mp < 10 ? mp + 3 : mp - 9; y = yoe + era * 400 + (m <= 2);
-        local.tm_year = (int)(y - 1900); local.tm_mon = (int)(m - 1); local.tm_mday = (int)d;
-        local.tm_hour = (int)(secs / 3600); local.tm_min = (int)(secs / 60 % 60); local.tm_sec = (int)(secs % 60);
+        days = (value >= 0 ? value : value - 86399) / 86400;
+        secs = value - days * 86400;
+        days += 719468;
+        era = (days >= 0 ? days : days - 146096) / 146097;
+        doe = days - era * 146097;
+        yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+        doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        mp = (5 * doy + 2) / 153;
+        d = doy - (153 * mp + 2) / 5 + 1;
+        m = mp < 10 ? mp + 3 : mp - 9;
+        y = yoe + era * 400 + (m <= 2);
+        local.tm_year = (int)(y - 1900);
+        local.tm_mon = (int)(m - 1);
+        local.tm_mday = (int)d;
+        local.tm_hour = (int)(secs / 3600);
+        local.tm_min = (int)(secs / 60 % 60);
+        local.tm_sec = (int)(secs % 60);
     }
-    xx_rt_snprintf(text, capacity, "%04d-%02d-%02d %02d:%02d:%02d", local.tm_year + 1900, local.tm_mon + 1,
-        local.tm_mday, local.tm_hour, local.tm_min, local.tm_sec);
+    xx_rt_snprintf(text, capacity, "%04d-%02d-%02d %02d:%02d:%02d", local.tm_year + 1900, local.tm_mon + 1, local.tm_mday, local.tm_hour, local.tm_min, local.tm_sec);
 }
 
 static char *facts_strdup(const char *text)
@@ -1333,7 +1440,10 @@ static int facts_pe(gui_backend_facts *facts, xx_io_device *device)
         facts->base_bits = facts->entry_bits = pe.bIs64 ? 64 : 32;
         facts->base_address = pe.map.module_address != XX_INVALID_ADDRESS ? pe.map.module_address : pe.nImageBase;
         facts->entry_point = pe.nEntryPointAddress != XX_INVALID_ADDRESS ? pe.nEntryPointAddress : facts->base_address + pe.nAddressOfEntryPoint;
-        if (pe.nEntryPointOffset >= 0) { facts->entry_point_offset = pe.nEntryPointOffset; facts->flags |= GUI_FACTS_ENTRY_OFFSET; }
+        if (pe.nEntryPointOffset >= 0) {
+            facts->entry_point_offset = pe.nEntryPointOffset;
+            facts->flags |= GUI_FACTS_ENTRY_OFFSET;
+        }
         facts->sections = pe.nNumberOfSections;
         facts->time_date_stamp = pe.nTimeDateStamp;
         facts_time(facts->time_date_stamp_text, sizeof(facts->time_date_stamp_text), pe.nTimeDateStamp);
@@ -1350,7 +1460,8 @@ static int facts_pe(gui_backend_facts *facts, xx_io_device *device)
         }
         if (pe.nNumberOfSections) facts->flags |= GUI_FACTS_SECTIONS;
         if (pe.nOverlayOffset >= 0 && pe.nOverlaySize > 0) {
-            facts->overlay_offset = pe.nOverlayOffset; facts->overlay_size = pe.nOverlaySize;
+            facts->overlay_offset = pe.nOverlayOffset;
+            facts->overlay_size = pe.nOverlaySize;
             facts->flags |= GUI_FACTS_OVERLAY;
         }
         if (facts_resource(&pe, 24)) { /* RT_MANIFEST */
@@ -1363,7 +1474,7 @@ static int facts_pe(gui_backend_facts *facts, xx_io_device *device)
             xx_buf_init(&text);
             for (i = 0; i < pe.nVersionCount; ++i)
                 xx_buf_appendf(&text, "%s: %s\n", pe.pVersionRecords[i].pKey ? pe.pVersionRecords[i].pKey : "",
-                    pe.pVersionRecords[i].pValue ? pe.pVersionRecords[i].pValue : "");
+                               pe.pVersionRecords[i].pValue ? pe.pVersionRecords[i].pValue : "");
             if (!text.size) xx_buf_append_str(&text, "");
             facts->version = xx_buf_detach(&text, NULL);
         }
@@ -1373,8 +1484,7 @@ static int facts_pe(gui_backend_facts *facts, xx_io_device *device)
         /* The engine row exactly as describe_input reads it. */
         xx_rt_memset(&reader, 0, sizeof(reader));
         xx_pe_init(&reader, device, 0);
-        if (reader.format.check_is_valid(&reader.format, NULL) && xx_format_handle_base_info(&reader.format, NULL))
-            facts_format_row(facts, &reader.format);
+        if (reader.format.check_is_valid(&reader.format, NULL) && xx_format_handle_base_info(&reader.format, NULL)) facts_format_row(facts, &reader.format);
         xx_pe_destroy(&reader);
     }
     xx_pe_inspect_free(&pe);
@@ -1406,7 +1516,10 @@ static int facts_elf(gui_backend_facts *facts, xx_io_device *device)
             if (header && header->type == 1u) { /* PT_LOAD */
                 uint64_t align = header->alignment > 1u ? header->alignment : 1u;
                 uint64_t aligned = header->virtual_address & ~(align - 1u);
-                if (!have_load) { first_load = header->virtual_address; have_load = 1; }
+                if (!have_load) {
+                    first_load = header->virtual_address;
+                    have_load = 1;
+                }
                 if (aligned < first_load) first_load = aligned;
             }
         }
@@ -1487,7 +1600,8 @@ static void facts_map_overlay(gui_backend_facts *facts, const xx_memory_map *map
     size_t i;
     for (i = 0; map && i < map->record_count; ++i)
         if ((map->records[i].file_part & XX_FILE_PART_OVERLAY) && !map->records[i].is_virtual && map->records[i].size > 0) {
-            facts->overlay_offset = map->records[i].offset; facts->overlay_size = map->records[i].size;
+            facts->overlay_offset = map->records[i].offset;
+            facts->overlay_size = map->records[i].size;
             facts->flags |= GUI_FACTS_OVERLAY;
             return;
         }
@@ -1543,8 +1657,7 @@ static void facts_other(gui_backend_facts *facts, xx_io_device *device)
                 }
                 if (!version) version = xx_io_get_u8(device, 4);
             }
-            if (version)
-                xx_rt_snprintf(facts->main_label, sizeof(facts->main_label), "%s(%u.%u)", facts->type_name, version / 10, version % 10);
+            if (version) xx_rt_snprintf(facts->main_label, sizeof(facts->main_label), "%s(%u.%u)", facts->type_name, version / 10, version % 10);
             /* An archive is data: no byte order (Qt says Unknown) and MODE_DATA. */
             facts->endianness[0] = 0;
             copy_field(facts->mode, sizeof(facts->mode), "Data");
@@ -1557,80 +1670,76 @@ static void facts_other(gui_backend_facts *facts, xx_io_device *device)
         }
     }
     switch (facts->type_id) {
-    case XFT_BINARY:
-        facts_qt_row(facts, "Unknown", "Unknown", "NOEXEC", "Unknown");
-        break;
-    case GUI_FILE_TYPE_TEXT: case GUI_FILE_TYPE_UNICODE:
-        facts_qt_row(facts, "Unknown", "Unknown", "", "");
-        break;
-    case GUI_FILE_TYPE_7ZIP:
-        facts_qt_row(facts, "LE", "Data", "", "Archive");
-        break;
-    case XFT_ARCHIVE: case XFT_ZIP: case XFT_RAR:
-        facts_qt_row(facts, "Unknown", "Data", "NOEXEC", "Archive");
-        break;
-    case XFT_JAR: case XFT_APK:
-        facts_qt_row(facts, "Unknown", "Data", "Universal", "Package");
-        break;
-    case XFT_PDF:
-        facts_qt_row(facts, "Unknown", "Unknown", "NOEXEC", "Document");
-        break;
-    case XFT_MACHOFAT:
-        {
+        case XFT_BINARY: facts_qt_row(facts, "Unknown", "Unknown", "NOEXEC", "Unknown"); break;
+        case GUI_FILE_TYPE_TEXT:
+        case GUI_FILE_TYPE_UNICODE: facts_qt_row(facts, "Unknown", "Unknown", "", ""); break;
+        case GUI_FILE_TYPE_7ZIP: facts_qt_row(facts, "LE", "Data", "", "Archive"); break;
+        case XFT_ARCHIVE:
+        case XFT_ZIP:
+        case XFT_RAR: facts_qt_row(facts, "Unknown", "Data", "NOEXEC", "Archive"); break;
+        case XFT_JAR:
+        case XFT_APK: facts_qt_row(facts, "Unknown", "Data", "Universal", "Package"); break;
+        case XFT_PDF: facts_qt_row(facts, "Unknown", "Unknown", "NOEXEC", "Document"); break;
+        case XFT_MACHOFAT: {
             unsigned char magic[4];
             const char *endian = "Unknown";
             if (xx_io_read_at(device, 0, magic, sizeof(magic))) {
-                if ((magic[0] == 0xca && magic[1] == 0xfe && magic[2] == 0xba && (magic[3] == 0xbe || magic[3] == 0xbf)))
-                    endian = "BE";
-                else if ((magic[0] == 0xbe || magic[0] == 0xbf) && magic[1] == 0xba && magic[2] == 0xfe && magic[3] == 0xca)
-                    endian = "LE";
+                if ((magic[0] == 0xca && magic[1] == 0xfe && magic[2] == 0xba && (magic[3] == 0xbe || magic[3] == 0xbf))) endian = "BE";
+                else if ((magic[0] == 0xbe || magic[0] == 0xbf) && magic[1] == 0xba && magic[2] == 0xfe && magic[3] == 0xca) endian = "LE";
             }
             facts_qt_row(facts, endian, "Unknown", "", "");
-        }
-        break;
-    case XFT_DEX:
-        facts_qt_row(facts, map && map->endian == XX_ENDIAN_LITTLE ? "LE" :
-            map && map->endian == XX_ENDIAN_BIG ? "BE" : "Unknown", "32-bit", "Dalvik", "Main module");
-        break;
-    case XFT_NE:
-        if (format) {
-            const xx_ne *ne = (const xx_ne *)format;
-            uint16_t ip = (uint16_t)(ne->initial_cs_ip & 0xffffu);
-            uint16_t cs = (uint16_t)(ne->initial_cs_ip >> 16);
-            facts->base_address = 0x10000u;
-            facts->entry_point = 0x10000u + (uint64_t)cs * 0x10000u + ip;
-            facts_qt_row(facts, "LE", "16SEG", ne->target_os == 4 || ne->target_os == 5 ? "386" : "286",
-                ne->flags & 0x8000u ? "DLL" : "EXE");
-        }
-        break;
-    case XFT_LE: case XFT_LX:
-        if (format) {
-            const xx_linear_executable *linear = (const xx_linear_executable *)format;
-            facts->base_address = 0;
-            facts->entry_point = UINT32_MAX;
-            if (linear->start_object && linear->start_object <= linear->object_count)
-                facts->entry_point = linear->objects[linear->start_object - 1].base_address + linear->entry_offset;
-            facts_qt_row(facts, "LE", facts->type_id == XFT_LE ? "16SEG" : "32-bit",
-                facts_linear_arch(linear->cpu_type), "EXE");
-        }
-        break;
-    default:
-        break;
+        } break;
+        case XFT_DEX:
+            facts_qt_row(facts,
+                         map && map->endian == XX_ENDIAN_LITTLE ? "LE"
+                         : map && map->endian == XX_ENDIAN_BIG  ? "BE"
+                                                                : "Unknown",
+                         "32-bit", "Dalvik", "Main module");
+            break;
+        case XFT_NE:
+            if (format) {
+                const xx_ne *ne = (const xx_ne *)format;
+                uint16_t ip = (uint16_t)(ne->initial_cs_ip & 0xffffu);
+                uint16_t cs = (uint16_t)(ne->initial_cs_ip >> 16);
+                facts->base_address = 0x10000u;
+                facts->entry_point = 0x10000u + (uint64_t)cs * 0x10000u + ip;
+                facts_qt_row(facts, "LE", "16SEG", ne->target_os == 4 || ne->target_os == 5 ? "386" : "286", ne->flags & 0x8000u ? "DLL" : "EXE");
+            }
+            break;
+        case XFT_LE:
+        case XFT_LX:
+            if (format) {
+                const xx_linear_executable *linear = (const xx_linear_executable *)format;
+                facts->base_address = 0;
+                facts->entry_point = UINT32_MAX;
+                if (linear->start_object && linear->start_object <= linear->object_count)
+                    facts->entry_point = linear->objects[linear->start_object - 1].base_address + linear->entry_offset;
+                facts_qt_row(facts, "LE", facts->type_id == XFT_LE ? "16SEG" : "32-bit", facts_linear_arch(linear->cpu_type), "EXE");
+            }
+            break;
+        default: break;
     }
     switch (facts->page) {
-    case GUI_FACTS_PAGE_COM: /* XCOM: loaded at 0100, MODE_16, 8086, EXE */
-        facts->base_bits = facts->entry_bits = 16;
-        facts->base_address = facts->entry_point = 0x100u;
-        facts->entry_point_offset = 0;
-        facts->flags |= GUI_FACTS_ENTRY_OFFSET;
-        copy_field(facts->endianness, sizeof(facts->endianness), "LE");
-        copy_field(facts->mode, sizeof(facts->mode), "16-bit");
-        copy_field(facts->architecture, sizeof(facts->architecture), "8086");
-        copy_field(facts->type, sizeof(facts->type), "EXE");
-        break;
-    case GUI_FACTS_PAGE_NE: case GUI_FACTS_PAGE_LE: facts->base_bits = facts->entry_bits = 32; break; /* MODE_16SEG / MODE_32 */
-    case GUI_FACTS_PAGE_DEX: facts->base_bits = 32; facts->entry_bits = 16; break;
-    default: facts->base_bits = facts_size_bits(facts->file_size); facts->entry_bits = 32; break;
+        case GUI_FACTS_PAGE_COM: /* XCOM: loaded at 0100, MODE_16, 8086, EXE */
+            facts->base_bits = facts->entry_bits = 16;
+            facts->base_address = facts->entry_point = 0x100u;
+            facts->entry_point_offset = 0;
+            facts->flags |= GUI_FACTS_ENTRY_OFFSET;
+            copy_field(facts->endianness, sizeof(facts->endianness), "LE");
+            copy_field(facts->mode, sizeof(facts->mode), "16-bit");
+            copy_field(facts->architecture, sizeof(facts->architecture), "8086");
+            copy_field(facts->type, sizeof(facts->type), "EXE");
+            break;
+        case GUI_FACTS_PAGE_NE:
+        case GUI_FACTS_PAGE_LE: facts->base_bits = facts->entry_bits = 32; break; /* MODE_16SEG / MODE_32 */
+        case GUI_FACTS_PAGE_DEX:
+            facts->base_bits = 32;
+            facts->entry_bits = 16;
+            break;
+        default:
+            facts->base_bits = facts_size_bits(facts->file_size);
+            facts->entry_bits = 32;
+            break;
     }
     if (format) release(format);
 }
@@ -1654,7 +1763,10 @@ int gui_backend_file_facts(const char *path, int type_id, gui_backend_facts *fac
     xx_rt_memset(facts, 0, sizeof(*facts));
     facts->entry_point_offset = facts->overlay_offset = -1;
     if (!path || !*path || type_id < 0 || (type_id && !gui_selectable_file_type(type_id))) return 0;
-    types.wanted = type_id; types.found = 0; types.first = 0; types.count = 0;
+    types.wanted = type_id;
+    types.found = 0;
+    types.first = 0;
+    types.count = 0;
     if (!die_engine_detect_file_types(path, facts_type, &types) || !types.first) return 0;
     gui_extra_file_types(path, &text, &unicode, &seven_zip, &rar);
     if (rar && type_id == XFT_RAR) types.found = 1;
@@ -1662,12 +1774,18 @@ int gui_backend_file_facts(const char *path, int type_id, gui_backend_facts *fac
     if (type_id && type_id < XFT_COUNT && !types.found) return 0;
     if (!(device = xx_io_file_open(path, "rb"))) return 0;
     size = xx_io_total_size(device);
-    if (size < 0) { xx_io_close(device); return 0; }
+    if (size < 0) {
+        xx_io_close(device);
+        return 0;
+    }
     if (!type_id) {
         int i;
         type_id = types.first;
         for (i = 0; i < types.count; ++i)
-                if (facts_type_valid(types.list[i], device)) { type_id = types.list[i]; break; }
+            if (facts_type_valid(types.list[i], device)) {
+                type_id = types.list[i];
+                break;
+            }
         if (type_id == XFT_BINARY) {
             if (seven_zip) type_id = GUI_FILE_TYPE_7ZIP;
             else if (rar) type_id = XFT_RAR;
@@ -1677,24 +1795,41 @@ int gui_backend_file_facts(const char *path, int type_id, gui_backend_facts *fac
     }
     facts->type_id = type_id;
     copy_field(facts->type_name, sizeof(facts->type_name),
-        type_id == GUI_FILE_TYPE_TEXT ? "Text" : type_id == GUI_FILE_TYPE_UNICODE ? "Unicode" :
-        type_id == GUI_FILE_TYPE_7ZIP ? "7-Zip" : xft_to_string((XFileType)type_id));
+               type_id == GUI_FILE_TYPE_TEXT      ? "Text"
+               : type_id == GUI_FILE_TYPE_UNICODE ? "Unicode"
+               : type_id == GUI_FILE_TYPE_7ZIP    ? "7-Zip"
+                                                  : xft_to_string((XFileType)type_id));
     facts->page = type_id == GUI_FILE_TYPE_7ZIP ? GUI_FACTS_PAGE_ARCHIVE : facts_page(type_id);
     facts->file_size = (uint64_t)size;
     facts->base_bits = facts_size_bits(facts->file_size);
     facts->entry_bits = 32;
     switch (facts->page) {
-    case GUI_FACTS_PAGE_PE: copy_field(facts->main_label, sizeof(facts->main_label), "PE"); ok = facts_pe(facts, device); break;
-    case GUI_FACTS_PAGE_ELF: copy_field(facts->main_label, sizeof(facts->main_label), "ELF"); ok = facts_elf(facts, device); break;
-    case GUI_FACTS_PAGE_MACH: copy_field(facts->main_label, sizeof(facts->main_label), "Mach-O"); ok = facts_macho(facts, device); break;
-    case GUI_FACTS_PAGE_MSDOS: copy_field(facts->main_label, sizeof(facts->main_label), "MSDOS"); ok = facts_msdos(facts, device); break;
-    default:
-        copy_field(facts->main_label, sizeof(facts->main_label),
-            facts->page == GUI_FACTS_PAGE_NE ? "NE" : facts->page == GUI_FACTS_PAGE_LE ? (type_id == XFT_LX ? "LX" : "LE") :
-            facts->page == GUI_FACTS_PAGE_DEX ? "DEX" : facts->page == GUI_FACTS_PAGE_ARCHIVE ? facts->type_name :
-            facts->page == GUI_FACTS_PAGE_COM ? "" : "Binary");
-        facts_other(facts, device);
-        break;
+        case GUI_FACTS_PAGE_PE:
+            copy_field(facts->main_label, sizeof(facts->main_label), "PE");
+            ok = facts_pe(facts, device);
+            break;
+        case GUI_FACTS_PAGE_ELF:
+            copy_field(facts->main_label, sizeof(facts->main_label), "ELF");
+            ok = facts_elf(facts, device);
+            break;
+        case GUI_FACTS_PAGE_MACH:
+            copy_field(facts->main_label, sizeof(facts->main_label), "Mach-O");
+            ok = facts_macho(facts, device);
+            break;
+        case GUI_FACTS_PAGE_MSDOS:
+            copy_field(facts->main_label, sizeof(facts->main_label), "MSDOS");
+            ok = facts_msdos(facts, device);
+            break;
+        default:
+            copy_field(facts->main_label, sizeof(facts->main_label),
+                       facts->page == GUI_FACTS_PAGE_NE        ? "NE"
+                       : facts->page == GUI_FACTS_PAGE_LE      ? (type_id == XFT_LX ? "LX" : "LE")
+                       : facts->page == GUI_FACTS_PAGE_DEX     ? "DEX"
+                       : facts->page == GUI_FACTS_PAGE_ARCHIVE ? facts->type_name
+                       : facts->page == GUI_FACTS_PAGE_COM     ? ""
+                                                               : "Binary");
+            facts_other(facts, device);
+            break;
     }
     xx_io_close(device);
     if (!ok) {
@@ -1712,9 +1847,13 @@ void gui_backend_free(void *pPtr)
 
 void gui_backend_shutdown(void)
 {
-    xx_rt_free(g_info_path); g_info_path = NULL;
+    xx_rt_free(g_info_path);
+    g_info_path = NULL;
     gui_backend_clear_cache();
-    if (g_cache_lock) { xx_mutex_destroy(g_cache_lock); g_cache_lock = NULL; }
+    if (g_cache_lock) {
+        xx_mutex_destroy(g_cache_lock);
+        g_cache_lock = NULL;
+    }
     if (g_bInited) {
         db_free(&g_db);
         xx_rt_free(g_pIncludeTags);

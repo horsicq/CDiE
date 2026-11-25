@@ -15,8 +15,7 @@ xxwidgets_status gui_tree_set_scan_preferences(const gui_scan_page_values *value
  * Call outside xxwidgets input callbacks and polling; there, or without an
  * owner, it waits for the worker without a dialog. The backend's options and
  * databases must not change until it returns. */
-int gui_tree_scan(xxwidgets_widget *owner, xxwidgets_scan_panel *panel, const char *path, int type_id,
-                  char **type, int *cancelled);
+int gui_tree_scan(xxwidgets_widget *owner, xxwidgets_scan_panel *panel, const char *path, int type_id, char **type, int *cancelled);
 
 /* The rest of Detect It Easy's result panel. A scan also fills the file's
  * Endianness, Mode, Architecture and Type, the scan time and the Log, and

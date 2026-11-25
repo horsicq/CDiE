@@ -57,8 +57,14 @@ static void error_text(gui_extractor_source *s, const char *text)
 {
     if (s) snprintf(s->error, sizeof(s->error), "%s", text ? text : "");
 }
-const char *gui_extractor_source_error(const gui_extractor_source *s) { return s ? s->error : "Invalid Extractor source"; }
-static const char *source_error(void *user) { return gui_extractor_source_error(user); }
+const char *gui_extractor_source_error(const gui_extractor_source *s)
+{
+    return s ? s->error : "Invalid Extractor source";
+}
+static const char *source_error(void *user)
+{
+    return gui_extractor_source_error(user);
+}
 static int stopped(xx_pd_struct *pd)
 {
     if (!xx_pd_is_stopped(pd)) return 0;
@@ -67,9 +73,11 @@ static int stopped(xx_pd_struct *pd)
 }
 static xxwidgets_status map_status(xx_extractor_status status)
 {
-    return status == XX_EXTRACTOR_OK ? XXWIDGETS_OK : status == XX_EXTRACTOR_CANCELLED ? XXWIDGETS_UNAVAILABLE :
-        status == XX_EXTRACTOR_NO_MEMORY ? XXWIDGETS_OUT_OF_MEMORY :
-        status == XX_EXTRACTOR_INVALID ? XXWIDGETS_INVALID_ARGUMENT : XXWIDGETS_PLATFORM_ERROR;
+    return status == XX_EXTRACTOR_OK          ? XXWIDGETS_OK
+           : status == XX_EXTRACTOR_CANCELLED ? XXWIDGETS_UNAVAILABLE
+           : status == XX_EXTRACTOR_NO_MEMORY ? XXWIDGETS_OUT_OF_MEMORY
+           : status == XX_EXTRACTOR_INVALID   ? XXWIDGETS_INVALID_ARGUMENT
+                                              : XXWIDGETS_PLATFORM_ERROR;
 }
 static int write_all(xx_io_device *file, const void *data, size_t size, xx_pd_struct *pd)
 {
@@ -98,8 +106,7 @@ static const xx_memory_record *region_at(const extractor_index *index, uint64_t 
     size_t i;
     for (i = 0; index->map && i < index->map->count; ++i) {
         const xx_memory_record *r = index->map->records + i;
-        if (r->is_virtual || r->offset < 0 || r->size <= 0 || offset < (uint64_t)r->offset ||
-            offset - (uint64_t)r->offset >= (uint64_t)r->size) continue;
+        if (r->is_virtual || r->offset < 0 || r->size <= 0 || offset < (uint64_t)r->offset || offset - (uint64_t)r->offset >= (uint64_t)r->size) continue;
         if (!best || r->size < best->size) best = r;
     }
     return best;
@@ -112,8 +119,7 @@ static void hex_value(char out[32], uint64_t value)
 {
     snprintf(out, 32, value > UINT32_MAX ? "%016" PRIX64 : "%08" PRIX64, value);
 }
-static void widget_record(const extractor_index *index, const extractor_meta *m, const char *name, const char *info,
-    xxwidgets_extractor_record *out)
+static void widget_record(const extractor_index *index, const extractor_meta *m, const char *name, const char *info, xxwidgets_extractor_record *out)
 {
     const xx_memory_record *region = region_at(index, m->record.offset);
     memset(out, 0, sizeof(*out));
@@ -162,8 +168,15 @@ static int matches(scan_context *c, const extractor_meta *meta, const xx_extract
     hex_value(offset, row.offset);
     hex_value(size, row.size);
     if (row.has_address) hex_value(address, row.address);
-    fields[0] = number; fields[1] = offset; fields[2] = address; fields[3] = row.region;
-    fields[4] = size; fields[5] = row.method; fields[6] = row.type; fields[7] = row.info; fields[8] = row.name;
+    fields[0] = number;
+    fields[1] = offset;
+    fields[2] = address;
+    fields[3] = row.region;
+    fields[4] = size;
+    fields[5] = row.method;
+    fields[6] = row.type;
+    fields[7] = row.info;
+    fields[8] = row.name;
     for (i = 0; c->columns && i < 9; ++i) {
         int result = contains(fields[i], c->columns[i], c->pd);
         if (result <= 0) return result;
@@ -178,7 +191,10 @@ static bool collect_record(const xx_extractor_record *record, void *user)
     size_t i;
     int match;
     memset(&meta, 0, sizeof(meta));
-    if (stopped(c->pd)) { c->status = XXWIDGETS_UNAVAILABLE; return false; }
+    if (stopped(c->pd)) {
+        c->status = XXWIDGETS_UNAVAILABLE;
+        return false;
+    }
     meta.record = *record;
     meta.record.name = meta.record.info = meta.record.extension = NULL;
     meta.number = c->index->seen++;
@@ -187,9 +203,14 @@ static bool collect_record(const xx_extractor_record *record, void *user)
         return false;
     }
     match = matches(c, &meta, record);
-    if (match < 0) { c->status = XXWIDGETS_UNAVAILABLE; return false; }
+    if (match < 0) {
+        c->status = XXWIDGETS_UNAVAILABLE;
+        return false;
+    }
     if (!match) return true;
-    fields[0] = record->name; fields[1] = record->info; fields[2] = record->extension;
+    fields[0] = record->name;
+    fields[1] = record->info;
+    fields[2] = record->extension;
     for (i = 0; i < TEXT_FIELDS; ++i) {
         size_t bytes = fields[i] ? strlen(fields[i]) : 0;
         if (bytes > INT64_MAX || c->index->text_size > (uint64_t)INT64_MAX - bytes) goto io_failure;
@@ -207,8 +228,7 @@ io_failure:
 }
 static int metadata_at(gui_extractor_source *s, uint64_t row, extractor_meta *meta)
 {
-    return row < s->index.count && row <= (uint64_t)INT64_MAX / sizeof(*meta) &&
-        xx_io_read_at(s->index.records, (int64_t)(row * sizeof(*meta)), meta, sizeof(*meta));
+    return row < s->index.count && row <= (uint64_t)INT64_MAX / sizeof(*meta) && xx_io_read_at(s->index.records, (int64_t)(row * sizeof(*meta)), meta, sizeof(*meta));
 }
 /* Validate a complete UTF-8 scalar. Escape a malformed byte or an ASCII
  * control independently, so arbitrary archive/section names remain visible. */
@@ -222,11 +242,21 @@ static size_t safe_token(const unsigned char *p, size_t available, char out[4], 
     else if (c >= 0xe0 && c <= 0xef) n = 3;
     else if (c >= 0xf0 && c <= 0xf4) n = 4;
     if (n > available) n = 0;
-    for (i = 1; i < n; ++i) if ((p[i] & 0xc0) != 0x80) { n = 0; break; }
-    if ((n == 3 && ((c == 0xe0 && p[1] < 0xa0) || (c == 0xed && p[1] >= 0xa0))) ||
-        (n == 4 && ((c == 0xf0 && p[1] < 0x90) || (c == 0xf4 && p[1] >= 0x90)))) n = 0;
-    if (n) { memcpy(out, p, n); *bytes = n; return n; }
-    out[0] = '\\'; out[1] = 'x'; out[2] = hex[c >> 4]; out[3] = hex[c & 15];
+    for (i = 1; i < n; ++i)
+        if ((p[i] & 0xc0) != 0x80) {
+            n = 0;
+            break;
+        }
+    if ((n == 3 && ((c == 0xe0 && p[1] < 0xa0) || (c == 0xed && p[1] >= 0xa0))) || (n == 4 && ((c == 0xf0 && p[1] < 0x90) || (c == 0xf4 && p[1] >= 0x90)))) n = 0;
+    if (n) {
+        memcpy(out, p, n);
+        *bytes = n;
+        return n;
+    }
+    out[0] = '\\';
+    out[1] = 'x';
+    out[2] = hex[c >> 4];
+    out[3] = hex[c & 15];
     *bytes = 4;
     return 1;
 }
@@ -237,7 +267,9 @@ static size_t safe_prefix(char *out, size_t capacity, const unsigned char *input
         char token[4];
         size_t bytes, consumed = safe_token(input + at, available - at, token, &bytes);
         if (bytes + 1 > capacity - used) break;
-        memcpy(out + used, token, bytes); used += bytes; at += consumed;
+        memcpy(out + used, token, bytes);
+        used += bytes;
+        at += consumed;
     }
     out[used] = 0;
     return at;
@@ -259,8 +291,8 @@ static xxwidgets_status source_read(void *user, uint64_t first, size_t capacity,
     gui_extractor_source *s = user;
     size_t i;
     if (received) *received = 0;
-    if (!s || !received || (!records && capacity) || capacity > XXWIDGETS_EXTRACTOR_PAGE_SIZE ||
-        first > s->index.count || capacity > s->index.count - first) return XXWIDGETS_INVALID_ARGUMENT;
+    if (!s || !received || (!records && capacity) || capacity > XXWIDGETS_EXTRACTOR_PAGE_SIZE || first > s->index.count || capacity > s->index.count - first)
+        return XXWIDGETS_INVALID_ARGUMENT;
     for (i = 0; i < capacity; ++i) {
         extractor_meta meta;
         if (!metadata_at(s, first + i, &meta) || !prefix_at(s, &meta, 0, s->text[i][0], sizeof(s->text[i][0])) ||
@@ -277,8 +309,7 @@ static xxwidgets_status source_read(void *user, uint64_t first, size_t capacity,
     *received = capacity;
     return XXWIDGETS_OK;
 }
-static xxwidgets_status make_map(gui_extractor_source *s, const xxwidgets_extractor_options *options, xx_pd_struct *pd,
-    cdie_memory_map_data **out)
+static xxwidgets_status make_map(gui_extractor_source *s, const xxwidgets_extractor_options *options, xx_pd_struct *pd, cdie_memory_map_data **out)
 {
     char *error = NULL;
     const char *format = s->formats[options->format], *mode = s->map_modes[options->map_mode];
@@ -296,8 +327,7 @@ static xxwidgets_status make_map(gui_extractor_source *s, const xxwidgets_extrac
     }
     return XXWIDGETS_OK;
 }
-static xxwidgets_status source_scan(void *user, xxwidgets_extractor_options *requested, const char *const columns[9],
-    xx_pd_struct *pd, uint64_t *count)
+static xxwidgets_status source_scan(void *user, xxwidgets_extractor_options *requested, const char *const columns[9], xx_pd_struct *pd, uint64_t *count)
 {
     gui_extractor_source *s = user;
     xxwidgets_extractor_options options;
@@ -312,13 +342,17 @@ static xxwidgets_status source_scan(void *user, xxwidgets_extractor_options *req
     error_text(s, "");
     if (!s || !requested || !count || requested->format >= s->model.format_count || requested->map_mode >= s->model.map_mode_count ||
         requested->mode < XXWIDGETS_EXTRACTOR_HEURISTIC || requested->mode > XXWIDGETS_EXTRACTOR_RAW || (requested->all_types != 0 && requested->all_types != 1) ||
-        (requested->deep_scan != 0 && requested->deep_scan != 1) ||
-        (s->model.type_count < 64 && (requested->type_mask >> s->model.type_count))) return XXWIDGETS_INVALID_ARGUMENT;
+        (requested->deep_scan != 0 && requested->deep_scan != 1) || (s->model.type_count < 64 && (requested->type_mask >> s->model.type_count)))
+        return XXWIDGETS_INVALID_ARGUMENT;
     options = *requested;
     if (!strcmp(s->formats[options.format], "Binary")) {
-        for (i = 0; i < s->model.map_mode_count; ++i) if (!strcmp(s->map_modes[i], "Data")) options.map_mode = i;
+        for (i = 0; i < s->model.map_mode_count; ++i)
+            if (!strcmp(s->map_modes[i], "Data")) options.map_mode = i;
     }
-    if (stopped(pd)) { error_text(s, "Extractor scan cancelled"); return XXWIDGETS_UNAVAILABLE; }
+    if (stopped(pd)) {
+        error_text(s, "Extractor scan cancelled");
+        return XXWIDGETS_UNAVAILABLE;
+    }
     if (xx_io_total_size(s->input) != (int64_t)s->size) {
         error_text(s, "The input size changed; reopen Extractor before scanning");
         return XXWIDGETS_PLATFORM_ERROR;
@@ -332,7 +366,8 @@ static xxwidgets_status source_scan(void *user, xxwidgets_extractor_options *req
         status = XXWIDGETS_PLATFORM_ERROR;
         goto finish;
     }
-    for (i = 0; i < s->model.type_count; ++i) if (options.type_mask & (UINT64_C(1) << i)) selected[selected_count++] = s->selected_types[i];
+    for (i = 0; i < s->model.type_count; ++i)
+        if (options.type_mask & (UINT64_C(1) << i)) selected[selected_count++] = s->selected_types[i];
     native.mode = (xx_extractor_mode)options.mode;
     /* Binary is a raw-byte interpretation. An explicit Format request is
      * rejected by the core; Heuristic correctly resolves to Raw. */
@@ -359,7 +394,11 @@ static xxwidgets_status source_scan(void *user, xxwidgets_extractor_options *req
             goto finish;
         }
     }
-    if (stopped(pd)) { status = XXWIDGETS_UNAVAILABLE; error_text(s, "Extractor scan cancelled"); goto finish; }
+    if (stopped(pd)) {
+        status = XXWIDGETS_UNAVAILABLE;
+        error_text(s, "Extractor scan cancelled");
+        goto finish;
+    }
     old = s->index;
     s->index = candidate;
     memset(&candidate, 0, sizeof(candidate));
@@ -390,7 +429,8 @@ static int same_input(const char *source, const char *destination)
     }
     if (one != INVALID_HANDLE_VALUE) CloseHandle(one);
     if (two != INVALID_HANDLE_VALUE) CloseHandle(two);
-    xx_rt_free(a); xx_rt_free(b);
+    xx_rt_free(a);
+    xx_rt_free(b);
     return equal;
 #else
     struct stat a, b;
@@ -417,16 +457,16 @@ static bool observe_dump(const xx_pd_struct *pd, void *user)
         }
     return stop;
 }
-static xxwidgets_status source_dump_ex(void *user, const char *destination, int directory, const uint64_t *indices, size_t count,
-    xx_pd_struct *pd, xxwidgets_disk_write_reporter *reporter)
+static xxwidgets_status source_dump_ex(void *user, const char *destination, int directory, const uint64_t *indices, size_t count, xx_pd_struct *pd,
+                                       xxwidgets_disk_write_reporter *reporter)
 {
     gui_extractor_source *s = user;
     uint64_t row, total, total_bytes = 0, written_bytes = 0;
     int level;
     xxwidgets_status status = XXWIDGETS_OK;
     error_text(s, "");
-    if (!s || !destination || !*destination || (directory != 0 && directory != 1) ||
-        (!directory && (!indices || count != 1)) || (directory && (indices || count))) return XXWIDGETS_INVALID_ARGUMENT;
+    if (!s || !destination || !*destination || (directory != 0 && directory != 1) || (!directory && (!indices || count != 1)) || (directory && (indices || count)))
+        return XXWIDGETS_INVALID_ARGUMENT;
     total = directory ? s->index.count : 1;
     if (reporter) {
         (void)xxwidgets_disk_write_set_file(reporter, destination, 0, total, 1);
@@ -456,8 +496,14 @@ static xxwidgets_status source_dump_ex(void *user, const char *destination, int 
         const char *target = destination;
         xx_extractor_status result;
         size_t n;
-        if (stopped(pd)) { status = XXWIDGETS_UNAVAILABLE; break; }
-        if (!metadata_at(s, at, &meta)) { status = XXWIDGETS_INVALID_ARGUMENT; break; }
+        if (stopped(pd)) {
+            status = XXWIDGETS_UNAVAILABLE;
+            break;
+        }
+        if (!metadata_at(s, at, &meta)) {
+            status = XXWIDGETS_INVALID_ARGUMENT;
+            break;
+        }
         record = meta.record;
         /* Dump means the displayed physical Offset+Size, matching Qt. The
          * generic core also offers decoded extraction for other consumers. */
@@ -466,14 +512,23 @@ static xxwidgets_status source_dump_ex(void *user, const char *destination, int 
         record.unpacked_size = record.size;
         record.container_offset = record.container_size = record.archive_index = 0;
         record.container_type = XX_FILE_TYPE_UNKNOWN;
-        if (!prefix_at(s, &meta, 0, member_name, sizeof(member_name)) ||
-            !prefix_at(s, &meta, 2, extension, sizeof(extension))) { status = XXWIDGETS_PLATFORM_ERROR; break; }
-        record.name = member_name; record.extension = extension;
+        if (!prefix_at(s, &meta, 0, member_name, sizeof(member_name)) || !prefix_at(s, &meta, 2, extension, sizeof(extension))) {
+            status = XXWIDGETS_PLATFORM_ERROR;
+            break;
+        }
+        record.name = member_name;
+        record.extension = extension;
         if (directory) {
-            if (!xx_extractor_record_filename(&record, name, sizeof(name))) { status = XXWIDGETS_PLATFORM_ERROR; break; }
+            if (!xx_extractor_record_filename(&record, name, sizeof(name))) {
+                status = XXWIDGETS_PLATFORM_ERROR;
+                break;
+            }
             snprintf(full_name, sizeof(full_name), "%016" PRIX64 "_%s", meta.number, name);
             n = strlen(destination);
-            if (n > SIZE_MAX - strlen(full_name) - 2 || !(path = xx_rt_malloc(n + strlen(full_name) + 2))) { status = XXWIDGETS_OUT_OF_MEMORY; break; }
+            if (n > SIZE_MAX - strlen(full_name) - 2 || !(path = xx_rt_malloc(n + strlen(full_name) + 2))) {
+                status = XXWIDGETS_OUT_OF_MEMORY;
+                break;
+            }
             snprintf(path, n + strlen(full_name) + 2, "%s/%s", destination, full_name);
             target = path;
         }
@@ -491,7 +546,11 @@ static xxwidgets_status source_dump_ex(void *user, const char *destination, int 
             xx_pd_set_observer(tracking.previous.progress, tracking.previous.callback, tracking.previous.user_data);
         } else result = xx_extractor_extract_file(s->input, &record, target, directory == 0, pd);
         status = map_status(result);
-        if (status != XXWIDGETS_OK) { error_text(s, xx_extractor_status_name(result)); xx_rt_free(path); break; }
+        if (status != XXWIDGETS_OK) {
+            error_text(s, xx_extractor_status_name(result));
+            xx_rt_free(path);
+            break;
+        }
         if (reporter) {
             written_bytes += record.size;
             (void)xxwidgets_disk_write_set_bytes(reporter, written_bytes, total_bytes, 1);
@@ -534,10 +593,11 @@ static ssize_t count_csv_write(xx_io_device *device, const void *data, size_t si
 static int csv_text(xx_io_device *file, const char *text, size_t bytes, xx_pd_struct *pd)
 {
     size_t i, at = 0;
-    for (i = 0; i < bytes; ++i) if (text[i] == '"') {
-        if (!write_all(file, text + at, i - at + 1, pd) || !write_all(file, "\"", 1, pd)) return 0;
-        at = i + 1;
-    }
+    for (i = 0; i < bytes; ++i)
+        if (text[i] == '"') {
+            if (!write_all(file, text + at, i - at + 1, pd) || !write_all(file, "\"", 1, pd)) return 0;
+            at = i + 1;
+        }
     return write_all(file, text + at, bytes - at, pd);
 }
 static int csv_field(xx_io_device *file, const char *text, xx_pd_struct *pd)
@@ -564,8 +624,13 @@ static int csv_stored(gui_extractor_source *s, xx_io_device *file, const extract
         while (consumed < n && consumed < TRANSFER_CHUNK) {
             char token[4];
             size_t length, step = safe_token(buffer + consumed, n - consumed, token, &length);
-            if (used + length > sizeof(output)) { if (!csv_text(file, output, used, pd)) return 0; used = 0; }
-            memcpy(output + used, token, length); used += length; consumed += step;
+            if (used + length > sizeof(output)) {
+                if (!csv_text(file, output, used, pd)) return 0;
+                used = 0;
+            }
+            memcpy(output + used, token, length);
+            used += length;
+            consumed += step;
         }
         if (!csv_text(file, output, used, pd)) return 0;
         at += consumed;
@@ -598,14 +663,15 @@ static xxwidgets_status source_save_ex(void *user, const char *path, xx_pd_struc
         (void)xxwidgets_disk_write_set_bytes(reporter, 0, 0, 0);
     }
     for (attempt = 0; attempt < 16 && !file; ++attempt) {
-        snprintf(temporary, length + 96, "%s.cdie-extractor-%llx-%llx-%u.tmp", path,
-            (unsigned long long)xx_rt_clock_ms(), (unsigned long long)(uintptr_t)s, attempt);
+        snprintf(temporary, length + 96, "%s.cdie-extractor-%llx-%llx-%u.tmp", path, (unsigned long long)xx_rt_clock_ms(), (unsigned long long)(uintptr_t)s, attempt);
         file = xx_io_file_open(temporary, "wbx");
         if (file) created = 1;
     }
     if (!file) goto finish;
-    counter.file = file; counter.reporter = reporter;
-    output.write = count_csv_write; output.priv = &counter;
+    counter.file = file;
+    counter.reporter = reporter;
+    output.write = count_csv_write;
+    output.priv = &counter;
     level = xx_pd_enter_level(pd, s->index.count, "Saving Extractor CSV");
     {
         static const char header[] = "#,Offset,Address,Region,Size,Method,Type,Info,Name\r\n";
@@ -617,24 +683,45 @@ static xxwidgets_status source_save_ex(void *user, const char *path, xx_pd_struc
         char number[32], offset[32], address[32] = "", size[32];
         const char *fields[7];
         size_t i;
-        if (stopped(pd)) { status = XXWIDGETS_UNAVAILABLE; goto finish; }
+        if (stopped(pd)) {
+            status = XXWIDGETS_UNAVAILABLE;
+            goto finish;
+        }
         if (!metadata_at(s, row, &meta)) goto finish;
         widget_record(&s->index, &meta, "", "", &record);
         snprintf(number, sizeof(number), "%" PRIu64, meta.number);
-        hex_value(offset, record.offset); hex_value(size, record.size);
+        hex_value(offset, record.offset);
+        hex_value(size, record.size);
         if (record.has_address) hex_value(address, record.address);
-        fields[0] = number; fields[1] = offset; fields[2] = address; fields[3] = record.region;
-        fields[4] = size; fields[5] = record.method; fields[6] = record.type;
-        for (i = 0; i < 7; ++i) if ((i && !write_all(&output, ",", 1, pd)) || !csv_field(&output, fields[i], pd)) goto finish;
-        if (!write_all(&output, ",", 1, pd) || !csv_stored(s, &output, &meta, 1, pd) ||
-            !write_all(&output, ",", 1, pd) || !csv_stored(s, &output, &meta, 0, pd) || !write_all(&output, "\r\n", 2, pd)) goto finish;
+        fields[0] = number;
+        fields[1] = offset;
+        fields[2] = address;
+        fields[3] = record.region;
+        fields[4] = size;
+        fields[5] = record.method;
+        fields[6] = record.type;
+        for (i = 0; i < 7; ++i)
+            if ((i && !write_all(&output, ",", 1, pd)) || !csv_field(&output, fields[i], pd)) goto finish;
+        if (!write_all(&output, ",", 1, pd) || !csv_stored(s, &output, &meta, 1, pd) || !write_all(&output, ",", 1, pd) || !csv_stored(s, &output, &meta, 0, pd) ||
+            !write_all(&output, "\r\n", 2, pd))
+            goto finish;
         xx_pd_set_current(pd, level, row + 1);
     }
-    xx_pd_leave_level(pd, level); level = -1;
-    if (stopped(pd)) { status = XXWIDGETS_UNAVAILABLE; goto finish; }
-    if (xx_io_close(file) != 0) { file = NULL; goto finish; }
+    xx_pd_leave_level(pd, level);
+    level = -1;
+    if (stopped(pd)) {
+        status = XXWIDGETS_UNAVAILABLE;
+        goto finish;
+    }
+    if (xx_io_close(file) != 0) {
+        file = NULL;
+        goto finish;
+    }
     file = NULL;
-    if (stopped(pd)) { status = XXWIDGETS_UNAVAILABLE; goto finish; }
+    if (stopped(pd)) {
+        status = XXWIDGETS_UNAVAILABLE;
+        goto finish;
+    }
     if (!xx_io_file_replace_a(temporary, path, true)) goto finish;
     status = XXWIDGETS_OK;
     if (reporter) {
@@ -666,21 +753,38 @@ xxwidgets_status gui_extractor_source_open(const char *path, xx_pd_struct *pd, g
     size_t i;
     xxwidgets_status status = XXWIDGETS_PLATFORM_ERROR;
     if (!out || !error || !path || !*path) return XXWIDGETS_INVALID_ARGUMENT;
-    *out = NULL; *error = NULL;
+    *out = NULL;
+    *error = NULL;
     s = xx_rt_calloc(1, sizeof(*s));
     if (!s) return XXWIDGETS_OUT_OF_MEMORY;
     s->path = cdie_strdup(path);
-    if (!s->path) { status = XXWIDGETS_OUT_OF_MEMORY; goto fail; }
-    if (stopped(pd)) { status = XXWIDGETS_UNAVAILABLE; goto fail; }
+    if (!s->path) {
+        status = XXWIDGETS_OUT_OF_MEMORY;
+        goto fail;
+    }
+    if (stopped(pd)) {
+        status = XXWIDGETS_UNAVAILABLE;
+        goto fail;
+    }
     s->input = xx_io_file_open(path, "rb");
     size = xx_io_total_size(s->input);
-    if (size < 0) { error_text(s, "Cannot open Extractor input"); goto fail; }
+    if (size < 0) {
+        error_text(s, "Cannot open Extractor input");
+        goto fail;
+    }
     s->size = (uint64_t)size;
     s->detected = xx_extractor_detect_device(s->input, pd);
-    if (stopped(pd)) { status = XXWIDGETS_UNAVAILABLE; goto fail; }
+    if (stopped(pd)) {
+        status = XXWIDGETS_UNAVAILABLE;
+        goto fail;
+    }
     if (!cdie_memory_map_read(path, pd, &map, &map_error)) {
-        xx_rt_free(map_error); map_error = NULL;
-        if (stopped(pd)) { status = XXWIDGETS_UNAVAILABLE; goto fail; }
+        xx_rt_free(map_error);
+        map_error = NULL;
+        if (stopped(pd)) {
+            status = XXWIDGETS_UNAVAILABLE;
+            goto fail;
+        }
         if (!cdie_memory_map_read_mode(path, "Binary", "Data", pd, &map, &map_error)) {
             error_text(s, map_error ? map_error : "Cannot read Extractor map");
             goto fail;
@@ -700,9 +804,13 @@ xxwidgets_status gui_extractor_source_open(const char *path, xx_pd_struct *pd, g
     if ((map->available_modes & CDIE_MEMORY_MAP_MODE_SEGMENTS) && strcmp(map->mode, "Segments"))
         snprintf(s->map_labels[s->model.map_mode_count++], sizeof(s->map_labels[0]), "Segments");
     if (strcmp(map->mode, "Data")) snprintf(s->map_labels[s->model.map_mode_count++], sizeof(s->map_labels[0]), "Data");
-    s->index.map = map; map = NULL;
+    s->index.map = map;
+    map = NULL;
     s->model.type_count = xx_extractor_type_count();
-    if (s->model.type_count > 64) { error_text(s, "Too many Extractor types for the native selector"); goto fail; }
+    if (s->model.type_count > 64) {
+        error_text(s, "Too many Extractor types for the native selector");
+        goto fail;
+    }
     s->model.options.deep_scan = 1;
     for (i = 0; i < s->model.type_count; ++i) {
         const xx_extractor_type *type = xx_extractor_type_at(i);
@@ -714,12 +822,20 @@ xxwidgets_status gui_extractor_source_open(const char *path, xx_pd_struct *pd, g
     for (i = 0; i < s->model.format_count; ++i)
         s->format_mode_masks[i] = (unsigned char)(5U | (strcmp(s->formats[i], "Binary") && xx_extractor_format_available(s->detected) ? 2U : 0U));
     for (i = 0; i < 3; ++i) s->map_modes[i] = s->map_labels[i];
-    s->model.formats = s->formats; s->model.map_modes = s->map_modes; s->model.types = s->types;
+    s->model.formats = s->formats;
+    s->model.map_modes = s->map_modes;
+    s->model.types = s->types;
     s->model.format_mode_masks = s->format_mode_masks;
-    s->model.read = source_read; s->model.scan = source_scan; s->model.dump = source_dump;
-    s->model.save = source_save; s->model.error = source_error; s->model.user = s;
-    s->model.save_ex = source_save_ex; s->model.dump_ex = source_dump_ex;
-    s->model.device = s->input; s->model.size = s->size;
+    s->model.read = source_read;
+    s->model.scan = source_scan;
+    s->model.dump = source_dump;
+    s->model.save = source_save;
+    s->model.error = source_error;
+    s->model.user = s;
+    s->model.save_ex = source_save_ex;
+    s->model.dump_ex = source_dump_ex;
+    s->model.device = s->input;
+    s->model.size = s->size;
     *out = s;
     xx_rt_free(map_error);
     return XXWIDGETS_OK;
@@ -730,7 +846,10 @@ fail:
     gui_extractor_source_free(s);
     return status;
 }
-xxwidgets_extractor_source *gui_extractor_source_model(gui_extractor_source *s) { return s ? &s->model : NULL; }
+xxwidgets_extractor_source *gui_extractor_source_model(gui_extractor_source *s)
+{
+    return s ? &s->model : NULL;
+}
 void gui_extractor_source_free(gui_extractor_source *s)
 {
     if (!s) return;

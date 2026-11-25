@@ -24,6 +24,5 @@ int cdie_memory_map_read(const char *path, xx_pd_struct *progress, cdie_memory_m
  * a flat physical Data map. Native format names must match the detected family
  * or precise file type. A NULL/empty mode uses its default. Unsupported format
  * or map-mode requests fail without returning a partial snapshot. */
-int cdie_memory_map_read_mode(const char *path, const char *format_name, const char *mode_name, xx_pd_struct *progress,
-                              cdie_memory_map_data **out, char **error);
+int cdie_memory_map_read_mode(const char *path, const char *format_name, const char *mode_name, xx_pd_struct *progress, cdie_memory_map_data **out, char **error);
 #endif
