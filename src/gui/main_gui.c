@@ -3250,8 +3250,7 @@ static const struct smoke_tool {
     const WCHAR *title;
     int action, fixture;
     smoke_opener open;
-} g_smokeTools[] = {{L"File Information", SMOKE_FILE_INFORMATION, 0, do_file_information},
-                    {L"Entropy", SMOKE_ENTROPY, 0, do_entropy},
+} g_smokeTools[] = {{L"Entropy", SMOKE_ENTROPY, 0, do_entropy},
                     {L"Hash", SMOKE_HASH, 0, do_hash},
                     {L"Strings", SMOKE_STRINGS_FILE, 0, do_strings},
                     {L"Hex View", SMOKE_HEX_VIEW, 0, do_hex_view},
@@ -3488,9 +3487,9 @@ static int smoke_shortcut_keys(void)
         DWORD length = GetModuleFileNameW(NULL, executable, MAX_PATH);
         if (!length || length >= MAX_PATH || !SetWindowTextW(native(g_path), executable)) return 0;
     }
-    if (!smoke_begin(L"File Information", SMOKE_FILE_INFORMATION)) return 0;
+    if (!smoke_begin(L"Entropy", SMOKE_ENTROPY)) return 0;
     g_smokeEscape = 1;
-    run_pending(SHORTCUT_ACTION(GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_FILE_INFORMATION));
+    run_pending(SHORTCUT_ACTION(GUI_SHORTCUT_TOOL_FIRST + GUI_TOOL_ENTROPY));
     return smoke_finish();
 }
 
@@ -3822,9 +3821,6 @@ static int run_smoke_steps(void)
         }
         if (!smoke_begin_page(L"File", SMOKE_FILE_CANCEL, 0) || do_settings(GUI_OPTIONS_FILE) != 0 || !smoke_finish()) return smoke_failed(__LINE__);
     }
-    if (!smoke_begin(L"File Information", SMOKE_FILE_INFORMATION)) return smoke_failed(__LINE__);
-    do_file_information();
-    if (!smoke_finish()) return smoke_failed(__LINE__);
     if (!smoke_begin(L"Entropy", SMOKE_ENTROPY)) return smoke_failed(__LINE__);
     do_entropy();
     if (!smoke_finish()) return smoke_failed(__LINE__);

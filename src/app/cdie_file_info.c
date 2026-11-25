@@ -427,8 +427,34 @@ static int walk_fat(info_walk *walk, xx_io_device *device, const info_fat *fat)
     return 1;
 }
 
+/* cdie builds xxfclib without the DataStructs stream (no xxdatastructs):
+ * File Information then lists no PE/ELF/Mach-O structures, only the file row
+ * and, for a fat Mach-O, the fat table. */
+#if XXFC_ENABLE_STREAM_DATASTRUCTS
+#define INFO_DATA_STRUCTS 1
+#else
+#define INFO_DATA_STRUCTS 0
+#endif
+
+static const char *info_struct_name(Abstractformat *format, uint32_t id)
+{
+#if INFO_DATA_STRUCTS
+    return xx_format_data_struct_id_to_string(format, id);
+#else
+    (void)format;
+    (void)id;
+    return NULL;
+#endif
+}
+
 static int walk_structures(info_walk *walk, Abstractformat *format, int64_t bias)
 {
+#if !INFO_DATA_STRUCTS
+    (void)walk;
+    (void)format;
+    (void)bias;
+    return 1;
+#else
     const cdie_file_info_visitor *visitor = walk->visitor;
     xx_data_struct_state *state;
     xx_data_struct_record_state *fields = NULL;
@@ -445,7 +471,7 @@ static int walk_structures(info_walk *walk, Abstractformat *format, int64_t bias
         }
         if (!walk->selected_id || (format == walk->selected_format && item->id == walk->selected_id)) {
             uint64_t occurrence, occurrences = 1;
-            name = xx_format_data_struct_id_to_string(format, item->id);
+            name = info_struct_name(format, item->id);
             if (!name) name = "Unknown";
             walk->found = 1;
             if (!walk->inventory && item->type != XX_DATA_STRUCT_TYPE_RAW_DATA && item->count > 1 && item->entry_size > 0) {
@@ -522,6 +548,7 @@ done:
     if (fields) xx_format_free_data_struct_records_reading(format, fields);
     xx_format_free_data_structs_reading(format, state);
     return ok;
+#endif
 }
 
 int cdie_file_info_visit(const char *path, const char *selector, int inventory, const cdie_file_info_visitor *visitor, void *user, xx_pd_struct *progress, char **error)
@@ -589,7 +616,7 @@ int cdie_file_info_visit_slice(const char *path, int slice, const char *selector
             select_family(&reader, family < 3 ? family : 2);
             last = family < 3 ? reader.last_id : (uint32_t)(sizeof(fat_names) / sizeof(fat_names[0]));
             for (id = 1; id <= last; ++id) {
-                const char *name = family < 3 ? xx_format_data_struct_id_to_string(reader.format, id) : fat_names[id - 1];
+                const char *name = family < 3 ? info_struct_name(reader.format, id) : fat_names[id - 1];
                 char qualified_name[256];
                 xx_data_struct catalog = {0};
                 if (!name || !*name) continue;
@@ -631,12 +658,12 @@ int cdie_file_info_visit_slice(const char *path, int slice, const char *selector
         reader.slice_ready = 1;
         /* A slice that is not a Mach-O (a static library's archive) stays RAW_DATA. */
         if (reader.slice.format.check_is_valid(&reader.slice.format, NULL)) {
-            if (!xx_format_handle_base_info(&reader.slice.format, progress) || !xx_format_has_data_structs(&reader.slice.format)) goto finish;
+            if (!xx_format_handle_base_info(&reader.slice.format, progress) || (INFO_DATA_STRUCTS && !xx_format_has_data_structs(&reader.slice.format))) goto finish;
             walk.slice = &reader.slice.format;
         }
         reader.type = xx_format_file_type_to_string(XX_FILE_TYPE_MACHOFAT);
     } else {
-        if (!xx_format_handle_base_info(reader.format, progress) || !xx_format_has_data_structs(reader.format)) goto finish;
+        if (!xx_format_handle_base_info(reader.format, progress) || (INFO_DATA_STRUCTS && !xx_format_has_data_structs(reader.format))) goto finish;
         reader.type = xx_format_file_type_to_string(reader.format->file_type);
     }
     if (selector && xx_rt_strcmp(selector, "Info")) {
@@ -660,7 +687,9 @@ int cdie_file_info_visit_slice(const char *path, int slice, const char *selector
             walk.field_filter = hash + 1;
         }
         walk.selected_format = walk.slice ? walk.slice : reader.format;
+#if INFO_DATA_STRUCTS
         walk.selected_id = xx_format_data_struct_string_to_id(walk.selected_format, qualified);
+#endif
         for (family = 0; fat && !walk.selected_id && family < 3; ++family) {
             if (!xx_rt_strcmp(qualified, fat_names[family])) {
                 walk.selected_format = walk.fat_tag;

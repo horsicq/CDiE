@@ -176,7 +176,7 @@ static void print_help(void)
     cdie_printf("  -a, --alltypes            Scan applicable parent file types.\n");
     cdie_printf("  -O, --overlayscan         Scan trailing overlays.\n");
     cdie_printf("  -R, --resourcesscan       Scan PE/ELF resource payloads.\n");
-    cdie_printf("  -A, --archivesscan        Scan ZIP/JAR/APK/IPA members and nested archives.\n");
+    cdie_printf("  -A, --archivesscan        Scan ZIP/JAR/APK/IPA and FAT/MSA disk image members and nested archives.\n");
     cdie_printf("  -d, --deepscan            Deep scan.\n");
     cdie_printf("  -u, --heuristicscan       Heuristic scan.\n");
     cdie_printf("  -g, --aggressivescan      Aggressive scan.\n");
@@ -439,9 +439,9 @@ static int run_updater(int bCheck, const char *pDatabase, int bJson)
 static void show_database(DBase *pDb, xx_scan_options *pOptions, cdie_output_format outputFormat)
 {
     /* Same list, in the same order, as XScanEngine::getSignatureStates(). */
-    static const XFileType pTypes[] = {XFT_BINARY, XFT_COM,   XFT_MSDOS, XFT_NE,       XFT_LE,        XFT_LX,      XFT_PE,      XFT_ELF,  XFT_MACHO, XFT_PDF,
-                                       XFT_CFBF,   XFT_IMAGE, XFT_JPEG,  XFT_PNG,      XFT_RAR,       XFT_ISO9660, XFT_ARCHIVE, XFT_ZIP,  XFT_JAR,   XFT_APK,
-                                       XFT_IPA,    XFT_DEX,   XFT_NPM,   XFT_MACHOFAT, XFT_AMIGAHUNK, XFT_ATARIST, XFT_DOS16M,  XFT_DOS4G};
+    static const XFileType pTypes[] = {XFT_BINARY, XFT_COM,   XFT_MSDOS, XFT_NE,       XFT_LE,        XFT_LX,      XFT_PE,      XFT_ELF, XFT_MACHO,  XFT_PDF,
+                                       XFT_CFBF,   XFT_IMAGE, XFT_JPEG,  XFT_PNG,      XFT_RAR,       XFT_ISO9660, XFT_ARCHIVE, XFT_ZIP, XFT_JAR,    XFT_APK,
+                                       XFT_IPA,    XFT_DEX,   XFT_NPM,   XFT_MACHOFAT, XFT_AMIGAHUNK, XFT_ATARIST, XFT_FAT,     XFT_MSA, XFT_DOS16M, XFT_DOS4G};
     size_t i = 0;
     int bFirst = 1;
 

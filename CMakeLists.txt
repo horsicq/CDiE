@@ -57,7 +57,8 @@ set(XXFC_CODEPAGE_KOREAN OFF CACHE BOOL "Include Korean CP949" FORCE)
 
 # Compile only the optional format streams used by this application.
 if(NOT TARGET xxfclib::xxfclib)
-    set(XXFC_ENABLE_STREAM_DATASTRUCTS ON)
+    # File Information does not use DataStructs (no xxdatastructs).
+    set(XXFC_ENABLE_STREAM_DATASTRUCTS OFF)
     set(XXFC_ENABLE_STREAM_IMPORT ON)
     set(XXFC_ENABLE_STREAM_EXPORT ON)
     # Resource expansion uses the native PE/ELF resource stream readers.
@@ -262,9 +263,6 @@ if(NOT TARGET xxfclib AND NOT TARGET xxfclib_static)
     endif()
 endif()
 
-if(COMMAND xxfclib_require_streams AND TARGET xxfclib::die_engine)
-    xxfclib_require_streams(xxfclib::die_engine DATASTRUCTS)
-endif()
 
 # ------------------------------------------------------ xxnetlib + xxgithub --
 #

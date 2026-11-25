@@ -52,27 +52,6 @@ skipped without a message at the 64 KiB default and at `1M` (no temporary
 file); glibc's `tmpfile()` falls back to `/tmp`, so POSIX hosts check only the
 first half.
 
-File Information coverage uses independently generated 32/64-bit PE and
-little-/big-endian ELF and Mach-O files. It verifies native header values,
-structure/field offsets, repeated table entries, inventory counts, catalog
-scope, field selectors, argument errors, malformed native tables, output
-escaping and multi-file documents. These tests deliberately point at a missing
-signature database to prove that native information commands do not load it.
-Native DataStructs output has a separate documented schema; the `diec`
-differential suite below continues to cover signature-scan output.
-For fat Mach-O files, cdie intentionally shows the fat table plus the selected
-slice, whereas Detect It Easy File Information shows only generic rows.
-
-When xxwidgets is built, `cdie_test_file_information` compares the GUI model
-with console DataStructs for all generated executable fixtures, including
-absolute field offsets. Shared-view tests destroy the source model before
-navigating the copied widget data, verify failed replacement preserves the
-old view, and check typed ENTRY fields. A POSIX PTY test opens the actual shared
-dialog, navigates and closes it with Escape. Both pre-cancelled and mid-read
-observer cancellation return no partial model. Windows' native smoke test
-opens File Information and checks for populated field-table rows; Cocoa's
-smoke test exercises the shared form and native model in its actual window.
-
 To compare with a reference executable, configure
 `-DCDIE_REFERENCE_EXECUTABLE=/absolute/path/to/diec`. This enables
 `cdie.reference`, comparing the same generated corpus and isolated databases

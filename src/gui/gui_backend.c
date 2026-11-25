@@ -488,7 +488,7 @@ typedef struct gui_file_types_context {
 
 static int gui_archive_file_type(int type)
 {
-    return type == XFT_ZIP || type == XFT_JAR || type == XFT_APK || type == XFT_IPA || type == XFT_NPM || type == XFT_MACHOFAT || type == XFT_RAR || type == XFT_ISO9660;
+    return type == XFT_ZIP || type == XFT_JAR || type == XFT_APK || type == XFT_IPA || type == XFT_NPM || type == XFT_MACHOFAT || type == XFT_RAR || type == XFT_ISO9660 || type == XFT_FAT || type == XFT_MSA;
 }
 
 /* Broad database categories do not identify separate concrete format readers. */

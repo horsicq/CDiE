@@ -887,9 +887,9 @@ static cdie_update_status upd_query_source(const cdie_update_config *pConfig, cd
  * else -- a mistyped -D, a project's own "db" folder -- is refused. */
 static int upd_looks_like_database(const char *pPath)
 {
-    static const char *const ppTypes[] = {"Binary",  "COM", "MSDOS", "NE",    "LE",   "LX",  "PE",  "ELF",     "MACH",      "MACHOFAT",
-                                          "Archive", "ZIP", "JAR",   "APK",   "IPA",  "DEX", "NPM", "Amiga",   "AtariST",   "DOS16M",
-                                          "DOS4G",   "PDF", "CFBF",  "Image", "JPEG", "PNG", "RAR", "ISO9660", "JavaClass", "PYC"};
+    static const char *const ppTypes[] = {"Binary", "COM",   "MSDOS", "NE",  "LE",  "LX",      "PE",        "ELF",    "MACH",   "MACHOFAT", "Archive",
+                                          "ZIP",    "JAR",   "APK",   "IPA", "DEX", "NPM",     "Amiga",     "GEMDOS", "DOS16M", "DOS4G",    "PDF",
+                                          "CFBF",   "Image", "JPEG",  "PNG", "RAR", "ISO9660", "JavaClass", "PYC",    "FAT",    "MSA"};
     xx_list_t entries;
     size_t i;
     size_t j;
