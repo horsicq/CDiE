@@ -172,7 +172,7 @@ with 500 MiB free at the check as they reach 16 MiB, one of 16 MiB - 1 is
 listed, and 20 MiB is listed with 2 GiB). Its temporary-file write failures
 are not injected. In `tests/test_compatibility.py`, `diec --archivesscan` scans a
 300 MiB member, reports its bad-CRC copy, reads it without end records and
-keeps the 21-member window in order with it third (`--suite reference`
+keeps all 22 members of an archive in order with it third (`--suite reference`
 compares the four with a `diec` 4.0.0); both tests are skipped when the
 temporary folder has less than 2 GiB free. It also feeds the
 head filter that decides whether a member can be scannable in 1-, 4- and

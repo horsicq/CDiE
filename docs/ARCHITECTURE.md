@@ -453,7 +453,7 @@ See [JS_ENGINE.md](JS_ENGINE.md).
   member bound only stops a stream that decodes on past anything it could
   declare. Native decoder limits still apply, and so does the readers' own
   512 MiB budget for methods that hold a whole member in memory.
-  The engine scans at most 21 members per archive (100,000 when aggressive).
+  The engine scans at most 1001 members per archive (100,000 when aggressive).
   Members keep `archives_scan` and clear the other traversal flags, so nested
   archives expand, down to 20 archive levels (`XX_SCAN_ARCHIVE_MAX_DEPTH`).
   As a deliberate cdie safety limit that `XScanEngine` does not have, one
