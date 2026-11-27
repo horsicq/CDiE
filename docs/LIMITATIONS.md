@@ -328,18 +328,12 @@ compile-time definitions.
 
 The following `diec` options are not ported: `--test` and `--createtest`.
 
-`--info` (`-i`), native structure selection with `--struct` (`-S`) and
-`--showstructs` (`-w`) use DataStructs for PE, ELF and thin Mach-O only.
-Other formats and Mach-O Fat containers return an unsupported-format error
-for those structure operations. The DataStructs schema differs from Qt's
-XFileInfo report. Entropy and legacy XFileInfo method selectors remain
-unavailable through `--struct`; `Hash` / `Hash#ALGORITHM` and `Strings` are handled separately
-as a whole-file byte operation. Structure reports are bounded to 1,048,576
-visited/emitted structures, 4,194,304 visited fields and 64 MiB of output per
-file; exceeding a console report bound fails without a partial report. The GUI
-separately retains up to 64 MiB of model data (and at most 262,144 structures);
-if a larger valid file has more rows it displays the prefix that fits instead
-of showing nothing.
+`--info` (`-i`) prints only the file row and, for fat Mach-O, the fat table.
+File Information no longer exposes DataStructs; `--showstructs` (`-w`) lists
+no structures for PE, ELF or Mach-O. Native DataStructs, entropy and legacy
+XFileInfo method selectors are unavailable through `--struct` (`-S`);
+`Hash` / `Hash#ALGORITHM` and `Strings` are handled separately as whole-file
+byte operations.
 
 `--hash` and `-S Hash` currently expose CRC32, MD5, SHA1 and SHA256. CRC32 is
 ISO-HDLC/ZIP. MD4, SHA224, SHA384 and SHA512 are not implemented by this command;
@@ -388,8 +382,8 @@ often the input is read, never a result.
 
 Scan-output compatibility is checked separately from File Information; see
 TESTING.md for the reference-version differences and historical corpus results.
-Fat Mach-O File Information is a documented exception: cdie shows the fat table
-and the selected slice, while Detect It Easy shows only the generic rows.
+Fat Mach-O File Information is a documented exception: cdie shows the file row
+and the fat table, while Detect It Easy shows only the generic rows.
 The short options are `diec`'s, which are not always the
 mnemonic letter — `-a` is `--alltypes`, `-p` is `--plaintext`, `-l` is
 `--profiling` and `-s` is `--showdatabase`. Where this port previously used a

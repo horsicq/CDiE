@@ -236,9 +236,9 @@ static void print_help(void)
     cdie_printf("      --hash                Show CRC32, MD5, SHA1 and SHA256 hashes.\n");
     cdie_printf("                            Select one with -S Hash#SHA256.\n");
     cdie_printf("  -e, --entropy             Show Shannon entropy of the file and its regions.\n");
-    cdie_printf("  -i, --info                Show native PE/ELF/Mach-O DataStructs and fields.\n");
+    cdie_printf("  -i, --info                Show file row (and fat Mach-O table).\n");
     cdie_printf("  -S, --struct <name>       Show NAME[#FIELD], optionally FORMAT::NAME.\n");
-    cdie_printf("  -w, --showstructs         List DataStructs (target optional).\n");
+    cdie_printf("  -w, --showstructs         List structures (none for PE/ELF/Mach-O; target optional).\n");
     cdie_printf("      --createtar <path>    Create TAR archive from database.\n");
     cdie_printf("      --createprecompiledtar <p> Create precompiled bytecode TAR archive.\n");
     cdie_printf("      --checkupdate         Check for a database update (exit code 1: available).\n");

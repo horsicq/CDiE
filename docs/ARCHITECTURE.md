@@ -20,10 +20,12 @@ executable imports nothing but `KERNEL32.dll` — see
 [The runtime layer](#the-runtime-layer).
 
 File Information uses `app/cdie_file_info.c` as a shared synchronous native
-DataStructs walker. Its visitor API is used by the console formatters and by
-`gui/gui_file_information.c`, which copies a bounded presentation model on a
-worker thread. It has no signature-database dependency and only opens the PE,
-ELF and thin Mach-O native readers. Progress observation copies worker state
+collector. `--info` prints only the file row and, for fat Mach-O, the fat
+table. `--showstructs` lists no structures for PE, ELF or Mach-O; File
+Information no longer exposes DataStructs. Its visitor API is used by the
+console formatters and by `gui/gui_file_information.c`, which copies a
+bounded presentation model on a worker thread. It has no signature-database
+dependency. Progress observation copies worker state
 under a mutex; observer stop requests are retained as sticky cancellation.
 Partial or cancelled models are discarded before any widgets are updated.
 
@@ -129,7 +131,7 @@ records to DYNSYM, accepting named undefined global/weak symbols. Relocatable
 objects can use SYMTAB. Mach-O uses native inspection's undefined external nlist
 symbols and resolves ordinary dylib ordinals to library basenames. Unknown
 slot offsets/addresses stay unknown. The focused build enables import/symbol
-streams; DataStructs remain restricted to the previous three reader families.
+streams; File Information does not expose DataStructs.
 
 Names are copied through a bounded byte-escaping adapter; the snapshot owns all
 records/strings and no reader/device pointer. The `cdie_imports_free` destructor
